@@ -1,0 +1,130 @@
+//! Round-trip tests for every record type plus golden-bytes tests that lock the v1 encoding.
+
+mod fixtures;
+
+use fixtures::*;
+use shoebox_core::codec::{CodecError, Record};
+use shoebox_core::model::*;
+use std::fmt::Debug;
+
+fn round_trip<T: Record + PartialEq + Debug>(value: T) {
+    let bytes = value.encode();
+    assert_eq!(bytes[0], T::VERSION, "first byte is the version");
+    assert_eq!(T::decode(&bytes).unwrap(), value);
+}
+
+#[test]
+fn every_record_round_trips() {
+    round_trip(photo());
+    round_trip(album());
+    round_trip(shared_item());
+    round_trip(member());
+    round_trip(device_cert());
+    round_trip(admin_cert());
+    round_trip(holding());
+    round_trip(blob(1, "jpeg"));
+    round_trip(exif());
+}
+
+#[test]
+fn optional_and_empty_variants_round_trip() {
+    let mut p = photo();
+    p.exif = ExifSummary::default();
+    p.deleted_at.value = None;
+    round_trip(p);
+    let mut a = album();
+    a.items.adds.clear();
+    a.items.removes.clear();
+    a.cover.value = None;
+    round_trip(a);
+    let mut s = shared_item();
+    s.shared_hash = None;
+    round_trip(s);
+}
+
+#[test]
+fn decode_rejects_empty_unknown_version_and_garbage() {
+    assert_eq!(Holding::decode(&[]), Err(CodecError::Empty));
+    let mut bytes = holding().encode();
+    bytes[0] = 2;
+    assert_eq!(
+        Holding::decode(&bytes),
+        Err(CodecError::UnsupportedVersion {
+            found: 2,
+            expected: 1
+        })
+    );
+    assert!(matches!(
+        Holding::decode(&[1, 0xFF]),
+        Err(CodecError::Malformed(_))
+    ));
+    let mut truncated = holding().encode();
+    truncated.truncate(10);
+    assert!(matches!(
+        Holding::decode(&truncated),
+        Err(CodecError::Malformed(_))
+    ));
+}
+
+fn hex_of<T: Record>(v: &T) -> String {
+    hex::encode(v.encode())
+}
+
+// Golden bytes: these lock the v1 on-disk/on-wire encoding. If one fails, you changed the
+// encoding: bump `Record::VERSION` for that type and add a migration instead of editing these.
+
+#[test]
+fn golden_photo_v1() {
+    assert_eq!(
+        hex_of(&photo()),
+        "0101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101e9070a696d6167652f6a7065670202020202020202020202020202020202020202020202020202020202020202ea070a696d6167652f776562700303030303030303030303030303030303030303030303030303030303030303eb070a696d6167652f7765627080a0abfef962010446756a690105583130305600e030c02001a09f9beb03df809c010707070707070707070707070707070707070707070707070707070707070707010a00070707070707070707070707070707070707070707070707070707070707070701c0bab7fef96214010808080808080808080808080808080808080808080808080808080808080808"
+    );
+}
+
+#[test]
+fn golden_album_v1() {
+    assert_eq!(
+        hex_of(&album()),
+        "01090909090909090909090909090909090653756d6d657203000101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101040001010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010205000101010101010101010101010101010101010101010101010101010101010101060002020202020202020202020202020202020202020202020202020202020202020101010101010101010101010101010101010101010101010101010101010101010105000101010101010101010101010101010101010101010101010101010101010101"
+    );
+}
+
+#[test]
+fn golden_shared_item_v1() {
+    assert_eq!(
+        hex_of(&shared_item()),
+        "0101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101e9070a696d6167652f6a7065670104040404040404040404040404040404040404040404040404040404040404040202020202020202020202020202020202020202020202020202020202020202ea070a696d6167652f776562700303030303030303030303030303030303030303030303030303030303030303eb070a696d6167652f77656270070707070707070707070707070707070707070707070707070707070707070780d5c3fef96280a0abfef962"
+    );
+}
+
+#[test]
+fn golden_member_v1() {
+    assert_eq!(
+        hex_of(&member()),
+        "010505050505050505050505050505050505050505050505050505050505050505044173686101"
+    );
+}
+
+#[test]
+fn golden_device_cert_v1() {
+    assert_eq!(
+        hex_of(&device_cert()),
+        "0102020202020202020202020202020202020202020202020202020202020202020010506920696e2074686520636c6f7365740101010101010101010101010101010101010101010101010101010101010101640201010101010101010101010101010101010101010101010101010101010101010004abababab"
+    );
+}
+
+#[test]
+fn golden_admin_cert_v1() {
+    assert_eq!(
+        hex_of(&admin_cert()),
+        "0101010101010101010101010101010101010101010101010101010101010101013200000000000000000000000000000000000000000000000000000000000000000004cdcdcdcd"
+    );
+}
+
+#[test]
+fn golden_holding_v1() {
+    assert_eq!(
+        hex_of(&holding()),
+        "0102020202020202020202020202020202020202020202020202020202020202020101010101010101010101010101010101010101010101010101010101010101003c000202020202020202020202020202020202020202020202020202020202020202"
+    );
+}

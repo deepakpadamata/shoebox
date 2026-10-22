@@ -212,6 +212,22 @@ ts_type! {
 }
 
 ts_type! {
+    /// What a background wake-up achieved (M4-08/09).
+    pub struct BurstReport {
+        pub peers_total: u32,
+        pub peers_reached: u32,
+        pub at_risk_before: u32,
+        pub at_risk_after: u32,
+        pub elapsed_ms: f64,
+        /// Nothing is at risk any more.
+        pub finished: bool,
+        /// Stopped because the time budget ended (the input of the notification rule).
+        pub budget_exhausted: bool,
+        pub reason: Option<String>,
+    }
+}
+
+ts_type! {
     pub struct FreeUpReport {
         pub photos: u32,
         pub bytes: f64,

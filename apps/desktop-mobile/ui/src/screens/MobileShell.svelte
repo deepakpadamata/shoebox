@@ -8,6 +8,10 @@
   import Avatar from '../components/Avatar.svelte';
   import Banner from '../components/Banner.svelte';
   import Sheet from '../components/Sheet.svelte';
+  import Toggle from '../components/Toggle.svelte';
+  import ProgressBar from '../components/ProgressBar.svelte';
+  import { etaSeconds } from '../lib/store.svelte';
+  import { hasKeepAwake, keepAwake } from '../lib/host';
   import Library from './Library.svelte';
   import Albums from './Albums.svelte';
   import Deleted from './Deleted.svelte';
@@ -27,6 +31,10 @@
   const atRisk = $derived(app.counts?.at_risk ?? 0);
   let kitOpen = $state(false);
   let menuOpen = $state(false);
+  let awake = $state(false);
+  const eta = $derived((app.counts, etaSeconds()));
+  const etaText = $derived(eta === null ? '' : eta < 90 ? 'about a minute left' : eta < 3600 ? `about ${Math.ceil(eta / 60)} min left` : `about ${Math.ceil(eta / 3600)} h left`);
+  const unreachable = $derived(atRisk > 0 && app.peersOnline === 0);
   const titles: Record<string, string> = { library: 'Library', favorites: 'Favorites', albums: 'Albums', album: 'Album', shared: 'Shared', deleted: 'Recently Deleted', devices: 'Devices', health: 'Storage', settings: 'Settings' };
 </script>
 
@@ -49,8 +57,16 @@
 
   {#if app.removed || app.state?.membership === 'removed'}
     <div class="banners"><Banner tone="risk" icon="⛔">This device was removed from the library.</Banner></div>
+  {:else if unreachable && sec === 'library'}
+    <div class="banners"><Banner tone="warn" icon="⏸" action="Devices" onaction={() => go('devices')}>Backup paused: none of your devices are reachable. Your photos stay safe on this device until one is.</Banner></div>
   {:else if atRisk > 0 && sec === 'library'}
-    <div class="banners"><Banner tone="risk" action="View" onaction={() => go('health')}><b>{plural(atRisk, 'photo')}</b> not backed up on enough devices yet.</Banner></div>
+    <div class="banners">
+      <Banner tone="risk" action="View" onaction={() => go('health')}>
+        <b>{plural(atRisk, 'photo')}</b> not backed up on enough devices yet.{etaText ? ` ${etaText}.` : ''}
+        {#if app.backupProgress}<ProgressBar total={app.backupProgress.total} segments={[{ value: app.backupProgress.done, tone: 'info' }]} label="Backing up" />{/if}
+        {#if hasKeepAwake()}<label class="row-flex small awake"><Toggle checked={awake} label="Keep the screen on" onchange={(v) => { awake = v; keepAwake(v); }} /> Keep the screen on until done</label>{/if}
+      </Banner>
+    </div>
   {:else if app.backup && app.backup.permission !== 'unavailable' && !app.backup.policy.enabled && sec === 'library'}
     <div class="banners"><Banner tone="info" icon="☁︎" action="Turn on" onaction={() => go('settings')}>Back up your camera roll to your other devices.</Banner></div>
   {:else if app.state && !app.state.recovery_kit_saved && sec === 'library'}
@@ -109,6 +125,7 @@
   .menu a { padding: 14px 4px; text-decoration: none; border-top: 1px solid var(--line); font-size: 16px; }
   .menu a:first-child { border-top: 0; }
   .risk { color: var(--risk); font-weight: 700; }
+  .awake { margin-top: 8px; }
   .sd { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
   .sd.busy { background: var(--info); }
 </style>

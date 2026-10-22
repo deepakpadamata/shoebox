@@ -66,6 +66,7 @@ pub const COMMANDS: &[&str] = &[
     "backup_status",
     "backup_configure",
     "backup_run",
+    "sync_burst",
 ];
 
 pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Value> {
@@ -203,6 +204,11 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
         "backup_status" => out(core.backup_status().await?),
         "backup_configure" => out(core.backup_configure(arg(&args, "policy")?).await?),
         "backup_run" => out(core.backup_run(true).await?),
+        "sync_burst" => out(core
+            .sync_burst(std::time::Duration::from_secs(
+                opt::<u64>(&args, "seconds")?.unwrap_or(25),
+            ))
+            .await?),
         "export_library" => out(core.export_library(&arg::<String>(&args, "dest")?).await?),
         other => bail!("unknown command `{other}`"),
     }

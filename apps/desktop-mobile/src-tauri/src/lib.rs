@@ -5,10 +5,12 @@
 
 mod backup;
 pub mod blob;
+mod burst;
 pub mod commands;
 mod core;
 mod export;
 pub mod keystore;
+pub mod notify;
 pub mod photos_source;
 pub mod types;
 

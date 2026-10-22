@@ -17,6 +17,9 @@ export const app = $state({
   pairVersion: 0,
   importProgress: null as null | { done: number; total: number },
   removed: false,
+  /** Other devices reachable right now, and recent at-risk counts for the ETA. */
+  peersOnline: 0,
+  riskSamples: [] as { t: number; n: number }[],
   backup: null as null | import('./api').BackupStatus,
   backupProgress: null as null | { done: number; total: number },
   /** What the sync manager is doing right now: peers mid-sync, and the last failure. */
@@ -37,10 +40,33 @@ export function fail(e: unknown) {
   toast(e instanceof Error ? e.message : String(e));
 }
 
+/** Remember how fast the at-risk count falls, to estimate when backup will be done. */
+export function noteRisk(n: number) {
+  const t = Date.now();
+  app.riskSamples = [...app.riskSamples.filter((s) => t - s.t < 120_000), { t, n }];
+}
+
+/** Seconds until nothing is at risk at the recent pace, or null when it is not falling. */
+export function etaSeconds(): number | null {
+  const s = app.riskSamples;
+  if (s.length < 2) return null;
+  const [first, last] = [s[0], s[s.length - 1]];
+  const dt = (last.t - first.t) / 1000;
+  const rate = (first.n - last.n) / dt;
+  return rate > 0 && dt >= 5 ? Math.ceil(last.n / rate) : null;
+}
+
+export async function refreshPeers() {
+  const list = await api.devices();
+  app.peersOnline = list.filter((d) => !d.is_this_device && d.online && !d.revoked).length;
+}
+
 export async function refreshState() {
   app.state = await api.appState();
   if (app.state.has_library) {
     app.counts = await api.counts();
+    noteRisk(app.counts.at_risk);
+    refreshPeers().catch(() => {});
     app.backup = await api.backupStatus().catch(() => null);
   }
 }
@@ -51,10 +77,11 @@ function handle(e: AppEvent) {
   if (e === 'LibraryChanged') {
     app.version++;
     clearTimeout(countsTimer);
-    countsTimer = setTimeout(() => api.counts().then((c) => (app.counts = c)).catch(() => {}), 400);
+    countsTimer = setTimeout(() => api.counts().then((c) => { app.counts = c; noteRisk(c.at_risk); }).catch(() => {}), 400);
   } else if (e === 'DevicesChanged' || e === 'LibraryRotated') {
     app.devicesVersion++;
     app.version++;
+    refreshPeers().catch(() => {});
   } else if (e === 'RemovedFromLibrary') {
     app.removed = true;
   } else if (e === 'PairingDone') {

@@ -30,5 +30,14 @@ class MainActivity : TauriActivity() {
       @JavascriptInterface fun top() = this@MainActivity.top
       @JavascriptInterface fun bottom() = this@MainActivity.bottom
     }, "ShoeboxInsets")
+    webView.addJavascriptInterface(object {
+      // "Keep the screen on until backup finishes" (mockup 5e).
+      @JavascriptInterface fun setKeepAwake(on: Boolean) {
+        runOnUiThread {
+          if (on) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+          else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+      }
+    }, "ShoeboxHost")
   }
 }

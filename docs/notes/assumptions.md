@@ -231,3 +231,10 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   the kit does not contain the library's *space capability*, so a device that lost everything cannot yet fetch data; this needs a root-proof handshake in which a surviving
   member/keeper hands the capability to a device that signs a challenge with the root key — scheduled with the pairing protocol (M2-04). `recovery_kit_saved` is the
   replicated setting `recovery_kit_saved` (`[1]`).
+- **A-061 · M2-03** · Enforcement is by **connection gating**: `Node::set_allowed_peers` (the non-revoked device list; empty set once this device itself is revoked) is applied in
+  iroh's `before_connect`/`after_handshake` hooks, so it covers every protocol (docs, blobs, gossip, ping) and closes live connections of newly refused peers. Pairing
+  (`shoebox/pair/0`) stays open to unlisted devices. Nothing is refused while no device list exists yet, so a fresh joiner can sync; a library whose first
+  certs have not arrived is therefore unprotected for that moment. A revoked device that learns of its own revocation gets `Membership::Removed` +
+  `NodeEvent::RemovedFromLibrary`; one that never hears (peers cut it off first) just cannot connect. **Not done / split into M2-03b:** capability rotation (the revoked device
+  keeps the namespace secret), and per-record filtering of writes authored by a revoked device (unnecessary while it cannot connect, and not possible to enforce
+  per record because registers merge by LWW without an author signature). The 100k-record rotation criterion moves with it.

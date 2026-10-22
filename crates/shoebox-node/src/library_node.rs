@@ -36,6 +36,7 @@ pub(crate) struct Inner<L: LibraryStore> {
     /// Held (shared) while a file is ingested and (exclusively) while blobs are reconciled, so a
     /// freshly tagged blob whose record is not written yet is never released.
     pub(crate) ingest: tokio::sync::RwLock<()>,
+    pub(crate) membership: Mutex<crate::identity::Membership>,
 }
 
 pub struct LibraryNode<L: LibraryStore> {
@@ -82,6 +83,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 devices: Mutex::new(HashMap::new()),
                 fetcher: Default::default(),
                 ingest: tokio::sync::RwLock::new(()),
+                membership: Mutex::new(crate::identity::Membership::Unknown),
             }),
         };
         ln.start_sync_manager(nudge_rx);
@@ -110,6 +112,12 @@ impl<L: LibraryStore> LibraryNode<L> {
         self.inner.cap.lock().unwrap().clone().ok_or_else(|| {
             anyhow::anyhow!("this library node was not given a capability (see with_capability)")
         })
+    }
+
+    pub fn library_id(&self) -> shoebox_core::store::LibraryId {
+        self.capability()
+            .expect("library node has a capability")
+            .library
     }
 
     pub fn node(&self) -> &Node {

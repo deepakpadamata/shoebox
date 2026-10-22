@@ -24,7 +24,7 @@ pub use config::{NodeConfig, RelaySetting};
 pub use doc_digest::{doc_digest, DOC_DIGEST_ALPN};
 pub use fetcher::{FetchSource, FetcherConfig};
 pub use holdings::{DEFAULT_REDUNDANCY, REDUNDANCY_KEY};
-pub use identity::RECOVERY_KIT_SAVED_KEY;
+pub use identity::{Membership, RECOVERY_KIT_SAVED_KEY};
 pub use import::{ImportOptions, ImportReport};
 pub use keys::load_or_create_secret;
 pub use library_node::LibraryNode;

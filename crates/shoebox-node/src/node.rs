@@ -35,6 +35,8 @@ const PROGRESS_STEP: u64 = 256 * 1024;
 
 /// ALPN of the liveness/latency protocol.
 pub const PING_ALPN: &[u8] = b"shoebox/ping/0";
+/// ALPN of the pairing protocol (M2-04). Open to devices that are not in the device list yet.
+pub const PAIR_ALPN: &[u8] = b"shoebox/pair/0";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NodeEvent {
@@ -63,6 +65,8 @@ pub enum NodeEvent {
         peer: EndpointId,
         phase: crate::sync::SyncPhase,
     },
+    /// This device's own revocation reached it: it no longer belongs to the library.
+    RemovedFromLibrary,
     /// A device of the library came online or went offline (from the presence topic).
     PresenceChanged {
         device: shoebox_core::ids::EndpointId,
@@ -155,6 +159,9 @@ struct PeerTracker {
     open: Arc<Mutex<HashMap<EndpointId, usize>>>,
     /// Peers we refuse to talk to (used to simulate partitions and, later, revoked devices).
     blocked: Arc<Mutex<HashSet<EndpointId>>>,
+    /// When set, only these peers may connect (the library's valid device list, M2-03);
+    /// [`PAIR_ALPN`] stays open so new devices can be paired.
+    allowed: Arc<Mutex<Option<HashSet<EndpointId>>>>,
     conns: Arc<Mutex<HashMap<EndpointId, Vec<WeakConnectionHandle>>>>,
     /// Last time a connection with the peer was established or closed.
     last_seen: Arc<Mutex<HashMap<EndpointId, Instant>>>,
@@ -166,6 +173,7 @@ impl PeerTracker {
             tx,
             open: Default::default(),
             blocked: Default::default(),
+            allowed: Default::default(),
             conns: Default::default(),
             last_seen: Default::default(),
         }
@@ -173,6 +181,35 @@ impl PeerTracker {
 
     fn is_blocked(&self, id: &EndpointId) -> bool {
         self.blocked.lock().unwrap().contains(id)
+    }
+
+    /// Blocked, or not on the allow-list (when there is one), for a connection speaking `alpn`.
+    fn refuses(&self, id: &EndpointId, alpn: &[u8]) -> bool {
+        if self.is_blocked(id) {
+            return true;
+        }
+        match &*self.allowed.lock().unwrap() {
+            Some(allowed) => !allowed.contains(id) && alpn != PAIR_ALPN,
+            None => false,
+        }
+    }
+
+    fn set_allowed(&self, allowed: Option<HashSet<EndpointId>>) {
+        *self.allowed.lock().unwrap() = allowed.clone();
+        let Some(allowed) = allowed else { return };
+        let mut conns = self.conns.lock().unwrap();
+        conns.retain(|id, list| {
+            if allowed.contains(id) {
+                return true;
+            }
+            for conn in list.iter().filter_map(WeakConnectionHandle::upgrade) {
+                // Pairing connections of not-yet-listed devices are left alone.
+                if conn.alpn() != PAIR_ALPN {
+                    conn.close(1u32.into(), b"not in the device list");
+                }
+            }
+            false
+        });
     }
 
     fn block(&self, id: EndpointId) {
@@ -192,9 +229,9 @@ impl EndpointHooks for PeerTracker {
     async fn before_connect<'a>(
         &'a self,
         remote_addr: &'a iroh::EndpointAddr,
-        _alpn: &'a [u8],
+        alpn: &'a [u8],
     ) -> BeforeConnectOutcome {
-        if self.is_blocked(&remote_addr.id) {
+        if self.refuses(&remote_addr.id, alpn) {
             BeforeConnectOutcome::Reject
         } else {
             BeforeConnectOutcome::Accept
@@ -203,7 +240,7 @@ impl EndpointHooks for PeerTracker {
 
     async fn after_handshake<'a>(&'a self, conn: &'a Connection) -> AfterHandshakeOutcome {
         let id = conn.remote_id();
-        if self.is_blocked(&id) {
+        if self.refuses(&id, conn.alpn()) {
             return AfterHandshakeOutcome::Reject {
                 error_code: 1u32.into(),
                 reason: b"blocked".to_vec(),
@@ -454,6 +491,17 @@ impl Node {
 
     pub fn is_blocked(&self, id: EndpointId) -> bool {
         self.inner.tracker.is_blocked(&id)
+    }
+
+    /// Only let `allowed` connect (and close other connections), or lift the restriction with
+    /// `None`. The pairing protocol stays reachable by everyone.
+    pub fn set_allowed_peers(&self, allowed: Option<HashSet<EndpointId>>) {
+        self.inner.tracker.set_allowed(allowed);
+    }
+
+    /// Would a (non-pairing) connection with `id` be refused right now?
+    pub fn is_refused(&self, id: EndpointId) -> bool {
+        self.inner.tracker.refuses(&id, b"")
     }
 
     pub fn events(&self) -> NodeEvents {

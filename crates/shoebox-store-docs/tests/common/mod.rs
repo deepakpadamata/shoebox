@@ -99,12 +99,19 @@ pub fn fast() -> SyncConfig {
 
 /// Node 0 creates the library; the others join through its ticket string.
 pub async fn library_nodes(c: &Cluster) -> Vec<LibraryNode<DocsLibrary>> {
+    library_nodes_with_root(c, RootPublicKey([7; 32])).await
+}
+
+pub async fn library_nodes_with_root(
+    c: &Cluster,
+    root: RootPublicKey,
+) -> Vec<LibraryNode<DocsLibrary>> {
     // Set RUST_LOG (e.g. `shoebox_store_docs=debug,shoebox_node=debug`) to see what the sync layers do.
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
     let b0 = DocsBackend::for_node(c.node(0).clone(), c.clock().clone());
-    let (l0, cap) = b0.create_library(&RootPublicKey([7; 32])).await.unwrap();
+    let (l0, cap) = b0.create_library(&root).await.unwrap();
     let ln0 =
         LibraryNode::with_sync_config(c.node(0).clone(), Arc::new(l0), c.clock().clone(), fast())
             .with_capability(cap);

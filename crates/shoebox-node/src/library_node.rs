@@ -38,6 +38,8 @@ pub(crate) struct Inner<L: LibraryStore> {
     pub(crate) ingest: tokio::sync::RwLock<()>,
     pub(crate) membership: Mutex<crate::identity::Membership>,
     pub(crate) confirmations: Mutex<crate::freeup::Confirmations>,
+    pub(crate) notice: Mutex<Option<shoebox_core::identity::RotationNotice>>,
+    pub(crate) notice_acked: Mutex<std::collections::HashSet<EndpointId>>,
     pub(crate) invites: Arc<Mutex<crate::pairing::Invites>>,
 }
 
@@ -88,10 +90,13 @@ impl<L: LibraryStore> LibraryNode<L> {
                 ingest: tokio::sync::RwLock::new(()),
                 membership: Mutex::new(crate::identity::Membership::Unknown),
                 invites: Default::default(),
+                notice: Mutex::new(crate::rotation::load_notice(&data_dir)),
+                notice_acked: Default::default(),
                 confirmations: Mutex::new(crate::freeup::Confirmations::load(&data_dir)),
             }),
         };
         ln.start_sync_manager(nudge_rx);
+        ln.start_rotation_support();
         ln.restore_watches();
         ln
     }

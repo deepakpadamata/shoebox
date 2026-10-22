@@ -432,6 +432,19 @@ async fn cmd_run(cli: &Cli) -> Result<()> {
             _ = tokio::signal::ctrl_c() => break,
             ev = events.recv() => {
                 let Ok(ev) = ev else { continue };
+                if let NodeEvent::LibraryRotated { cap } = &ev {
+                    // The library moved to a new epoch: remember the new capability.
+                    let ticket = LibraryTicket { cap: cap.clone(), peers: s.state.peers.clone() };
+                    let mut state = DevState {
+                        name: s.state.name.clone(),
+                        role: s.state.role,
+                        ticket: ticket.to_string(),
+                        peers: s.state.peers.clone(),
+                        root_seed: s.state.root_seed.clone(),
+                    };
+                    state.ticket = ticket.to_string();
+                    let _ = std::fs::write(state_path(&s.dir), serde_json::to_string_pretty(&state).unwrap_or_default());
+                }
                 if let NodeEvent::PairingDone { .. } = ev {
                     // Every ticket is single use: hand out fresh ones.
                     for role in [Role::Keeper, Role::Viewer, Role::Phone] {

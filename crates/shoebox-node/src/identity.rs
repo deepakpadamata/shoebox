@@ -33,7 +33,11 @@ impl<L: LibraryStore> LibraryNode<L> {
     ) -> Result<RecoveryKit> {
         let cap = self.capability()?;
         self.certify_self(root, role, name).await?;
-        Ok(RecoveryKit::new(cap.library, self.now_ms(), root.clone()))
+        Ok(RecoveryKit::new(
+            cap.identity_id(),
+            self.now_ms(),
+            root.clone(),
+        ))
     }
 
     /// Rejoin an existing library with the recovery phrase: verify it against the library's
@@ -49,13 +53,13 @@ impl<L: LibraryStore> LibraryNode<L> {
         let cap = self.capability()?;
         let me = self.device();
         let store = self.store();
-        let admin = issue_admin_cert(root, cap.library, me, self.holdings_hlc(), None);
+        let admin = issue_admin_cert(root, cap.identity_id(), me, self.holdings_hlc(), None);
         store
             .apply_device_change(SignedDeviceChange::Admin(admin))
             .await?;
         let cert = issue_device_cert(
             root,
-            cap.library,
+            cap.identity_id(),
             me,
             role,
             name,
@@ -140,7 +144,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         anyhow::ensure!(!current.revoked, "that device is already revoked");
         let cert = shoebox_core::identity::issue_device_cert(
             &self.node().device_key(),
-            cap.library,
+            cap.identity_id(),
             *device,
             current.role,
             &current.name,

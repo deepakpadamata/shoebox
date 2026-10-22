@@ -82,7 +82,8 @@ pub(crate) struct PresenceState {
 fn topic_id(cap: &LibraryCapability) -> TopicId {
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"shoebox/presence/0");
-    hasher.update(&cap.library.0);
+    // The identity id, not the epoch: presence survives a rotation (M2-03b).
+    hasher.update(&cap.identity_id().0);
     hasher.update(&cap.root.0);
     TopicId::from_bytes(*hasher.finalize().as_bytes())
 }

@@ -211,3 +211,70 @@ async fn a_restarted_keeper_stays_paired_and_finishes_fetching() {
     );
     d.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_keeper_follows_a_rotation_and_rejoins_the_new_library_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_inode, ln) = inviter(dir.path(), &["photo-gps.jpg"]).await;
+    let ticket = ln
+        .start_pairing(Role::Keeper, Duration::from_secs(300), accept())
+        .await
+        .unwrap();
+    let d = Daemon::start(opts(dir.path())).await.unwrap();
+    Client::connect(d.control_path())
+        .await
+        .unwrap()
+        .pair(&ticket.to_string(), "pi", |_| true)
+        .await
+        .unwrap();
+
+    // A second device joins, then the admin revokes it and rotates the library.
+    let phone = Node::open(NodeConfig::local_only(dir.path().join("phone"), "phone"))
+        .await
+        .unwrap();
+    let t = ln
+        .start_pairing(Role::Phone, Duration::from_secs(300), accept())
+        .await
+        .unwrap();
+    phone.pair_join(&t, "phone", accept()).await.unwrap();
+    let phone_id = shoebox_core::ids::EndpointId(*phone.id().as_bytes());
+    let before = ln.library_id();
+    ln.revoke_and_rotate(&phone_id).await.unwrap();
+    assert_ne!(ln.library_id(), before);
+
+    let want = hex::encode(ln.library_id().0);
+    assert!(
+        wait_for(30, || async {
+            let s = Client::connect(d.control_path())
+                .await
+                .unwrap()
+                .status()
+                .await
+                .unwrap();
+            s["library"]["id"] == want.as_str() && s["library"]["photos"] == 1
+        })
+        .await,
+        "the keeper follows the rotation and syncs the new epoch"
+    );
+    d.shutdown().await.unwrap();
+    phone.shutdown().await.ok();
+
+    // After a restart it rejoins the *new* library, not the old one.
+    let d = Daemon::start(opts(dir.path())).await.unwrap();
+    assert!(
+        wait_for(30, || async {
+            let s = Client::connect(d.control_path())
+                .await
+                .unwrap()
+                .status()
+                .await
+                .unwrap();
+            s["library"]["id"] == want.as_str()
+                && s["library"]["photos"] == 1
+                && s["membership"] == "member"
+        })
+        .await,
+        "a restarted keeper is on the new epoch"
+    );
+    d.shutdown().await.unwrap();
+}

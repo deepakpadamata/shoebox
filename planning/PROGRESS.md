@@ -43,8 +43,8 @@ Implementation status per issue. Assumptions made along the way are logged in
 |---|---|---|
 | M2-01 Identity | ✅ | root → admin → device certs, verified in all backends (A-056/057) |
 | M2-02 Recovery kit | ✅ | 24-word phrase + printable text; **gap:** a device that lost everything still needs a root-proof capability handoff (A-060) |
-| M2-03 Enforce device list and revocation | ◐ | connection gating + `Removed` state done and tested; **rotation split into M2-03b** (A-061) |
-| M2-03b Rotate capability on revocation | ⬜ | new, 4 d |
+| M2-03 Enforce device list and revocation | ✅ | connection gating + `Removed` state (A-061); rotation is M2-03b |
+| M2-03b Rotate capability on revocation | ✅ | epoch rotation on the Loro store, signed notice, offline members catch up (A-067); 100k records in 1.2 s (release) |
 | M2-04 Pairing protocol | ✅ | tested on loopback; relay path **not verified** (A-062) |
 | M2-05 Keeper daemon & control socket | ✅ | lock file, 0600 socket, resumes after restart |
 | M2-06 Keeper CLI | ✅ | `docs/keeper-cli.md` (mockups 5g/5i are not in the repo, A-063) |

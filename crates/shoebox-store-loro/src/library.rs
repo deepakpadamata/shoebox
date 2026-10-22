@@ -13,7 +13,7 @@ use shoebox_core::library_state::{Effect, LibraryState, StateEntry};
 use shoebox_core::model::*;
 use shoebox_core::store::*;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, warn};
 
@@ -29,10 +29,17 @@ fn be(e: impl std::fmt::Display) -> StoreError {
 pub(crate) struct Inner {
     pub(crate) state: LibraryState,
     pub(crate) doc: LoroDoc,
+    device: EndpointId,
     /// Hex of the first 8 bytes of this device's id: the map-key prefix of its own records.
     author: String,
-    library: LibraryId,
+    /// The current epoch's id: records are signed for it and peers address it.
+    pub(crate) library: LibraryId,
+    /// What certificates are bound to; constant across rotations.
+    identity: LibraryId,
+    root: RootPublicKey,
     signer: Option<KeyPair>,
+    /// Where replicas live (`<base>/<epoch hex>/`); `None` = memory only.
+    base_dir: Option<PathBuf>,
     persist: Option<Persist>,
     /// What has been written to the log already.
     logged: VersionVector,
@@ -49,30 +56,69 @@ fn author_prefix(device: &EndpointId) -> String {
     hex::encode(&device.0[..8])
 }
 
-impl LibraryShared {
-    pub(crate) fn new(
+/// Which records follow a library into its next epoch.
+#[derive(Clone, Copy)]
+pub(crate) enum Carry {
+    /// Everything still valid (the admin that starts a rotation).
+    All,
+    /// What this device wrote itself plus the device list (members following a rotation).
+    Own,
+}
+
+/// The capability of a rotated library: a new epoch id, the original identity in the payload.
+pub(crate) fn rotated_capability(
+    epoch: LibraryId,
+    identity: LibraryId,
+    root: RootPublicKey,
+) -> LibraryCapability {
+    let mut backend = vec![2];
+    backend.extend_from_slice(&identity.0);
+    LibraryCapability {
+        library: epoch,
+        root,
+        mode: Capability::Write,
+        backend,
+    }
+}
+
+impl Inner {
+    pub(crate) fn identity_id(&self) -> LibraryId {
+        self.identity
+    }
+
+    pub(crate) fn root_key(&self) -> RootPublicKey {
+        self.root
+    }
+
+    fn build(
         device: EndpointId,
         root: RootPublicKey,
+        identity: LibraryId,
         library: LibraryId,
         signer: Option<KeyPair>,
-        dir: Option<&Path>,
-    ) -> Result<Arc<Self>> {
+        base_dir: Option<&Path>,
+    ) -> Result<Inner> {
         let doc = LoroDoc::new();
         // A stable Loro peer id per device keeps its operations in one lane.
         let peer = u64::from_le_bytes(device.0[..8].try_into().expect("8 bytes"));
         let _ = doc.set_peer_id(peer.max(1));
         let mut inner = Inner {
-            state: LibraryState::with_root(device, root, library),
+            state: LibraryState::with_root(device, root, identity),
             doc,
+            device,
             author: author_prefix(&device),
             library,
+            identity,
+            root,
             signer,
+            base_dir: base_dir.map(Path::to_path_buf),
             persist: None,
             logged: VersionVector::default(),
             pending: HashMap::new(),
         };
-        if let Some(dir) = dir {
-            let (persist, snapshot, updates) = Persist::open(dir).map_err(be)?;
+        if let Some(base) = base_dir {
+            let dir = base.join(hex::encode(library.0));
+            let (persist, snapshot, updates) = Persist::open(&dir).map_err(be)?;
             if let Some(s) = snapshot {
                 inner.doc.import(&s).map_err(be)?;
             }
@@ -86,6 +132,71 @@ impl LibraryShared {
             inner.persist = Some(persist);
             inner.fold_all();
         }
+        Ok(inner)
+    }
+
+    /// The records that follow this replica into a new epoch.
+    fn carried(&self, carry: Carry) -> Vec<StateEntry> {
+        match carry {
+            Carry::All => self
+                .state
+                .all_entries()
+                .into_iter()
+                // Holdings are single-writer: every device republishes its own afterwards.
+                .filter(|e| match e {
+                    StateEntry::Holding { device, .. } => *device == self.device,
+                    _ => true,
+                })
+                .collect(),
+            Carry::Own => {
+                let prefix = format!("{}/", self.author);
+                let map = self.doc.get_map(ENTRIES);
+                let mut out = vec![];
+                map.for_each(|k, v| {
+                    let Some(record_key) = k.strip_prefix(&prefix) else {
+                        return;
+                    };
+                    if let loro::ValueOrContainer::Value(LoroValue::Binary(bytes)) = v {
+                        if let Some(o) = auth::open(&bytes) {
+                            if let Ok(e) = decode_library_entry(record_key, o.payload) {
+                                out.push(e);
+                            }
+                        }
+                    }
+                });
+                // The device list is needed at once to know who to talk to; certificates are
+                // self-authenticating, so everybody can carry them.
+                out.extend(
+                    self.state
+                        .all_entries()
+                        .into_iter()
+                        .filter(|e| matches!(e, StateEntry::Device(_) | StateEntry::Admin(_))),
+                );
+                out
+            }
+        }
+    }
+
+    /// Write `entries` into this (fresh) replica as this device's own records.
+    fn adopt_entries(&mut self, entries: Vec<StateEntry>) {
+        let mut fx = Effect::default();
+        for e in &entries {
+            fx.extend(self.state.apply_entry(e));
+        }
+        self.persist_effect(&fx);
+    }
+}
+
+impl LibraryShared {
+    pub(crate) fn new(
+        device: EndpointId,
+        root: RootPublicKey,
+        identity: LibraryId,
+        library: LibraryId,
+        signer: Option<KeyPair>,
+        base_dir: Option<&Path>,
+    ) -> Result<Arc<Self>> {
+        let inner = Inner::build(device, root, identity, library, signer, base_dir)?;
         let has_log = inner.persist.is_some();
         let shared = Arc::new(Self {
             inner: Mutex::new(inner),
@@ -105,6 +216,42 @@ impl LibraryShared {
             });
         }
         Ok(shared)
+    }
+
+    /// Replace the replica by a fresh one for `new_epoch`, carrying `carry`; returns the old
+    /// epoch's id. The old on-disk replica is removed once the new one holds the records.
+    pub(crate) fn rotate(&self, new_epoch: LibraryId, carry: Carry) -> Result<LibraryId> {
+        let mut inner = self.inner.lock().unwrap();
+        let old = inner.library;
+        let records = inner.carried(carry);
+        let mut fresh = Inner::build(
+            inner.device,
+            inner.root,
+            inner.identity,
+            new_epoch,
+            inner.signer.clone(),
+            inner.base_dir.as_deref(),
+        )?;
+        fresh.adopt_entries(records);
+        if let Some(p) = fresh.persist.as_mut() {
+            let _ = p.flush();
+        }
+        let old_dir = inner.base_dir.as_ref().map(|b| b.join(hex::encode(old.0)));
+        *inner = fresh;
+        drop(inner);
+        if let Some(dir) = old_dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        self.emit(vec![Change::DeviceListChanged]);
+        Ok(old)
+    }
+
+    pub(crate) fn device_of(&self) -> EndpointId {
+        self.inner.lock().unwrap().device
+    }
+
+    pub(crate) fn epoch(&self) -> LibraryId {
+        self.inner.lock().unwrap().library
     }
 
     fn emit(&self, changes: Vec<Change>) {
@@ -420,7 +567,6 @@ fn judge(
 pub struct LoroLibrary {
     shared: Arc<LibraryShared>,
     transport: Transport,
-    library: LibraryId,
     clock: Arc<dyn Clock>,
     mode: Capability,
 }
@@ -429,14 +575,12 @@ impl LoroLibrary {
     pub(crate) fn new(
         shared: Arc<LibraryShared>,
         transport: Transport,
-        library: LibraryId,
         clock: Arc<dyn Clock>,
         mode: Capability,
     ) -> Self {
         Self {
             shared,
             transport,
-            library,
             clock,
             mode,
         }
@@ -593,7 +737,8 @@ impl LibraryStore for LoroLibrary {
     }
 
     async fn sync_with(&self, peer: &PeerAddr) -> Result<()> {
-        self.transport.sync(&self.shared, self.library, peer).await
+        let epoch = self.shared.epoch();
+        self.transport.sync(&self.shared, epoch, peer).await
     }
 
     fn capability(&self) -> Capability {
@@ -602,5 +747,26 @@ impl LibraryStore for LoroLibrary {
 
     fn replicates_by_push(&self) -> bool {
         true
+    }
+
+    async fn begin_rotation(&self) -> Result<LibraryCapability> {
+        self.writable()?;
+        let mut id = [0u8; 16];
+        getrandom::fill(&mut id).expect("operating system randomness");
+        let new = LibraryId(id);
+        let (identity, root) = {
+            let inner = self.shared.inner.lock().unwrap();
+            (inner.identity_id(), inner.root_key())
+        };
+        let old = self.shared.rotate(new, Carry::All)?;
+        self.transport.rotated(old, new, &self.shared);
+        Ok(rotated_capability(new, identity, root))
+    }
+
+    async fn adopt_rotation(&self, new: &LibraryCapability) -> Result<()> {
+        self.writable()?;
+        let old = self.shared.rotate(new.library, Carry::Own)?;
+        self.transport.rotated(old, new.library, &self.shared);
+        Ok(())
     }
 }

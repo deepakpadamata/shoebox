@@ -85,6 +85,14 @@ impl Effect {
     pub fn is_empty(&self) -> bool {
         self.changes.is_empty() && self.touched.is_empty()
     }
+
+    /// Fold `other` into this effect (changes appended, touched records deduplicated).
+    pub fn extend(&mut self, other: Effect) {
+        self.changes.extend(other.changes);
+        for t in other.touched {
+            self.touch(t);
+        }
+    }
 }
 
 fn identity_err(e: IdentityError) -> StoreError {

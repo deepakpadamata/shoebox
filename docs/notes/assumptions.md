@@ -277,3 +277,12 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   the node's sync manager (new `LibraryStore::replicates_by_push`, with a per-peer dirty flag so nudges inside the debounce window are not lost). (5) `LoroBackend::new` (in-process, unsigned)
   remains for conformance and benchmarks; the conformance suite passes on it, and fetcher/holdings/revocation/pairing/free-up/keeper tests now run on `HybridBackend`.
   (6) Not done: phone-class memory work (A-066 note in `store-benchmark.md`), publishing holdings for originals only (the fetcher still publishes thumbs/previews too).
+- **A-067 · M2-03b** · "Rotation" on the Loro library means a new **epoch**: a fresh library id and a fresh Loro document, not a new secret (Loro has none). Certificates stay bound to the
+  *identity id* (the original library id, carried in the capability's backend payload `[2, id]` after a rotation; `LibraryCapability::identity_id()`), so they remain valid without the offline root key.
+  `revoke_and_rotate` (admin only) revokes, calls `LibraryStore::begin_rotation` (fresh document carrying every still-valid record, re-signed by the admin; other devices' holdings are not carried, each
+  device republishes its own), signs a `RotationNotice` (revocation + admin cert + new capability) and pushes it over `shoebox/rotate/0` to every non-revoked member. Members verify the notice against the
+  root key, apply the revocation it proves, call `adopt_rotation` (carry own records + the device list) and pull the rest from the others. Members keep the latest notice on disk and hand it to any device that
+  connects, so a member that was offline catches up from whoever it meets first. The revoked device is never sent the notice and is refused at connection level (A-061); its stale epoch is unreachable.
+  Limits: a device two rotations behind cannot chain notices (it rejects a notice whose `old` is not its epoch); holdings of other devices disappear until republished (the fetcher republishes on fetch only —
+  a periodic republish is not implemented); apps must persist the new capability (`NodeEvent::LibraryRotated`: done for the keeper and `shoebox-dev run`); iroh-docs albums have a real bearer capability and are
+  **not** rotated here (M5). Presence topics derive from the identity id so presence survives rotation. Measured: a 100k-record rotation takes 1.2 s in a release build and loses nothing (ignored test).

@@ -110,6 +110,28 @@ impl Shared {
         ln.start_maintenance(MaintenanceConfig::default());
         ln.start_presence(PresenceConfig::default()).await?;
         *self.library.lock().await = Some(ln);
+        // A rotation replaces the capability: remember the new one so a restart rejoins it.
+        let mut events = self.node.events();
+        let storage = self.opts.storage.clone();
+        let name = self.opts.name.clone();
+        let peers = ticket.peers.clone();
+        tokio::spawn(async move {
+            while let Ok(ev) = events.recv().await {
+                if let shoebox_node::NodeEvent::LibraryRotated { cap } = ev {
+                    let ticket = LibraryTicket {
+                        cap,
+                        peers: peers.clone(),
+                    };
+                    let state = KeeperState {
+                        name: name.clone(),
+                        ticket: ticket.to_string(),
+                    };
+                    if let Ok(bytes) = serde_json::to_vec_pretty(&state) {
+                        let _ = std::fs::write(state_path(&storage), bytes);
+                    }
+                }
+            }
+        });
         Ok(())
     }
 

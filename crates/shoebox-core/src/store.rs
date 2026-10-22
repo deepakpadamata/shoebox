@@ -202,6 +202,20 @@ pub struct LibraryCapability {
 }
 
 impl LibraryCapability {
+    /// The id certificates are bound to. For a library that has never been rotated it is
+    /// `library`; after a rotation (M2-03b) `library` is the current *epoch* and the original id
+    /// travels in the backend payload (`[2, original id (16 bytes)]`, written by the Loro backend).
+    pub fn identity_id(&self) -> LibraryId {
+        match self.backend.as_slice() {
+            [2, rest @ ..] if rest.len() == 16 => {
+                let mut id = [0u8; 16];
+                id.copy_from_slice(rest);
+                LibraryId(id)
+            }
+            _ => self.library,
+        }
+    }
+
     /// The same library with `mode` set to read-only. **Does not strip `backend` material**; use
     /// [`StoreBackend::downgrade`] before handing a capability to someone who must not write.
     pub fn read_only(&self) -> Self {
@@ -355,6 +369,25 @@ pub trait LibraryStore: Send + Sync + 'static {
     async fn sync_with(&self, peer: &PeerAddr) -> Result<()>;
 
     fn capability(&self) -> Capability;
+
+    /// Move this replica to a fresh library id (a new *epoch*), carrying every record that is
+    /// still valid (certificates, photos, albums, settings, purge markers and this device's own
+    /// holdings). Used after a revocation: the revoked device keeps the old id and can reach
+    /// nobody who moved. Returns the capability of the new epoch. Backends without rotation
+    /// return `Backend`.
+    async fn begin_rotation(&self) -> Result<LibraryCapability> {
+        Err(StoreError::Backend(
+            "this backend cannot rotate a library".into(),
+        ))
+    }
+
+    /// Follow a rotation started by another admin: switch to `new`, carrying only the records
+    /// this device wrote itself (the rest comes back from the others by syncing).
+    async fn adopt_rotation(&self, _new: &LibraryCapability) -> Result<()> {
+        Err(StoreError::Backend(
+            "this backend cannot rotate a library".into(),
+        ))
+    }
 
     /// `true` if local writes only reach other devices when someone syncs (no live replication
     /// underneath), so the node should sync with its peers after local changes.

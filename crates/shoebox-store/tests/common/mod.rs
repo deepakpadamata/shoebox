@@ -96,7 +96,7 @@ pub async fn rig_with_root(c: &Cluster, root: KeyPair, roles: &[Role]) -> (Rig, 
         counter: 0,
         device: core_id(c, 0),
     };
-    let t0 = c.clock().now_ms();
+    let t0 = c.clock().now_ms() - 100; // certificates predate anything done through the clock
     l0.apply_device_change(SignedDeviceChange::Admin(issue_admin_cert(
         &root,
         cap.library,

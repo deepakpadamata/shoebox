@@ -294,3 +294,67 @@ impl TrustChain {
         }
     }
 }
+
+/// Announces that a library moved to a new epoch after `revocation` (M2-03b). Anyone holding
+/// the library's root key can check it: the admin that signed it must hold a root-signed admin
+/// cert, and the revocation it carries must be valid, so a member that was offline during the
+/// revocation can verify both the revocation and the move from this one message.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct RotationNotice {
+    pub old: LibraryId,
+    pub new_cap: crate::store::LibraryCapability,
+    pub revocation: DeviceCert,
+    pub admin: AdminCert,
+    pub signature: Vec<u8>,
+}
+
+fn rotation_bytes(identity: LibraryId, n: &RotationNotice) -> Vec<u8> {
+    signing_bytes(
+        "shoebox/rotation/v1",
+        identity,
+        &(&n.old, &n.new_cap, &n.revocation, &n.admin),
+    )
+}
+
+/// Sign a rotation notice with the admin device key (`admin` must be that device's admin cert).
+pub fn issue_rotation_notice(
+    admin_key: &KeyPair,
+    identity: LibraryId,
+    old: LibraryId,
+    new_cap: crate::store::LibraryCapability,
+    revocation: DeviceCert,
+    admin: AdminCert,
+) -> RotationNotice {
+    let mut n = RotationNotice {
+        old,
+        new_cap,
+        revocation,
+        admin,
+        signature: vec![],
+    };
+    n.signature = admin_key.sign(&rotation_bytes(identity, &n));
+    n
+}
+
+impl RotationNotice {
+    /// Check the whole notice against the library's root key and identity id.
+    pub fn verify(&self, root: &RootPublicKey, identity: LibraryId) -> Result<(), IdentityError> {
+        let mut chain = TrustChain::new(*root, identity);
+        chain.check_admin(&self.admin)?;
+        chain.add_admin(self.admin.clone());
+        if !verify_signature(
+            &self.admin.admin.0,
+            &rotation_bytes(identity, self),
+            &self.signature,
+        ) {
+            return Err(IdentityError::BadSignature);
+        }
+        if !self.revocation.revoked
+            || self.new_cap.root != *root
+            || self.new_cap.identity_id() != identity
+        {
+            return Err(IdentityError::BadSignature);
+        }
+        chain.check_device_cert(&self.revocation)
+    }
+}

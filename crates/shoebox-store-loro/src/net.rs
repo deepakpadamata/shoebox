@@ -36,6 +36,13 @@ impl IrohNet {
         net
     }
 
+    /// A replica moved to a new epoch id.
+    pub(crate) fn rotate(&self, old: LibraryId, new: LibraryId, shared: &Arc<LibraryShared>) {
+        let mut libs = self.libs.lock().unwrap();
+        libs.remove(&old);
+        libs.insert(new, Arc::downgrade(shared));
+    }
+
     pub(crate) fn register(&self, library: LibraryId, shared: &Arc<LibraryShared>) {
         self.libs
             .lock()

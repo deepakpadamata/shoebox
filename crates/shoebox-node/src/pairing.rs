@@ -414,7 +414,7 @@ async fn respond<L: LibraryStore>(
         .ok_or_else(|| anyhow!("this device is no longer an admin"))?;
     let cert = issue_device_cert(
         &ln.node().device_key(),
-        cap.library,
+        cap.identity_id(),
         joiner,
         invite.role,
         &name,
@@ -558,7 +558,7 @@ impl Node {
         conn.close(0u32.into(), b"done");
 
         // Trust nothing the inviter says beyond what chains to the library's root key.
-        let mut chain = TrustChain::new(grant.cap.root, grant.cap.library);
+        let mut chain = TrustChain::new(grant.cap.root, grant.cap.identity_id());
         chain
             .check_admin(&grant.inviter_admin)
             .map_err(|e| anyhow!("inviter's admin certificate is invalid: {e}"))?;

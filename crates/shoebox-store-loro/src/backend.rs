@@ -34,6 +34,19 @@ pub(crate) enum Transport {
 }
 
 impl Transport {
+    /// The replica moved from `old` to `new`: reachable under the new id from now on.
+    pub(crate) fn rotated(&self, old: LibraryId, new: LibraryId, shared: &Arc<LibraryShared>) {
+        match self {
+            Transport::Iroh(net) => net.rotate(old, new, shared),
+            Transport::InProcess(network) => {
+                let device = shared.device_of();
+                let mut map = network.0.lock().unwrap();
+                map.remove(&(old, device));
+                map.insert((new, device), shared.clone());
+            }
+        }
+    }
+
     pub(crate) async fn sync(
         &self,
         shared: &Arc<LibraryShared>,
@@ -112,10 +125,17 @@ impl LoroBackend {
         self
     }
 
-    fn library(&self, id: LibraryId, root: RootPublicKey, mode: Capability) -> Result<LoroLibrary> {
+    fn library(&self, cap: &LibraryCapability, mode: Capability) -> Result<LoroLibrary> {
+        let (id, root, identity) = (cap.library, cap.root, cap.identity_id());
         let make = || -> Result<Arc<LibraryShared>> {
-            let dir = self.data_dir.as_ref().map(|d| d.join(hex::encode(id.0)));
-            LibraryShared::new(self.device, root, id, self.signer.clone(), dir.as_deref())
+            LibraryShared::new(
+                self.device,
+                root,
+                identity,
+                id,
+                self.signer.clone(),
+                self.data_dir.as_deref(),
+            )
         };
         let shared = match &self.transport {
             Transport::InProcess(network) => {
@@ -138,7 +158,6 @@ impl LoroBackend {
         Ok(LoroLibrary::new(
             shared,
             self.transport.clone(),
-            id,
             self.clock.clone(),
             mode,
         ))
@@ -218,7 +237,7 @@ impl StoreBackend for LoroBackend {
             // Loro has no bearer secret: access is the device list (see `auth`).
             backend: vec![crate::CAPABILITY_VERSION],
         };
-        Ok((self.library(id, *root, Capability::Write)?, cap))
+        Ok((self.library(&cap, Capability::Write)?, cap))
     }
 
     fn downgrade(&self, cap: &LibraryCapability) -> LibraryCapability {
@@ -226,7 +245,7 @@ impl StoreBackend for LoroBackend {
     }
 
     async fn open_library(&self, cap: &LibraryCapability) -> Result<LoroLibrary> {
-        self.library(cap.library, cap.root, cap.mode)
+        self.library(cap, cap.mode)
     }
 
     async fn create_album(&self, _meta: SharedAlbumMeta) -> Result<UnsupportedAlbum> {

@@ -311,3 +311,10 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
 - **A-073 · M3 (UI behaviour)** · The timeline loads every page (2,000 per request) into memory and lays out by day; it reloads (debounced) on `LibraryChanged`. Fine for tens of thousands of photos,
   not yet incremental for 500k (a windowed fetch is the next step). Delete = "Recently Deleted" (restorable, purged after 30 days by the node's maintenance); there is no manual purge. Video tiles
   show a neutral tile (no poster frame, M3-10). The export names files `<date>_<time>_<id8>.<ext>` because original file names are not stored in the library.
+- **A-074 · M3 gaps closed** · (1) *Video posters:* the library record of a video has no separate thumbnail (it points at the video), and changing records is out of scope, so each device makes its own
+  poster: the UI loads the original (byte ranges) in a hidden `<video>`, grabs a frame at ~10 %, and `set_poster` stores a JPEG (<= 2 MB, JPEG-checked) under `<data dir>/posters/`, served as blob kind
+  `poster`. Device-local and never replicated; a device that only has the thumbnail-less record (no original here) shows the neutral tile. Needs a webview that can decode the codec (tested with the
+  sample MP4/MOV in a Chromium pane; WKWebView/WebView2 codec support not checked). (2) *Albums:* `rename_album` is an LWW name write that leaves cover and items alone; the album view has Rename and
+  "Remove from album". Deleting an album is not offered: the personal-album CRDT has no tombstone. (3) *Dev libraries:* if the data dir has no `app.json` but a `shoebox-dev` `dev.json`, the app adopts it
+  (same node dir, same device key, same library; the dev root seed is ignored) and writes `app.json`; a corrupt `dev.json` is an error. Verified against a library made by the real `shoebox-dev init`.
+  (4) While testing this a race in the pairing prompt showed up (the UI can answer before the question is registered): answers are now remembered (`PairingSlot::Early`).

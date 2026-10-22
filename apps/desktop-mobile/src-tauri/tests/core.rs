@@ -409,3 +409,146 @@ async fn exporting_writes_verified_originals_and_a_manifest() {
     assert!(core.export_library("").await.is_err());
     core.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn albums_can_be_renamed() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    let ids: Vec<String> = core
+        .library_page(None, 10)
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    let a = core.create_album("Trip").await.unwrap();
+    core.album_add(&a.id, &ids[..2]).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    core.rename_album(&a.id, "  Lisbon 2025 ").await.unwrap();
+    let albums = core.albums().await.unwrap();
+    assert_eq!(albums.len(), 1);
+    assert_eq!(
+        (albums[0].name.as_str(), albums[0].item_count),
+        ("Lisbon 2025", 2),
+        "items survive a rename"
+    );
+    assert!(core.rename_album(&a.id, "  ").await.is_err());
+    assert!(
+        core.rename_album(&"0".repeat(32), "x").await.is_err(),
+        "unknown album"
+    );
+    core.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn videos_get_device_local_poster_frames() {
+    use base64::Engine;
+    let dir = tempfile::tempdir().unwrap();
+    let core = open(dir.path()).await;
+    core.create_library("Mac", "keeper").await.unwrap();
+    core.import_paths(&[sample("clip.mp4"), sample("photo-gps.jpg")])
+        .await
+        .unwrap();
+    let items = core.library_page(None, 10).await.unwrap().items;
+    let video = items
+        .iter()
+        .find(|p| p.is_video)
+        .expect("the clip imported as a video");
+    let photo = items.iter().find(|p| !p.is_video).unwrap();
+    assert!(!video.has_poster);
+    assert!(
+        core.blob(&video.id, "poster", None)
+            .await
+            .unwrap()
+            .is_none(),
+        "no poster yet"
+    );
+
+    let jpeg = [0xFFu8, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4];
+    let b64 = base64::engine::general_purpose::STANDARD.encode(jpeg);
+    core.set_poster(&video.id, &b64).await.unwrap();
+    let got = core
+        .blob(&video.id, "poster", None)
+        .await
+        .unwrap()
+        .expect("poster is served");
+    assert_eq!(
+        (got.bytes.as_slice(), got.content_type.as_str()),
+        (&jpeg[..], "image/jpeg")
+    );
+    assert!(
+        core.library_page(None, 10)
+            .await
+            .unwrap()
+            .items
+            .iter()
+            .find(|p| p.id == video.id)
+            .unwrap()
+            .has_poster
+    );
+
+    assert!(
+        core.set_poster(&photo.id, &b64).await.is_err(),
+        "photos do not need posters"
+    );
+    assert!(
+        core.set_poster(&video.id, "AAAA").await.is_err(),
+        "not a JPEG"
+    );
+    assert!(
+        core.set_poster(&video.id, "###").await.is_err(),
+        "not base64"
+    );
+    core.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_app_adopts_a_library_made_by_the_dev_tool() {
+    // Build what `shoebox-dev init` leaves behind: the node under `node/` plus dev.json.
+    let dir = tempfile::tempdir().unwrap();
+    let first = open(dir.path()).await;
+    let created = first.create_library("Dev laptop", "keeper").await.unwrap();
+    first
+        .import_paths(&[sample("photo-gps.jpg")])
+        .await
+        .unwrap();
+    let id = first.app_state().await.unwrap().device_id;
+    first.shutdown().await.unwrap();
+    let app: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("app.json")).unwrap()).unwrap();
+    std::fs::remove_file(dir.path().join("app.json")).unwrap();
+    std::fs::write(
+        dir.path().join("dev.json"),
+        serde_json::json!({"name":"Dev laptop","role":"Keeper","ticket":app["ticket"],"peers":[],"root_seed":null}).to_string(),
+    )
+    .unwrap();
+
+    let adopted = open(dir.path()).await;
+    let st = adopted.app_state().await.unwrap();
+    assert!(st.has_library);
+    assert_eq!(st.device_id, id, "same device key");
+    assert_eq!(st.library_id.as_deref(), Some(created.library_id.as_str()));
+    assert_eq!(st.device_name, "Dev laptop");
+    assert_eq!(
+        adopted.library_page(None, 10).await.unwrap().items.len(),
+        1,
+        "the photos are there"
+    );
+    assert!(
+        dir.path().join("app.json").exists(),
+        "remembered for next time"
+    );
+    adopted.shutdown().await.unwrap();
+
+    // A corrupt dev.json is an error, not a silently empty app.
+    let bad = tempfile::tempdir().unwrap();
+    std::fs::write(
+        bad.path().join("dev.json"),
+        b"{\"name\":\"x\",\"role\":\"Keeper\",\"ticket\":\"nope\"}",
+    )
+    .unwrap();
+    assert!(AppCore::open(bad.path(), AppOptions::local_only())
+        .await
+        .is_err());
+}

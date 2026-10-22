@@ -145,6 +145,9 @@
       <Button size="sm" onclick={() => act(() => api.setFavorite(selected, !allFavorite))}>{allFavorite ? '♡ Unfavorite' : '♥ Favorite'}</Button>
       <Button size="sm" onclick={openAlbumSheet}>＋ Add to album</Button>
       <Button size="sm" onclick={() => act(() => Promise.all(selected.map((id) => api.pinOriginal(id, true))), 'Originals will be kept on this device')}>📌 Keep on this device</Button>
+      {#if source === 'album' && album}
+        <Button size="sm" onclick={() => act(() => api.albumRemove(album, selected), 'Removed from the album').then(() => (selected = []))}>Remove from album</Button>
+      {/if}
       <Button size="sm" kind="danger" onclick={removeSelected}>Delete from all devices</Button>
       <Button size="sm" kind="ghost" onclick={() => (selected = [])}>Cancel</Button>
     </div>
@@ -170,7 +173,7 @@
             <div class="tiles" style="top:{row.top}px;height:{row.height}px;gap:{GAP}px">
               {#each items.slice(row.from, row.to) as p, k (p.id)}
                 <Tile id={p.id} size={layout.tile} favorite={p.favorite} video={p.is_video} copies={p.copies} {target}
-                  hasThumb={p.has_thumb} selected={selectedSet.has(p.id)} {selecting} onclick={(e) => click(row.from + k, e)} />
+                  hasThumb={p.has_thumb} hasPoster={p.has_poster} hasOriginal={p.has_original} selected={selectedSet.has(p.id)} {selecting} onclick={(e) => click(row.from + k, e)} />
               {/each}
             </div>
           {/if}

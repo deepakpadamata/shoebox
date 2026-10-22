@@ -31,6 +31,26 @@
   let busy = $state(false);
   let kitOpen = $state(false);
   let kitDismissed = $state(false);
+  let albumName = $state('');
+  let renameOpen = $state(false);
+  let renameTo = $state('');
+
+  $effect(() => {
+    app.version;
+    const id = section() === 'album' ? param() : undefined;
+    if (!id) return;
+    api.albums().then((all) => (albumName = all.find((a) => a.id === id)?.name ?? 'Album')).catch(() => {});
+  });
+
+  async function rename() {
+    try {
+      await api.renameAlbum(param()!, renameTo);
+      albumName = renameTo.trim();
+      renameOpen = false;
+    } catch (e) {
+      fail(e);
+    }
+  }
   const sec = $derived(section());
   const counts = $derived(app.counts);
   const atRisk = $derived(counts?.at_risk ?? 0);
@@ -51,7 +71,7 @@
   }
 
   const title = $derived(
-    { library: 'Library', favorites: 'Favorites', albums: 'Albums', album: 'Album', deleted: 'Recently Deleted', devices: 'Devices', health: 'Storage', settings: 'Settings' }[sec] ?? 'Library',
+    sec === 'album' && albumName ? albumName : { library: 'Library', favorites: 'Favorites', albums: 'Albums', album: 'Album', deleted: 'Recently Deleted', devices: 'Devices', health: 'Storage', settings: 'Settings' }[sec] ?? 'Library',
   );
 </script>
 
@@ -80,6 +100,7 @@
     <header class="toolbar">
       <h3>{title}</h3>
       <span class="grow"></span>
+      {#if sec === 'album'}<Button size="sm" kind="ghost" onclick={() => { renameTo = albumName; renameOpen = true; }}>Rename</Button>{/if}
       <span class="status small muted" title={app.syncError}>
         <span class="sd" class:busy={app.syncing.length > 0} class:bad={!!app.syncError && app.syncing.length === 0}></span>
         {app.syncing.length > 0 ? 'Syncing…' : app.syncError ? 'Some devices are not reachable' : 'Up to date'}
@@ -116,6 +137,13 @@
     <input class="input" placeholder="/Users/you/Pictures" bind:value={importPath} onkeydown={(e) => e.key === 'Enter' && doImport()} />
     <Button kind="primary" block disabled={busy || !importPath.trim()} onclick={doImport}>{busy ? 'Importing…' : 'Import'}</Button>
   </div>
+</Sheet>
+
+<Sheet open={renameOpen} title="Rename album" onclose={() => (renameOpen = false)} width={380}>
+  <form class="stack" onsubmit={(e) => { e.preventDefault(); rename(); }}>
+    <input class="input" bind:value={renameTo} />
+    <Button type="submit" kind="primary" block disabled={!renameTo.trim()}>Rename</Button>
+  </form>
 </Sheet>
 
 <Sheet open={kitOpen} title="Recovery kit" onclose={() => (kitOpen = false)} width={520}>

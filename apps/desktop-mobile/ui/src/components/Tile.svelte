@@ -1,17 +1,27 @@
 <script lang="ts">
   import { blobUrl } from '../lib/api';
+  import { ensurePoster } from '../lib/poster';
   interface Props {
     id: string; size: number; favorite?: boolean; video?: boolean; copies?: number; target?: number;
     transferring?: boolean; selected?: boolean; selecting?: boolean; hasThumb?: boolean;
+    hasPoster?: boolean; hasOriginal?: boolean;
     onclick?: (e: MouseEvent) => void;
   }
-  let { id, size, favorite = false, video = false, copies, target = 2, transferring = false, selected = false, selecting = false, hasThumb = true, onclick }: Props = $props();
+  let { id, size, favorite = false, video = false, copies, target = 2, transferring = false, selected = false, selecting = false, hasThumb = true, hasPoster = false, hasOriginal = false, onclick }: Props = $props();
+  // A video's poster is made on this device once the original is here; until then a neutral tile.
+  let madePoster = $state(false);
+  $effect(() => {
+    if (video && !hasPoster && hasOriginal) ensurePoster(id).then((ok) => (madePoster = ok));
+  });
+  const poster = $derived(video && (hasPoster || madePoster));
   // Badges only where it matters (design README): red = not backed up enough, blue = in transit.
   const risk = $derived(copies !== undefined && copies < target);
 </script>
 
 <button class="tile" class:selected style="width:{size}px;height:{size}px" {onclick} aria-label="Photo" aria-pressed={selecting ? selected : undefined}>
-  {#if hasThumb && !video}
+  {#if poster}
+    <img src={blobUrl(id, 'poster')} alt="" loading="lazy" decoding="async" draggable="false" />
+  {:else if hasThumb && !video}
     <img src={blobUrl(id, 'thumb')} alt="" loading="lazy" decoding="async" draggable="false" />
   {:else}
     <span class="placeholder" aria-hidden="true"></span>

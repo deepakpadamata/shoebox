@@ -7,4 +7,8 @@ export type PhotoSummary = { id: string, taken_at: number, favorite: boolean, is
 /**
  * Devices holding the original (this one included).
  */
-copies: number, has_thumb: boolean, has_original: boolean, width: number, height: number, };
+copies: number, has_thumb: boolean, 
+/**
+ * A poster frame exists on this device (videos only; see `set_poster`).
+ */
+has_poster: boolean, has_original: boolean, width: number, height: number, };

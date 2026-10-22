@@ -41,6 +41,18 @@ pub(crate) async fn serve(
         .record(&photo)
         .await?
         .ok_or_else(|| anyhow!("no such photo"))?;
+    if kind == "poster" {
+        // The device-local poster frame of a video (see `AppCore::set_poster`).
+        return Ok(std::fs::read(core.poster_path(&photo))
+            .ok()
+            .map(|bytes| BlobBytes {
+                total: bytes.len() as u64,
+                etag: format!("poster-{}", Blake3Hash::of_bytes(&bytes)),
+                bytes,
+                content_type: "image/jpeg".into(),
+                range: None,
+            }));
+    }
     let (blob, bk) = match kind {
         "thumb" => (&rec.thumb, BlobKind::Thumb),
         "preview" => (&rec.preview, BlobKind::Preview),

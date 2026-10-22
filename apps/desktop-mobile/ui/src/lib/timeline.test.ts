@@ -6,7 +6,7 @@ function photo(i: number, day: number): PhotoSummary {
   return {
     id: String(i).padStart(64, '0'),
     taken_at: new Date(2024, 4, day, 12, 0, 0).getTime() - i,
-    favorite: false, is_video: false, copies: 1, has_thumb: true, has_original: true, width: 4, height: 3,
+    favorite: false, is_video: false, copies: 1, has_thumb: true, has_poster: false, has_original: true, width: 4, height: 3,
   };
 }
 

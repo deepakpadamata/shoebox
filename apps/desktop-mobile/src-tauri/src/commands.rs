@@ -61,6 +61,8 @@ pub const COMMANDS: &[&str] = &[
     "rename_device",
     "watch_folder",
     "export_library",
+    "rename_album",
+    "set_poster",
 ];
 
 pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Value> {
@@ -180,6 +182,19 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
         }
         "watch_folder" => {
             core.watch_folder(&arg::<String>(&args, "dir")?).await?;
+            Ok(json!({}))
+        }
+        "rename_album" => {
+            core.rename_album(
+                &arg::<String>(&args, "album")?,
+                &arg::<String>(&args, "name")?,
+            )
+            .await?;
+            Ok(json!({}))
+        }
+        "set_poster" => {
+            core.set_poster(&arg::<String>(&args, "id")?, &arg::<String>(&args, "data")?)
+                .await?;
             Ok(json!({}))
         }
         "export_library" => out(core.export_library(&arg::<String>(&args, "dest")?).await?),

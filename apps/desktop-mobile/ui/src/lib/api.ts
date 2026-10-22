@@ -22,7 +22,7 @@ export type {
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Settings,
 };
 
-export type BlobKind = 'thumb' | 'preview' | 'original';
+export type BlobKind = 'thumb' | 'preview' | 'original' | 'poster';
 
 const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -111,6 +111,8 @@ export const api = {
   setRedundancyTarget: (copies: number) => call<{}>('set_redundancy_target', { copies }),
   setRelay: (relay: string) => call<{}>('set_relay', { relay }),
   renameDevice: (name: string) => call<{}>('rename_device', { name }),
+  renameAlbum: (album: string, name: string) => call<{}>('rename_album', { album, name }),
+  setPoster: (id: string, data: string) => call<{}>('set_poster', { id, data }),
   exportLibrary: (dest: string) => call<ExportReport>('export_library', { dest }),
   watchFolder: (dir: string) => call<{}>('watch_folder', { dir }),
 };

@@ -143,7 +143,17 @@ fn relay_text(r: &RelaySetting) -> String {
     }
 }
 
-type PendingAnswer = Mutex<Option<oneshot::Sender<bool>>>;
+/// The answer to "do the codes match?": it may arrive before the question is registered (the
+/// UI reacts to the event as soon as it is emitted), so an early answer is kept.
+#[derive(Default)]
+enum PairingSlot {
+    #[default]
+    Idle,
+    Waiting(oneshot::Sender<bool>),
+    Early(bool),
+}
+
+type PendingAnswer = Mutex<PairingSlot>;
 
 pub struct AppCore {
     dir: PathBuf,
@@ -163,8 +173,11 @@ impl AppCore {
         std::fs::create_dir_all(&dir)?;
         let file: AppFile = match std::fs::read(dir.join("app.json")) {
             Ok(b) => serde_json::from_slice(&b).context("reading app.json")?,
-            Err(_) => AppFile::default(),
+            Err(_) => adopt_dev_library(&dir)?.unwrap_or_default(),
         };
+        if !dir.join("app.json").exists() && file.ticket.is_some() {
+            std::fs::write(dir.join("app.json"), serde_json::to_vec_pretty(&file)?)?;
+        }
         let mut config =
             NodeConfig::local_only(dir.join("node"), name_or_default(&file.device_name));
         config.role = file
@@ -194,7 +207,7 @@ impl AppCore {
             library: tokio::sync::RwLock::new(None),
             file: Mutex::new(file),
             events,
-            pending_pairing: Mutex::new(None),
+            pending_pairing: Mutex::new(PairingSlot::Idle),
         });
         core.forward_node_events();
         let ticket = core.file.lock().unwrap().ticket.clone();
@@ -290,12 +303,12 @@ impl AppCore {
                         peer_role: role_name(peer_role).into(),
                     }),
                     NodeEvent::PairingDone { .. } => {
-                        core.pending_pairing.lock().unwrap().take();
+                        *core.pending_pairing.lock().unwrap() = PairingSlot::Idle;
                         Some(AppEvent::PairingDone)
                     }
                     NodeEvent::PairingFailed { reason } => {
                         // Whoever was asked to compare the code need not answer any more.
-                        core.pending_pairing.lock().unwrap().take();
+                        *core.pending_pairing.lock().unwrap() = PairingSlot::Idle;
                         Some(AppEvent::PairingFailed { reason })
                     }
                     NodeEvent::RemovedFromLibrary => Some(AppEvent::RemovedFromLibrary),
@@ -465,7 +478,14 @@ impl AppCore {
                     return false;
                 };
                 let (tx, rx) = oneshot::channel();
-                *core.pending_pairing.lock().unwrap() = Some(tx);
+                {
+                    let mut slot = core.pending_pairing.lock().unwrap();
+                    if let PairingSlot::Early(answer) = *slot {
+                        *slot = PairingSlot::Idle;
+                        return answer;
+                    }
+                    *slot = PairingSlot::Waiting(tx);
+                }
                 // The code itself reaches the UI through `AppEvent::PairingCode`.
                 matches!(
                     tokio::time::timeout(PAIRING_ANSWER_TIMEOUT, rx).await,
@@ -477,13 +497,14 @@ impl AppCore {
 
     /// Answer the code comparison of the pairing in progress.
     pub fn confirm_pairing(&self, accept: bool) -> Result<()> {
-        let tx = self
-            .pending_pairing
-            .lock()
-            .unwrap()
-            .take()
-            .ok_or_else(|| anyhow!("no pairing is waiting for an answer"))?;
-        let _ = tx.send(accept);
+        let mut slot = self.pending_pairing.lock().unwrap();
+        match std::mem::take(&mut *slot) {
+            PairingSlot::Waiting(tx) => {
+                let _ = tx.send(accept);
+            }
+            // Answered before the question was registered: remember it for the decider.
+            _ => *slot = PairingSlot::Early(accept),
+        }
         Ok(())
     }
 
@@ -563,6 +584,7 @@ impl AppCore {
             is_video: rec.original.mime.starts_with("video/"),
             copies,
             has_thumb: self.node.blobs().has(&rec.thumb.hash).await?,
+            has_poster: self.poster_path(&rec.id).exists(),
             has_original: self.node.blobs().has(&rec.original.hash).await?,
             width: rec.exif.width,
             height: rec.exif.height,
@@ -841,6 +863,33 @@ impl AppCore {
         Ok(())
     }
 
+    /// Give an album a new name (the latest rename wins on every device).
+    pub async fn rename_album(&self, album: &str, name: &str) -> Result<()> {
+        let ln = self.ln().await?;
+        let name = name.trim();
+        ensure!(!name.is_empty(), "an album needs a name");
+        let id = parse_album(album)?;
+        ensure!(
+            ln.store().albums().await?.iter().any(|a| a.id == id),
+            "no such album"
+        );
+        let hlc = shoebox_core::Hlc {
+            physical_ms: now_ms(),
+            counter: 0,
+            device: ln.device(),
+        };
+        // An update that only carries the new name: the cover and items lose to what exists.
+        ln.store()
+            .upsert_album(AlbumMeta {
+                id,
+                name: Lww::new(name.to_string(), hlc),
+                cover: Lww::new(None, shoebox_core::Hlc::GENESIS),
+                items: shoebox_core::merge::OrSet::new(),
+            })
+            .await?;
+        Ok(())
+    }
+
     pub async fn album_page(
         &self,
         album: &str,
@@ -983,6 +1032,43 @@ impl AppCore {
             photos: r.photos.len() as u32,
             bytes: r.bytes as f64,
         })
+    }
+
+    // ---------- poster frames ----------
+
+    /// Videos have no poster in the library (the record's thumbnail is the video itself), so
+    /// each device keeps its own: the UI grabs a frame from the video it can play and hands it
+    /// back. Device-local on purpose; it is a cache and never replicates.
+    pub(crate) fn poster_path(&self, id: &Blake3Hash) -> PathBuf {
+        self.dir.join("posters").join(format!("{id}.jpg"))
+    }
+
+    pub async fn set_poster(&self, id: &str, base64_jpeg: &str) -> Result<()> {
+        use base64::Engine;
+        let id = parse_hash(id)?;
+        let rec = self
+            .record(&id)
+            .await?
+            .ok_or_else(|| anyhow!("no such photo"))?;
+        ensure!(
+            rec.original.mime.starts_with("video/"),
+            "only videos have poster frames"
+        );
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(base64_jpeg.trim())
+            .map_err(|_| anyhow!("the poster is not valid base64"))?;
+        ensure!(
+            bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
+            "the poster must be a JPEG"
+        );
+        ensure!(bytes.len() <= 2 * 1024 * 1024, "the poster is too large");
+        let path = self.poster_path(&id);
+        std::fs::create_dir_all(path.parent().expect("has parent"))?;
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, &bytes)?;
+        std::fs::rename(tmp, path)?;
+        self.emit(AppEvent::LibraryChanged);
+        Ok(())
     }
 
     // ---------- export ----------
@@ -1162,6 +1248,32 @@ impl AppCore {
             }
         });
     }
+}
+
+/// A directory made by `shoebox-dev` holds the same node layout plus a `dev.json`. When the
+/// app is pointed at one that has no `app.json` yet, take over its library (same device key,
+/// same data); the dev tool's root seed, if any, is left where it is and not used.
+fn adopt_dev_library(dir: &Path) -> Result<Option<AppFile>> {
+    #[derive(Deserialize)]
+    struct DevFile {
+        name: String,
+        role: String,
+        ticket: String,
+    }
+    let Ok(bytes) = std::fs::read(dir.join("dev.json")) else {
+        return Ok(None);
+    };
+    let dev: DevFile = serde_json::from_slice(&bytes).context("reading dev.json")?;
+    let _: LibraryTicket = dev
+        .ticket
+        .parse()
+        .map_err(|e| anyhow!("corrupt ticket in dev.json: {e}"))?;
+    Ok(Some(AppFile {
+        device_name: dev.name,
+        role: Some(role_name(parse_role(&dev.role)?).to_string()),
+        ticket: Some(dev.ticket),
+        relay: None,
+    }))
 }
 
 fn name_or_default(name: &str) -> String {

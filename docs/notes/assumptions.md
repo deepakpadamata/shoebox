@@ -194,3 +194,9 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   delete blobs created or referenced mid-pass (reproduced as lost entry content and lost library records under a 200 ms GC). Also verified
   experimentally: a *temp* tag keeps a **partial** blob alive through GC while held (a named tag does not), so a failed fetch now leaves a temp tag on
   the partial blob for up to an hour to preserve progress for the retry (in-process only: after a restart GC discards partials).
+- **A-053 · M1-07** · `shoebox-dev` is a *one process per data dir* tool: `run` keeps a device online; the other commands open the dir briefly, so
+  they cannot run against a dir that `run` is using (a second `--dir` plays the second device; M2's keeper control socket removes this limit).
+  One-shot commands that change holdings (`fetch`) sync with their peers before exiting, otherwise nobody would learn about the new copy. Device
+  state lives in `<dir>/dev.json` (name, role, the library ticket, known peers) and the node under `<dir>/node/`. `--local-only` = no relay, no mDNS.
+  `LibraryNode::sync_now` now waits for a sync that is already in flight and returns its outcome (the CLI's `join` returned an empty library because
+  it exited while the background manager's sync was still running). The root key in `init` is a placeholder derived from the device id (M2 adds real identity).

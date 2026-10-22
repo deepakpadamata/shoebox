@@ -11,6 +11,7 @@ members = [
     "apps/keeper",
     "apps/desktop-mobile",
     "tools/store-bench",
+    "tools/shoebox-dev",
     "xtask",
     "examples/hello-sync",
 ]
@@ -57,6 +58,8 @@ shoebox-testkit = { path = "crates/shoebox-testkit" }
 # Keep build artifacts small: full debuginfo for the iroh dependency tree made `target/` 13 GB.
 [profile.dev]
 debug = "line-tables-only"
+# The incremental cache alone grew past 4 GB here; builds are fast enough without it.
+incremental = false
 
 [profile.dev.package."*"]
 debug = false

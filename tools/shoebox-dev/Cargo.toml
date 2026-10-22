@@ -1,0 +1,31 @@
+[package]
+name = "shoebox-dev"
+description = "Developer CLI for M1/M2: init, import, ls, run, join, sync, peers, holdings, fetch."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[[bin]]
+name = "shoebox-dev"
+path = "src/main.rs"
+
+[dependencies]
+shoebox-core.workspace = true
+shoebox-node.workspace = true
+shoebox-store-docs.workspace = true
+tokio = { workspace = true, features = ["signal", "process"] }
+anyhow.workspace = true
+serde.workspace = true
+serde_json = "1"
+hex.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+futures.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+serde_json = "1"
+
+[lints]
+workspace = true

@@ -197,3 +197,41 @@ async fn a_burst_of_records_does_not_stall_the_engine() {
     .expect("all 1500 records arrive and the store stays responsive");
     c.shutdown().await;
 }
+
+/// `sync_now` must not return while a sync with that peer is still running (the background
+/// manager starts one as soon as a peer is added): callers rely on "returned" meaning "synced".
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sync_now_waits_for_a_sync_already_in_flight() {
+    use shoebox_core::store::{RootPublicKey, StoreBackend};
+    let c = Cluster::new(2).await.unwrap();
+    let b0 = shoebox_store_docs::DocsBackend::for_node(c.node(0).clone(), c.clock().clone());
+    let (l0, cap) = b0.create_library(&RootPublicKey([7; 32])).await.unwrap();
+    for i in 0..300u32 {
+        let mut p = photo((i % 250) as u8, i as i64);
+        p.id = shoebox_core::Blake3Hash::of_bytes(&i.to_le_bytes());
+        p.original.hash = p.id;
+        l0.upsert_photo(p).await.unwrap();
+    }
+    let b1 = shoebox_store_docs::DocsBackend::for_node(c.node(1).clone(), c.clock().clone());
+    let l1 = b1.open_library(&cap).await.unwrap();
+    let ln1 = shoebox_node::LibraryNode::with_sync_config(
+        c.node(1).clone(),
+        std::sync::Arc::new(l1),
+        c.clock().clone(),
+        fast(),
+    );
+    let peer = from_endpoint_addr(&c.node(0).addr());
+    ln1.add_peer(peer.clone()).unwrap(); // the manager starts syncing right away...
+    ln1.sync_now(peer.id).await.unwrap(); // ...and this must not return until it is done
+    let have = ln1
+        .store()
+        .photos_by_time(TimeRange::ALL, Page::all())
+        .await
+        .unwrap()
+        .len();
+    assert_eq!(
+        have, 300,
+        "sync_now returned before the library had arrived"
+    );
+    c.shutdown().await;
+}

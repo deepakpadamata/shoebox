@@ -17,6 +17,11 @@ See [docs/05-prototype-plan.md](docs/05-prototype-plan.md) §1. In short: `crate
 `apps/` are binaries, `tools/` and `xtask/` are developer tooling, `examples/` are throwaway spikes.
 `shoebox-core` has no async runtime and no iroh dependency.
 
+## Disk usage
+
+`target/` grows quickly (every rebuild leaves a ~100–200 MB test binary behind). Run `scripts/prune-target.sh` now and then; the
+dev profile already uses reduced debuginfo and no incremental cache.
+
 ## Fixtures
 
 `cargo xtask fixtures --preset small|medium|large` generates a synthetic photo corpus; `cargo xtask samples`

@@ -4,7 +4,7 @@
 
 use crate::library_node::{Inner, LibraryNode};
 use crate::node::{NodeEvent, NodeEvents};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use shoebox_core::ids::EndpointId;
 use shoebox_core::store::{LibraryStore, PeerAddr};
 use std::sync::{Arc, Weak};
@@ -54,6 +54,8 @@ pub(crate) struct PeerState {
     next_attempt: Instant,
     last_attempt: Option<Instant>,
     syncing: bool,
+    /// Outcome of the most recent finished attempt (`None` = it succeeded).
+    last_error: Option<String>,
 }
 
 impl PeerState {
@@ -64,6 +66,7 @@ impl PeerState {
             next_attempt: Instant::now(),
             last_attempt: None,
             syncing: false,
+            last_error: None,
         }
     }
 }
@@ -165,6 +168,31 @@ async fn manager<L: LibraryStore>(
     }
 }
 
+/// Wait until the sync running with `id` finishes; its result is ours too.
+async fn wait_for_running_sync<L: LibraryStore>(
+    inner: &Arc<Inner<L>>,
+    id: EndpointId,
+    timeout: Duration,
+) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        {
+            let peers = inner.peers.lock().unwrap();
+            let p = peers.get(&id).ok_or_else(|| anyhow!("unknown peer {id}"))?;
+            if !p.syncing {
+                return match &p.last_error {
+                    None => Ok(()),
+                    Some(e) => Err(anyhow!("{e}")),
+                };
+            }
+        }
+        if Instant::now() >= deadline {
+            bail!("timed out waiting for the running sync with {id}");
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 /// One sync attempt with state bookkeeping and events. A concurrent attempt is a no-op.
 pub(crate) async fn sync_peer<L: LibraryStore>(
     inner: &Arc<Inner<L>>,
@@ -177,11 +205,17 @@ pub(crate) async fn sync_peer<L: LibraryStore>(
             .get_mut(&id)
             .ok_or_else(|| anyhow!("unknown peer {id}"))?;
         if p.syncing {
-            return Ok(());
+            None
+        } else {
+            p.syncing = true;
+            p.last_attempt = Some(Instant::now());
+            Some(p.addr.clone())
         }
-        p.syncing = true;
-        p.last_attempt = Some(Instant::now());
-        p.addr.clone()
+    };
+    let Some(addr) = addr else {
+        // Another attempt (usually the background manager's) is already running: callers rely on
+        // "returned" meaning "synced", so wait for it and report how it went.
+        return wait_for_running_sync(inner, id, cfg.timeout).await;
     };
     let iroh_id = crate::addr::to_iroh_id(&id).map_err(|e| anyhow!("{e}"))?;
     inner.node.emit(NodeEvent::SyncProgress {
@@ -200,6 +234,7 @@ pub(crate) async fn sync_peer<L: LibraryStore>(
         let mut peers = inner.peers.lock().unwrap();
         if let Some(p) = peers.get_mut(&id) {
             p.syncing = false;
+            p.last_error = result.as_ref().err().map(|e| e.to_string());
             match &result {
                 Ok(()) => {
                     p.failures = 0;

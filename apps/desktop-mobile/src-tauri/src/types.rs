@@ -281,5 +281,98 @@ ts_type! {
         LibraryRotated,
         BackupProgress { done: u32, total: u32 },
         BackupPaused { reason: Option<String> },
+        /// Something changed in a shared album (new photos, members, downloads).
+        SharedChanged { album: String },
+    }
+}
+
+ts_type! {
+    /// A shared album this device belongs to.
+    pub struct SharedAlbumInfo {
+        pub id: String,
+        pub name: String,
+        /// `owner`, `contributor` or `viewer`.
+        pub role: String,
+        pub item_count: u32,
+        pub member_count: u32,
+        pub keep_originals: bool,
+        /// What to do with GPS data when adding photos: `ask`, `keep` or `remove`.
+        pub location: String,
+        /// Photos other members added since this album was last opened.
+        pub unread: u32,
+        /// Item id of the cover (the newest photo).
+        pub cover: Option<String>,
+    }
+}
+
+ts_type! {
+    pub struct SharedItemInfo {
+        pub id: String,
+        pub taken_at: f64,
+        pub added_at: f64,
+        pub added_by: String,
+        pub is_video: bool,
+        pub has_thumb: bool,
+        pub has_original: bool,
+        /// Added by this device.
+        pub mine: bool,
+        /// The location was taken out of the shared copy.
+        pub location_removed: bool,
+    }
+}
+
+ts_type! {
+    pub struct SharedItemsPage {
+        pub items: Vec<SharedItemInfo>,
+        /// Pass back as `after` for the next page.
+        pub next: Option<String>,
+        pub total: u32,
+    }
+}
+
+ts_type! {
+    pub struct SharedMemberInfo {
+        pub key: String,
+        pub name: String,
+        pub role: String,
+        pub me: bool,
+    }
+}
+
+ts_type! {
+    /// One line of an album's activity: several adds by the same person close together are one.
+    pub struct FeedEntry {
+        /// `added` or `joined`.
+        pub kind: String,
+        pub member: String,
+        pub count: u32,
+        pub at: f64,
+    }
+}
+
+ts_type! {
+    pub struct InviteOut {
+        pub text: String,
+        pub qr_svg: String,
+        pub expires_at: f64,
+    }
+}
+
+ts_type! {
+    /// What would happen if these photos were added: how many carry a location.
+    pub struct AddCheck {
+        pub total: u32,
+        pub with_location: u32,
+        /// The album's setting: `ask`, `keep` or `remove`.
+        pub policy: String,
+    }
+}
+
+ts_type! {
+    pub struct AddResult {
+        pub added: u32,
+        pub location_removed: u32,
+        /// Photos left out, with the reason.
+        pub skipped: Vec<String>,
     }
 }

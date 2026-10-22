@@ -36,6 +36,7 @@ keyring = ["dep:keyring"]
 shoebox-core.workspace = true
 shoebox-node.workspace = true
 shoebox-store.workspace = true
+shoebox-media.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "net", "signal", "process"] }
 futures.workspace = true
 anyhow.workspace = true

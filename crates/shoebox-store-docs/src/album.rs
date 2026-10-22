@@ -200,6 +200,10 @@ impl DocsAlbum {
         }
     }
 
+    pub async fn item(&self, id: &PhotoId) -> Option<SharedItem> {
+        self.inner.core.lock().await.state.item(id)
+    }
+
     pub async fn item_count(&self) -> usize {
         self.inner.core.lock().await.state.item_count()
     }

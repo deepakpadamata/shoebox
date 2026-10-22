@@ -1353,6 +1353,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shoebox-core",
+ "shoebox-media",
  "shoebox-node",
  "shoebox-store",
  "tauri",

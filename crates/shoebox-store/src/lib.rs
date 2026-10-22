@@ -5,7 +5,7 @@
 mod shared;
 
 pub use shared::{
-    decode_invite, encode_invite, AlbumNotice, MemberInfo, SharedAlbums, SharedSummary,
+    decode_invite, encode_invite, item_blob, AlbumNotice, MemberInfo, SharedAlbums, SharedSummary,
 };
 
 use async_trait::async_trait;

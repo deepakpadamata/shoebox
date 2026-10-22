@@ -30,6 +30,14 @@ pub(crate) async fn serve(
     kind: &str,
     range: Option<(u64, Option<u64>)>,
 ) -> Result<Option<BlobBytes>> {
+    if let Some(rest) = kind.strip_prefix("album:") {
+        // `album:<album id>:<kind>`: a photo of a shared album.
+        let (album, kind) = rest
+            .split_once(':')
+            .ok_or_else(|| anyhow!("malformed album blob kind"))?;
+        let (hash, mime, _) = core.shared_blob_ref(album, id, kind).await?;
+        return read_blob(core, &hash, &mime, range).await;
+    }
     let photo: Blake3Hash = {
         let b: [u8; 32] = hex::decode(id.trim())
             .ok()
@@ -59,11 +67,21 @@ pub(crate) async fn serve(
         "original" => (&rec.original, BlobKind::Original),
         other => return Err(anyhow!("unknown kind `{other}`")),
     };
-    let Some(total) = core.blobs().size(&blob.hash).await? else {
-        if bk != BlobKind::Original {
-            // Thumbnails and previews are small: get them for the retry.
-            core.fetch_in_background(photo, bk);
-        }
+    if core.blobs().size(&blob.hash).await?.is_none() && bk != BlobKind::Original {
+        // Thumbnails and previews are small: get them for the retry.
+        core.fetch_in_background(photo, bk);
+    }
+    read_blob(core, &blob.hash, &blob.mime, range).await
+}
+
+/// The bytes (or a range) of a blob that is on this device; `None` if it is not.
+async fn read_blob(
+    core: &Arc<AppCore>,
+    hash: &Blake3Hash,
+    mime: &str,
+    range: Option<(u64, Option<u64>)>,
+) -> Result<Option<BlobBytes>> {
+    let Some(total) = core.blobs().size(hash).await? else {
         return Ok(None);
     };
     let (start, end, partial) = match range {
@@ -76,18 +94,15 @@ pub(crate) async fn serve(
         }
     };
     let bytes = if end > start {
-        core.blobs()
-            .open_range(&blob.hash, start..end)
-            .await?
-            .to_vec()
+        core.blobs().open_range(hash, start..end).await?.to_vec()
     } else {
         vec![]
     };
     Ok(Some(BlobBytes {
         bytes,
-        content_type: blob.mime.clone(),
+        content_type: mime.to_string(),
         total,
         range: partial.then_some((start, end.saturating_sub(1))),
-        etag: blob.hash.to_string(),
+        etag: hash.to_string(),
     }))
 }

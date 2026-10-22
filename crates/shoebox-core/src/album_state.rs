@@ -219,6 +219,10 @@ impl AlbumState {
         self.items.len()
     }
 
+    pub fn item(&self, id: &PhotoId) -> Option<SharedItem> {
+        self.items.get(id).cloned()
+    }
+
     pub fn has_item(&self, id: &PhotoId) -> bool {
         self.items.contains_key(id)
     }

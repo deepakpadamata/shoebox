@@ -9,6 +9,7 @@ mod burst;
 pub mod commands;
 mod core;
 mod export;
+mod shared;
 pub mod keystore;
 pub mod notify;
 pub mod photos_source;

@@ -67,6 +67,20 @@ pub const COMMANDS: &[&str] = &[
     "backup_configure",
     "backup_run",
     "sync_burst",
+    "shared_albums",
+    "shared_create",
+    "shared_invite",
+    "shared_join",
+    "shared_leave",
+    "shared_items",
+    "shared_members",
+    "shared_feed",
+    "shared_add_check",
+    "shared_add",
+    "shared_save",
+    "shared_settings",
+    "shared_seen",
+    "shared_fetch",
 ];
 
 pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Value> {
@@ -209,6 +223,71 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
                 opt::<u64>(&args, "seconds")?.unwrap_or(25),
             ))
             .await?),
+        "shared_albums" => out(core.shared_albums().await?),
+        "shared_create" => out(core.shared_create(&arg::<String>(&args, "name")?).await?),
+        "shared_invite" => out(core
+            .shared_invite(
+                &arg::<String>(&args, "album")?,
+                &arg::<String>(&args, "role")?,
+                opt::<u32>(&args, "days")?.unwrap_or(7),
+            )
+            .await?),
+        "shared_join" => out(core.shared_join(&arg::<String>(&args, "text")?).await?),
+        "shared_leave" => {
+            core.shared_leave(&arg::<String>(&args, "album")?).await?;
+            Ok(json!({}))
+        }
+        "shared_items" => out(core
+            .shared_items(
+                &arg::<String>(&args, "album")?,
+                opt::<String>(&args, "after")?,
+                opt::<u32>(&args, "limit")?.unwrap_or(500),
+            )
+            .await?),
+        "shared_members" => out(core.shared_members(&arg::<String>(&args, "album")?).await?),
+        "shared_feed" => out(core.shared_feed(&arg::<String>(&args, "album")?).await?),
+        "shared_add_check" => out(core
+            .shared_add_check(
+                &arg::<String>(&args, "album")?,
+                &arg::<Vec<String>>(&args, "ids")?,
+            )
+            .await?),
+        "shared_add" => out(core
+            .shared_add(
+                &arg::<String>(&args, "album")?,
+                &arg::<Vec<String>>(&args, "ids")?,
+                opt::<String>(&args, "location")?,
+                opt::<bool>(&args, "remember")?.unwrap_or(false),
+            )
+            .await?),
+        "shared_save" => out(core
+            .shared_save(
+                &arg::<String>(&args, "album")?,
+                &arg::<Vec<String>>(&args, "ids")?,
+            )
+            .await?),
+        "shared_settings" => {
+            core.shared_settings(
+                &arg::<String>(&args, "album")?,
+                opt::<bool>(&args, "keep_originals")?,
+                opt::<String>(&args, "location")?,
+            )
+            .await?;
+            Ok(json!({}))
+        }
+        "shared_seen" => {
+            core.shared_seen(&arg::<String>(&args, "album")?).await?;
+            Ok(json!({}))
+        }
+        "shared_fetch" => {
+            core.shared_fetch(
+                &arg::<String>(&args, "album")?,
+                &arg::<String>(&args, "id")?,
+                &arg::<String>(&args, "kind")?,
+            )
+            .await?;
+            Ok(json!({}))
+        }
         "export_library" => out(core.export_library(&arg::<String>(&args, "dest")?).await?),
         other => bail!("unknown command `{other}`"),
     }

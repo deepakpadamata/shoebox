@@ -160,6 +160,7 @@ pub struct AppCore {
     opts: AppOptions,
     node: Node,
     library: tokio::sync::RwLock<Option<LibraryNode<Library>>>,
+    pub(crate) shared: tokio::sync::RwLock<Option<shoebox_store::SharedAlbums>>,
     file: Mutex<AppFile>,
     events: broadcast::Sender<AppEvent>,
     pending_pairing: PendingAnswer,
@@ -209,6 +210,7 @@ impl AppCore {
             opts,
             node,
             library: tokio::sync::RwLock::new(None),
+            shared: tokio::sync::RwLock::new(None),
             file: Mutex::new(file),
             events,
             pending_pairing: Mutex::new(PairingSlot::Idle),
@@ -254,8 +256,13 @@ impl AppCore {
 
     /// Stop everything and release the data directory.
     pub async fn shutdown(&self) -> Result<()> {
+        *self.shared.write().await = None;
         *self.library.write().await = None;
         self.node.shutdown().await
+    }
+
+    pub(crate) fn device_name(&self) -> String {
+        self.file.lock().unwrap().device_name.clone()
     }
 
     pub(crate) async fn ln(&self) -> Result<LibraryNode<Library>> {
@@ -360,6 +367,19 @@ impl AppCore {
         });
     }
 
+    fn forward_shared_changes(self: &Arc<Self>, shared: &shoebox_store::SharedAlbums) {
+        let weak = Arc::downgrade(self);
+        let mut notices = shared.subscribe();
+        tokio::spawn(async move {
+            while let Ok(shoebox_store::AlbumNotice(id)) = notices.recv().await {
+                let Some(core) = weak.upgrade() else { break };
+                core.emit(AppEvent::SharedChanged {
+                    album: hex::encode(id.0),
+                });
+            }
+        });
+    }
+
     // ---------- library lifecycle ----------
 
     async fn attach(self: &Arc<Self>, ticket: LibraryTicket) -> Result<()> {
@@ -377,6 +397,14 @@ impl AppCore {
             ln.start_presence(PresenceConfig::default()).await?;
         }
         self.forward_library_changes(&ln);
+        let shared = shoebox_store::SharedAlbums::open(
+            self.node.clone(),
+            &self.dir,
+            self.opts.background,
+        )
+        .await?;
+        self.forward_shared_changes(&shared);
+        *self.shared.write().await = Some(shared);
         *self.library.write().await = Some(ln);
         Ok(())
     }

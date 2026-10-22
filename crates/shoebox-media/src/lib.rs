@@ -9,6 +9,7 @@ mod detect;
 mod exif_data;
 mod raw;
 mod render;
+mod strip;
 mod video;
 
 use shoebox_core::ids::{Blake3Hash, Timestamp};
@@ -18,6 +19,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 
 pub use render::{PREVIEW_LONG_EDGE, THUMB_SIZE};
+pub use strip::{strip_location, StripError, Stripped};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MediaKind {

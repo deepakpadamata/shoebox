@@ -160,3 +160,77 @@ export function longPressDrag(node: HTMLElement, opts: LongPressDragOptions) {
     },
   };
 }
+
+export interface PullRefreshOptions {
+  onRefresh: () => Promise<unknown> | unknown;
+  /** Distance in pixels that counts as a pull. */
+  threshold?: number;
+}
+
+/**
+ * Pull down from the top of a scrolling list to refresh it. A small pill follows the finger, says
+ * "Release to refresh" once the pull is long enough, and "Refreshing…" until `onRefresh` settles.
+ */
+export function pullRefresh(node: HTMLElement, opts: PullRefreshOptions) {
+  const threshold = opts.threshold ?? 72;
+  let startY = 0;
+  let pulling = false;
+  let busy = false;
+  const pill = document.createElement('div');
+  pill.setAttribute('role', 'status');
+  pill.style.cssText =
+    'position:fixed;left:50%;z-index:20;transform:translate(-50%,-60px);padding:6px 14px;border-radius:999px;background:var(--surface);color:var(--ink-2);border:1px solid var(--line);box-shadow:var(--shadow);font:600 12px var(--font);pointer-events:none;opacity:0;transition:opacity .12s';
+  document.body.appendChild(pill);
+
+  const place = (dy: number, text: string) => {
+    const top = node.getBoundingClientRect().top;
+    pill.textContent = text;
+    pill.style.top = `${top}px`;
+    pill.style.transform = `translate(-50%, ${Math.min(dy, threshold * 1.4) - 40}px)`;
+    pill.style.opacity = dy > 8 || busy ? '1' : '0';
+  };
+  const start = (e: TouchEvent) => {
+    if (busy || node.scrollTop > 0 || e.touches.length !== 1) return;
+    startY = e.touches[0].clientY;
+    pulling = true;
+  };
+  const move = (e: TouchEvent) => {
+    if (!pulling) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0 || node.scrollTop > 0) {
+      pill.style.opacity = '0';
+      return;
+    }
+    place(dy * 0.6, dy * 0.6 >= threshold ? 'Release to refresh' : 'Pull to refresh');
+  };
+  const end = async (e: TouchEvent) => {
+    if (!pulling) return;
+    pulling = false;
+    const dy = (e.changedTouches[0]?.clientY ?? startY) - startY;
+    if (dy * 0.6 < threshold) {
+      pill.style.opacity = '0';
+      return;
+    }
+    busy = true;
+    place(threshold, 'Refreshing…');
+    try {
+      await opts.onRefresh();
+    } finally {
+      busy = false;
+      pill.style.opacity = '0';
+    }
+  };
+  node.addEventListener('touchstart', start, { passive: true });
+  node.addEventListener('touchmove', move, { passive: true });
+  node.addEventListener('touchend', end);
+  node.addEventListener('touchcancel', end);
+  return {
+    destroy() {
+      node.removeEventListener('touchstart', start);
+      node.removeEventListener('touchmove', move);
+      node.removeEventListener('touchend', end);
+      node.removeEventListener('touchcancel', end);
+      pill.remove();
+    },
+  };
+}

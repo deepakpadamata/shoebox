@@ -137,7 +137,9 @@ async fn a_device_with_a_library_does_not_quietly_become_a_new_device_when_its_k
     use desktop_mobile::{AppCore, AppOptions};
     let dir = tempfile::tempdir().unwrap();
     let opts = || AppOptions {
-        secrets: Some(std::sync::Arc::new(FileStore::new(dir.path().join("secrets")))),
+        secrets: Some(std::sync::Arc::new(FileStore::new(
+            dir.path().join("secrets"),
+        ))),
         ..AppOptions::local_only()
     };
     let core = AppCore::open(dir.path(), opts()).await.unwrap();
@@ -150,6 +152,9 @@ async fn a_device_with_a_library_does_not_quietly_become_a_new_device_when_its_k
     again.shutdown().await.unwrap();
     // Key gone: refuse, with a way forward, instead of inventing another identity.
     std::fs::remove_dir_all(dir.path().join("secrets")).unwrap();
-    let err = AppCore::open(dir.path(), opts()).await.err().expect("refused");
+    let err = AppCore::open(dir.path(), opts())
+        .await
+        .err()
+        .expect("refused");
     assert!(err.to_string().contains("recovery phrase"), "{err}");
 }

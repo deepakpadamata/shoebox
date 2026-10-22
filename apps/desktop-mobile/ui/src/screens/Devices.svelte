@@ -3,6 +3,8 @@
   // a device with a QR code and comparing the six-digit code, and removing one.
   import { onMount, untrack } from 'svelte';
   import { api, type DeviceInfo, type PairStart } from '../lib/api';
+  import { pullRefresh } from '../lib/gestures';
+  import { refreshEverything } from '../lib/refresh';
   import { app, fail, toast } from '../lib/store.svelte';
   import Avatar from '../components/Avatar.svelte';
   import Button from '../components/Button.svelte';
@@ -82,7 +84,7 @@
   const pathLabel = (d: DeviceInfo) => ({ lan: 'Same network', direct: 'Direct', relay: 'Via relay', none: d.online ? 'Connecting' : 'Offline' })[d.path] ?? d.path;
 </script>
 
-<div class="page">
+<div class="page" use:pullRefresh={{ onRefresh: refreshEverything }}>
   <div class="row-flex head">
     <div class="grow muted small">Devices that hold this library. Everything stays between them.</div>
     <Button kind="primary" size="sm" onclick={() => { addOpen = true; pair = null; }}>＋ Add a device</Button>

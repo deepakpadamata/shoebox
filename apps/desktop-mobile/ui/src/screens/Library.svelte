@@ -5,7 +5,8 @@
   import { api, type PageCursor, type PhotoPage, type PhotoSummary } from '../lib/api';
   import { dayLabel, plural } from '../lib/format';
   import { buildLayout, visibleRows } from '../lib/timeline';
-  import { longPressDrag, pinch, stepDensity } from '../lib/gestures';
+  import { longPressDrag, pinch, pullRefresh, stepDensity } from '../lib/gestures';
+  import { refreshEverything } from '../lib/refresh';
   import { viewport as media } from '../lib/viewport.svelte';
   import { app, fail, toast } from '../lib/store.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
@@ -207,6 +208,7 @@
   <div class="scroller" bind:this={scroller} bind:clientWidth={width} bind:clientHeight={viewport}
     onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}
     use:pinch={{ onEnd: setDensity }}
+    use:pullRefresh={{ onRefresh: refreshEverything }}
     use:longPressDrag={{ onStart: selectAt, onOver: selectAt, onEnd: () => {} }}>
     {#if !loaded}
       <div class="empty">Loading…</div>

@@ -6,6 +6,8 @@
   import { app, fail, toast } from '../lib/store.svelte';
   import { go, param } from '../lib/route.svelte';
   import { canScan, scanQr } from '../lib/scan';
+  import { pullRefresh } from '../lib/gestures';
+  import { refreshEverything } from '../lib/refresh';
   import Button from '../components/Button.svelte';
   import Sheet from '../components/Sheet.svelte';
   import SharedAlbum from './SharedAlbum.svelte';
@@ -58,7 +60,7 @@
 {#if id}
   {#key id}<SharedAlbum album={id} />{/key}
 {:else}
-  <div class="page">
+  <div class="page" use:pullRefresh={{ onRefresh: refreshEverything }}>
     <div class="row-flex">
       <Button kind="primary" onclick={() => (createOpen = true)}>＋ New shared album</Button>
       <Button onclick={() => (joinOpen = true)}>Join with an invitation</Button>

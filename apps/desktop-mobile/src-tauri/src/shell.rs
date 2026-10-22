@@ -14,13 +14,27 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 #[cfg(desktop)]
 use tauri::WindowEvent;
-use tauri::{Emitter, Manager, RunEvent, State};
+use tauri::{Emitter, Manager, RunEvent};
 
 struct Core(Arc<AppCore>);
 
+/// The app core, waiting for it if the window asked before startup finished. On phones the web
+/// view can load and call in while `setup` is still opening the library (the first start also
+/// creates the device key), so "not ready yet" must wait, not fail.
+async fn core_when_ready(app: &tauri::AppHandle) -> Result<Arc<AppCore>, String> {
+    for _ in 0..600 {
+        if let Some(core) = app.try_state::<Core>() {
+            return Ok(core.0.clone());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err("Shoebox is taking too long to start. Close it and open it again.".into())
+}
+
 #[tauri::command]
-async fn command(core: State<'_, Core>, cmd: String, args: Option<Value>) -> Result<Value, String> {
-    dispatch(&core.0, &cmd, args.unwrap_or(Value::Null))
+async fn command(app: tauri::AppHandle, cmd: String, args: Option<Value>) -> Result<Value, String> {
+    let core = core_when_ready(&app).await?;
+    dispatch(&core, &cmd, args.unwrap_or(Value::Null))
         .await
         .map_err(|e| user_message(&e))
 }

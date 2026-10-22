@@ -146,6 +146,7 @@ export const api = {
   sharedSeen: (album: string) => call<{}>('shared_seen', { album }),
   sharedFetch: (album: string, id: string, kind: BlobKind) => call<{}>('shared_fetch', { album, id, kind }),
   sharedRemoveMember: (album: string, member: string) => call<{}>('shared_remove_member', { album, member }),
+  syncBurst: (seconds = 10) => call<import('../bindings/BurstReport').BurstReport>('sync_burst', { seconds }),
   deviceLink: () => call<string>('device_link'),
   diagnostics: () => call<DiagnosticsBundle>('diagnostics'),
   exportLibrary: (dest: string) => call<ExportReport>('export_library', { dest }),

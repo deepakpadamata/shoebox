@@ -35,7 +35,10 @@ fn jpeg_is_complete(bytes: &[u8]) -> bool {
                 if m == 0xDA {
                     // Scan data: runs until a marker that is not a stuffed zero or a restart.
                     while i + 1 < bytes.len() {
-                        if bytes[i] == 0xFF && bytes[i + 1] != 0x00 && !(0xD0..=0xD7).contains(&bytes[i + 1]) {
+                        if bytes[i] == 0xFF
+                            && bytes[i + 1] != 0x00
+                            && !(0xD0..=0xD7).contains(&bytes[i + 1])
+                        {
                             break;
                         }
                         i += 1;

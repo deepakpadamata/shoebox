@@ -5,6 +5,8 @@
   import { app, fail } from '../lib/store.svelte';
   import { go } from '../lib/route.svelte';
   import Button from '../components/Button.svelte';
+  import { pullRefresh } from '../lib/gestures';
+  import { refreshEverything } from '../lib/refresh';
 
   let albums = $state<AlbumInfo[]>([]);
   let name = $state('');
@@ -22,7 +24,7 @@
   }
 </script>
 
-<div class="page">
+<div class="page" use:pullRefresh={{ onRefresh: refreshEverything }}>
   <form class="row-flex" onsubmit={(e) => { e.preventDefault(); create(); }}>
     <input class="input grow" placeholder="New album name" bind:value={name} />
     <Button type="submit" kind="primary" disabled={!name.trim()}>Create album</Button>

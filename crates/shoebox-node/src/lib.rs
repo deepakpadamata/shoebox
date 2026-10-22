@@ -13,6 +13,7 @@ mod keys;
 mod library_node;
 mod maintenance;
 mod node;
+mod pairing;
 mod presence;
 mod sync;
 mod ticket;
@@ -32,6 +33,7 @@ pub use maintenance::MaintenanceConfig;
 pub use node::{
     classify_addrs, Node, NodeEvent, NodeEvents, PathKind, PeerAddr, PeerInfo, PING_ALPN,
 };
+pub use pairing::{DecideFn, PairGrant, PairTicket, PairingCode};
 pub use presence::{DeviceStatus, PresenceConfig};
 pub use sync::{SyncConfig, SyncPhase};
 pub use ticket::{LibraryTicket, TicketError};

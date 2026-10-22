@@ -24,6 +24,7 @@ thiserror.workspace = true
 bytes.workspace = true
 hex.workspace = true
 blake3.workspace = true
+getrandom = "0.3"
 postcard.workspace = true
 shoebox-media.workspace = true
 notify = "8"

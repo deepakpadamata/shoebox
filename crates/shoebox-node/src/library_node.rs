@@ -37,6 +37,7 @@ pub(crate) struct Inner<L: LibraryStore> {
     /// freshly tagged blob whose record is not written yet is never released.
     pub(crate) ingest: tokio::sync::RwLock<()>,
     pub(crate) membership: Mutex<crate::identity::Membership>,
+    pub(crate) invites: Arc<Mutex<crate::pairing::Invites>>,
 }
 
 pub struct LibraryNode<L: LibraryStore> {
@@ -84,6 +85,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 fetcher: Default::default(),
                 ingest: tokio::sync::RwLock::new(()),
                 membership: Mutex::new(crate::identity::Membership::Unknown),
+                invites: Default::default(),
             }),
         };
         ln.start_sync_manager(nudge_rx);

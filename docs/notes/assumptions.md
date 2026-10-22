@@ -238,3 +238,11 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   `NodeEvent::RemovedFromLibrary`; one that never hears (peers cut it off first) just cannot connect. **Not done / split into M2-03b:** capability rotation (the revoked device
   keeps the namespace secret), and per-record filtering of writes authored by a revoked device (unnecessary while it cannot connect, and not possible to enforce
   per record because registers merge by LWW without an author signature). The 100k-record rotation criterion moves with it.
+- **A-062 · M2-04** · Pairing as built: ticket = `{inviter addr, 32-byte secret, expiry, role}` (`shoebox-pair1` + hex + checksum, same shape as the library ticket; this string is what a QR
+  encodes). The secret authenticates the exchange (keyed-BLAKE3 proof over both ids and a joiner nonce; the ticket is found by a key-derived 8-byte id); the six-digit code is a keyed hash of
+  secret, ids and both nonces — people compare it, and *either* side declining aborts before anything is written. The inviter consumes the ticket on a valid proof (single use), expiry
+  uses the node clock (default offered 5 min by the caller), and failed lookups are rate-limited globally (30/min, then everything is refused for a minute; per-ticket proof
+  failures burn a ticket after 5, though a ticket id cannot be guessed without the secret). The grant carries the device cert, the inviter's root-signed admin cert and the library
+  capability; the joiner verifies the chain to the capability's root key before trusting it. The role is fixed by the ticket (a camera device scanning a QR gets what the QR offers).
+  Admin rights are not granted by pairing. **Verified: loopback only.** "Through a relay" is unverified (no relay available here; the protocol is plain QUIC streams so nothing
+  relay-specific is expected). The `shoebox-dev` CLI does not use pairing yet — the keeper CLI (M2-06) will. Recovery-with-root-key still lacks its capability handoff (A-060).

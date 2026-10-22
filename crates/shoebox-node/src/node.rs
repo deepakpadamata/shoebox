@@ -65,6 +65,18 @@ pub enum NodeEvent {
         peer: EndpointId,
         phase: crate::sync::SyncPhase,
     },
+    /// A pairing attempt reached the point where both people compare `sas`.
+    PairingCode {
+        sas: String,
+        peer_name: String,
+        peer_role: shoebox_core::model::Role,
+    },
+    PairingDone {
+        peer: shoebox_core::ids::EndpointId,
+    },
+    PairingFailed {
+        reason: String,
+    },
     /// This device's own revocation reached it: it no longer belongs to the library.
     RemovedFromLibrary,
     /// A device of the library came online or went offline (from the presence topic).
@@ -312,6 +324,9 @@ struct Inner {
     lookup: MemoryLookup,
     events: broadcast::Sender<NodeEvent>,
     tracker: PeerTracker,
+    /// The endpoint secret, kept to sign device certificates as an admin (M2-04).
+    secret_seed: [u8; 32],
+    pub(crate) pair_slot: crate::pairing::PairSlot,
     /// Most recent measured round-trip time per peer.
     rtts: Mutex<HashMap<EndpointId, Duration>>,
 }
@@ -335,6 +350,8 @@ impl Node {
         }
         config.save().context("writing config.toml")?;
         let secret = load_or_create_secret(&config.key_path())?;
+        let secret_seed = secret.to_bytes();
+        let pair_slot = crate::pairing::PairSlot::default();
         let id = secret.public();
         let span = info_span!("node", id = %id.fmt_short(), name = %config.name);
         async move {
@@ -404,6 +421,7 @@ impl Node {
                 .accept(GOSSIP_ALPN, gossip.clone())
                 .accept(DOCS_ALPN, docs.clone())
                 .accept(PING_ALPN, Ping)
+                .accept(PAIR_ALPN, crate::pairing::PairProtocol(pair_slot.clone()))
                 .accept(
                     crate::doc_digest::DOC_DIGEST_ALPN,
                     crate::doc_digest::DigestProtocol { docs: docs.clone() },
@@ -424,6 +442,8 @@ impl Node {
                     lookup,
                     events,
                     tracker,
+                    secret_seed,
+                    pair_slot,
                     rtts: Mutex::new(HashMap::new()),
                 }),
             })
@@ -434,6 +454,15 @@ impl Node {
 
     pub fn id(&self) -> EndpointId {
         self.inner.id
+    }
+
+    /// This device's signing key (the endpoint key), for certificates it issues as an admin.
+    pub fn device_key(&self) -> shoebox_core::identity::KeyPair {
+        shoebox_core::identity::KeyPair::from_seed(self.inner.secret_seed)
+    }
+
+    pub(crate) fn inner_pair_slot(&self) -> &crate::pairing::PairSlot {
+        &self.inner.pair_slot
     }
 
     /// A snapshot of the current configuration.

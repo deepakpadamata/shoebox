@@ -4561,6 +4561,7 @@ dependencies = [
  "blake3",
  "bytes",
  "futures",
+ "getrandom 0.3.4",
  "hex",
  "iroh",
  "iroh-blobs",

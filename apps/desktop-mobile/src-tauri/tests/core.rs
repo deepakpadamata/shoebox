@@ -1,0 +1,346 @@
+//! M3-01/03/04: the app core end to end (no UI): creating a library, the timeline, photo detail,
+//! edits, albums, devices, health, settings and pairing between two app instances.
+
+use desktop_mobile::types::*;
+use desktop_mobile::{AppCore, AppOptions};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+fn samples() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/samples")
+}
+
+fn sample(name: &str) -> String {
+    samples().join(name).display().to_string()
+}
+
+async fn open(dir: &Path) -> Arc<AppCore> {
+    AppCore::open(dir, AppOptions::local_only()).await.unwrap()
+}
+
+async fn wait<F: FnMut() -> Fut, Fut: std::future::Future<Output = bool>>(
+    secs: u64,
+    mut f: F,
+) -> bool {
+    let end = std::time::Instant::now() + Duration::from_secs(secs);
+    while std::time::Instant::now() < end {
+        if f().await {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    false
+}
+
+async fn library_with_photos(dir: &Path) -> Arc<AppCore> {
+    let core = open(dir).await;
+    core.create_library("MacBook", "keeper").await.unwrap();
+    let report = core
+        .import_paths(&[
+            sample("photo-gps.jpg"),
+            sample("IMG_0001.jpg"),
+            sample("screenshot.png"),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(report.imported, 3, "{report:?}");
+    core
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_new_device_starts_empty_and_creating_a_library_hands_out_the_kit_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = open(dir.path()).await;
+    let st = core.app_state().await.unwrap();
+    assert!(!st.has_library && st.library_id.is_none());
+    assert!(core.library_page(None, 50).await.is_err(), "no library yet");
+
+    let created = core.create_library("MacBook", "keeper").await.unwrap();
+    assert_eq!(created.phrase.split_whitespace().count(), 24);
+    assert!(created.kit_text.contains(&created.library_id));
+    assert!(
+        core.create_library("again", "keeper").await.is_err(),
+        "only one library per device"
+    );
+
+    let st = core.app_state().await.unwrap();
+    assert!(st.has_library && st.membership == "member" && !st.recovery_kit_saved);
+    assert_eq!(st.device_name, "MacBook");
+    core.mark_recovery_kit_saved().await.unwrap();
+    assert!(core.app_state().await.unwrap().recovery_kit_saved);
+    core.shutdown().await.unwrap();
+
+    // A restart reopens the same library without asking again.
+    let again = open(dir.path()).await;
+    let st2 = again.app_state().await.unwrap();
+    assert!(st2.has_library && st2.library_id == st.library_id && st2.device_id == st.device_id);
+    again.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_timeline_pages_newest_first_and_details_say_where_a_photo_is_stored() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+
+    let page = core.library_page(None, 2).await.unwrap();
+    assert_eq!(page.items.len(), 2);
+    let next = page.next.clone().expect("a second page exists");
+    let rest = core.library_page(Some(next), 2).await.unwrap();
+    assert_eq!(rest.items.len(), 1);
+    assert!(rest.next.is_none());
+    let all: Vec<&PhotoSummary> = page.items.iter().chain(rest.items.iter()).collect();
+    assert!(
+        all.windows(2).all(|w| w[0].taken_at >= w[1].taken_at),
+        "newest first"
+    );
+    assert!(all
+        .iter()
+        .all(|p| p.has_thumb && p.has_original && p.copies == 1));
+
+    let id = &all[0].id;
+    let d = core.photo_detail(id).await.unwrap();
+    assert_eq!(d.copies, 1);
+    assert_eq!(d.redundancy_target, 2);
+    assert!(d.has_original && !d.pinned && !d.deleted);
+    assert_eq!(d.stored_on.len(), 1);
+    assert!(
+        d.stored_on[0].is_this_device && d.stored_on[0].kinds.contains(&"original".to_string())
+    );
+
+    let counts = core.counts().await.unwrap();
+    assert_eq!(
+        (counts.photos, counts.at_risk, counts.deleted),
+        (3, 3, 0),
+        "one copy < target 2"
+    );
+    core.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn favorites_deleting_restoring_pins_albums_and_settings_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    let ids: Vec<String> = core
+        .library_page(None, 10)
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+
+    core.set_favorite(&ids[..1], true).await.unwrap();
+    assert!(core.photo_detail(&ids[0]).await.unwrap().favorite);
+    assert_eq!(core.counts().await.unwrap().favorites, 1);
+
+    core.delete(&ids[1..2]).await.unwrap();
+    assert_eq!(core.library_page(None, 10).await.unwrap().items.len(), 2);
+    let bin = core.recently_deleted().await.unwrap();
+    assert_eq!(bin.len(), 1);
+    assert_eq!(bin[0].id, ids[1]);
+    core.restore(&ids[1..2]).await.unwrap();
+    assert_eq!(core.library_page(None, 10).await.unwrap().items.len(), 3);
+
+    core.pin_original(&ids[0], true).await.unwrap();
+    assert!(core.photo_detail(&ids[0]).await.unwrap().pinned);
+    core.pin_original(&ids[0], false).await.unwrap();
+    assert!(!core.photo_detail(&ids[0]).await.unwrap().pinned);
+
+    let album = core.create_album("  Summer ").await.unwrap();
+    assert_eq!(album.name, "Summer");
+    assert!(core.create_album("   ").await.is_err());
+    core.album_add(&album.id, &ids[..2]).await.unwrap();
+    let page = core.album_page(&album.id, None, 10).await.unwrap();
+    assert_eq!(page.items.len(), 2);
+    assert_eq!(core.albums().await.unwrap()[0].item_count, 2);
+    assert_eq!(
+        core.photo_detail(&ids[0]).await.unwrap().albums,
+        vec![album.id.clone()]
+    );
+    core.album_remove(&album.id, &ids[..1]).await.unwrap();
+    assert_eq!(
+        core.album_page(&album.id, None, 10)
+            .await
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+
+    core.set_redundancy_target(1).await.unwrap();
+    assert!(core.set_redundancy_target(0).await.is_err());
+    assert_eq!(core.settings().await.unwrap().redundancy_target, 1);
+    assert_eq!(
+        core.counts().await.unwrap().at_risk,
+        0,
+        "one copy meets a target of 1"
+    );
+    core.rename_device("Studio Mac").await.unwrap();
+    assert_eq!(core.settings().await.unwrap().device_name, "Studio Mac");
+    assert!(core.set_relay("http://plain.example").await.is_err());
+    core.set_relay("off").await.unwrap();
+    assert_eq!(core.settings().await.unwrap().relay, "off");
+
+    let h = core.health().await.unwrap();
+    assert_eq!(h.photos, 3);
+    assert_eq!(h.originals_here, 3);
+    assert_eq!(h.devices_total, 1);
+    core.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn blobs_are_served_whole_in_ranges_and_missing_ones_are_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    let id = core.library_page(None, 1).await.unwrap().items[0]
+        .id
+        .clone();
+
+    let thumb = core
+        .blob(&id, "thumb", None)
+        .await
+        .unwrap()
+        .expect("thumbnail is local");
+    assert_eq!(thumb.bytes.len() as u64, thumb.total);
+    assert!(thumb.range.is_none());
+    assert!(thumb.content_type.starts_with("image/"));
+    assert_eq!(thumb.etag.len(), 64);
+    assert!(
+        thumb.bytes.starts_with(&[0xFF, 0xD8])
+            || thumb.bytes.starts_with(&[0x89, b'P'])
+            || thumb.content_type == "image/webp"
+    );
+
+    let part = core
+        .blob(&id, "original", Some((10, Some(19))))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(part.bytes.len(), 10);
+    assert_eq!(part.range, Some((10, 19)));
+    let whole = core.blob(&id, "original", None).await.unwrap().unwrap();
+    assert_eq!(
+        &whole.bytes[10..20],
+        &part.bytes[..],
+        "a range is a slice of the whole"
+    );
+    let tail = core
+        .blob(&id, "original", Some((whole.total - 5, None)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(tail.bytes.len(), 5);
+    let beyond = core
+        .blob(&id, "original", Some((whole.total + 100, None)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(beyond.bytes.is_empty());
+
+    assert!(core.blob("zz", "thumb", None).await.is_err());
+    assert!(
+        core.blob(&"0".repeat(64), "thumb", None).await.is_err(),
+        "unknown photo"
+    );
+    assert!(core.blob(&id, "huge", None).await.is_err());
+    core.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_second_app_joins_by_pairing_and_the_library_follows() {
+    let (da, db) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let a = library_with_photos(da.path()).await;
+    let b = open(db.path()).await;
+
+    let start = a.pair_start("keeper").await.unwrap();
+    assert!(start.ticket.starts_with("shoebox-pair1"));
+    assert!(start.qr_svg.contains("<svg"));
+
+    // Both apps get the same six digits; both people confirm.
+    let (mut ea, mut eb) = (a.events(), b.events());
+    let a2 = a.clone();
+    let b2 = b.clone();
+    let confirm = |mut ev: tokio::sync::broadcast::Receiver<AppEvent>, core: Arc<AppCore>| {
+        tokio::spawn(async move {
+            while let Ok(e) = ev.recv().await {
+                if let AppEvent::PairingCode { sas, .. } = e {
+                    core.confirm_pairing(true).unwrap();
+                    return Some(sas);
+                }
+            }
+            None
+        })
+    };
+    let (ha, hb) = (confirm(ea.resubscribe(), a2), confirm(eb.resubscribe(), b2));
+    b.join(&start.ticket, "Pi").await.unwrap();
+    let (sa, sb) = (ha.await.unwrap().unwrap(), hb.await.unwrap().unwrap());
+    assert_eq!(sa, sb);
+    assert_eq!(sa.len(), 6);
+    let _ = (&mut ea, &mut eb);
+
+    let st = b.app_state().await.unwrap();
+    assert!(st.has_library && st.role == "keeper" && st.device_name == "Pi");
+    assert!(
+        wait(30, || async {
+            b.library_page(None, 10)
+                .await
+                .map(|p| p.items.len() == 3)
+                .unwrap_or(false)
+        })
+        .await,
+        "the new device syncs the timeline"
+    );
+    let devices = a.devices().await.unwrap();
+    assert_eq!(devices.len(), 2);
+    assert!(devices.iter().any(|d| d.name == "Pi" && d.role == "keeper"));
+    assert!(devices[0].is_this_device, "this device comes first");
+
+    // The keeper fetches the originals; the first device then sees two copies.
+    assert!(
+        wait(40, || async {
+            a.photo_detail(&a.library_page(None, 1).await.unwrap().items[0].id)
+                .await
+                .map(|d| d.copies == 2)
+                .unwrap_or(false)
+        })
+        .await,
+        "copy count follows"
+    );
+    // A pairing ticket cannot be reused and an unknown ticket is rejected with a clear message.
+    let c = tempfile::tempdir().unwrap();
+    let third = open(c.path()).await;
+    assert!(third.join(&start.ticket, "Third").await.is_err());
+    assert!(third.join("nonsense", "Third").await.is_err());
+    for core in [a, b, third] {
+        core.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn declining_the_code_leaves_the_joining_app_without_a_library() {
+    let (da, db) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let a = library_with_photos(da.path()).await;
+    let b = open(db.path()).await;
+    let start = a.pair_start("phone").await.unwrap();
+    let mut eb = b.events();
+    let b2 = b.clone();
+    let decline = tokio::spawn(async move {
+        while let Ok(e) = eb.recv().await {
+            if matches!(e, AppEvent::PairingCode { .. }) {
+                b2.confirm_pairing(false).unwrap();
+                return;
+            }
+        }
+    });
+    let err = b.join(&start.ticket, "Phone").await.unwrap_err();
+    decline.await.unwrap();
+    assert!(
+        format!("{err:#}").to_lowercase().contains("declined"),
+        "{err:#}"
+    );
+    assert!(!b.app_state().await.unwrap().has_library);
+    assert_eq!(a.devices().await.unwrap().len(), 1, "nothing was certified");
+    a.shutdown().await.unwrap();
+    b.shutdown().await.unwrap();
+}

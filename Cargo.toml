@@ -10,7 +10,7 @@ members = [
     "crates/shoebox-node",
     "crates/shoebox-testkit",
     "apps/keeper",
-    "apps/desktop-mobile",
+    "apps/desktop-mobile/src-tauri",
     "tools/store-bench",
     "tools/shoebox-dev",
     "xtask",

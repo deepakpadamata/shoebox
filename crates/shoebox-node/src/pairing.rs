@@ -391,11 +391,24 @@ async fn respond<L: LibraryStore>(
             _ => bail!("expected confirmation"),
         }
     };
-    let (mine, theirs) =
-        tokio::time::timeout(DECISION_TIMEOUT, async { tokio::join!(mine, theirs) })
-            .await
-            .map_err(|_| anyhow!("timed out waiting for confirmation"))?;
-    let theirs = theirs?;
+    // Either side declining ends it at once; otherwise wait for both.
+    let decide_both = async {
+        tokio::pin!(mine, theirs);
+        let (mut mine_ok, mut theirs_ok): (Option<bool>, Option<bool>) = (None, None);
+        while mine_ok.is_none() || theirs_ok.is_none() {
+            tokio::select! {
+                m = &mut mine, if mine_ok.is_none() => mine_ok = Some(m),
+                t = &mut theirs, if theirs_ok.is_none() => theirs_ok = Some(t?),
+            }
+            if mine_ok == Some(false) || theirs_ok == Some(false) {
+                return Ok::<(bool, bool), anyhow::Error>((false, false));
+            }
+        }
+        Ok((true, true))
+    };
+    let (mine, theirs) = tokio::time::timeout(DECISION_TIMEOUT, decide_both)
+        .await
+        .map_err(|_| anyhow!("timed out waiting for confirmation"))??;
     if !(mine && theirs) {
         let _ = write_msg(&mut send, &ToJoiner::Refused("pairing declined".into())).await;
         let _ = send.finish();

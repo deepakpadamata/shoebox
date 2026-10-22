@@ -1,2 +1,6 @@
 [alias]
 xtask = "run --package xtask --release --"
+
+[env]
+# `cargo test -p desktop-mobile` writes the TypeScript bindings of the app's shared types here.
+TS_RS_EXPORT_DIR = { value = "apps/desktop-mobile/ui/src/bindings", relative = true }

@@ -1,0 +1,67 @@
+[package]
+name = "desktop-mobile"
+description = "Shoebox desktop (and later mobile) app: the app core, a dev HTTP bridge and the Tauri shell."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "AGPL-3.0-only"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "desktop_mobile"
+path = "src/lib.rs"
+
+[[bin]]
+name = "desktop-dev-server"
+path = "src/bin/dev_server.rs"
+required-features = ["http"]
+
+[[bin]]
+name = "shoebox-desktop"
+path = "src/main.rs"
+required-features = ["tauri-app"]
+
+[features]
+default = []
+# A plain HTTP bridge to the same commands (dev, UI review in a browser, end-to-end tests).
+http = ["dep:axum", "dep:tokio-stream", "dep:tower-http", "dep:clap"]
+# The Tauri 2 shell. Needs the platform webview; see README.md.
+tauri-app = ["dep:tauri", "dep:tauri-build"]
+# Platform keystore (macOS Keychain, Windows Credential Manager, Secret Service).
+keyring = ["dep:keyring"]
+
+[dependencies]
+shoebox-core.workspace = true
+shoebox-node.workspace = true
+shoebox-store.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "net", "signal", "process"] }
+futures.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json = "1"
+hex.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ts-rs = { version = "10", features = ["serde-compat"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+axum = { version = "0.8", optional = true }
+tokio-stream = { version = "0.1", optional = true }
+tower-http = { version = "0.6", features = ["fs"], optional = true }
+tauri = { version = "2", optional = true }
+keyring = { version = "3", optional = true }
+getrandom = "0.3"
+clap = { version = "4", features = ["derive"], optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+shoebox-core = { workspace = true, features = ["testing"] }
+xtask = { path = "../../../xtask" }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+[build-dependencies]
+tauri-build = { version = "2", optional = true }
+
+[lints]
+workspace = true

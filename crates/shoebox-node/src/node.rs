@@ -355,7 +355,17 @@ pub struct Node {
 
 impl Node {
     /// Open (creating on first use) the node rooted at `config.data_dir`.
-    pub async fn open(mut config: NodeConfig) -> Result<Node> {
+    pub async fn open(config: NodeConfig) -> Result<Node> {
+        Self::open_inner(config, None).await
+    }
+
+    /// Like [`Node::open`], but with the endpoint secret supplied by the caller (for example
+    /// from the platform keystore) instead of the key file under `keys/`.
+    pub async fn open_with_secret(config: NodeConfig, secret: [u8; 32]) -> Result<Node> {
+        Self::open_inner(config, Some(secret)).await
+    }
+
+    async fn open_inner(mut config: NodeConfig, secret: Option<[u8; 32]>) -> Result<Node> {
         config.ensure_dirs().context("creating data dir layout")?;
         // Watched folders are state the app builds up at runtime, not something callers pass in:
         // keep what an earlier run saved unless the caller supplied its own list.
@@ -365,7 +375,10 @@ impl Node {
             }
         }
         config.save().context("writing config.toml")?;
-        let secret = load_or_create_secret(&config.key_path())?;
+        let secret = match secret {
+            Some(bytes) => iroh::SecretKey::from_bytes(&bytes),
+            None => load_or_create_secret(&config.key_path())?,
+        };
         let secret_seed = secret.to_bytes();
         let pair_slot = crate::pairing::PairSlot::default();
         let loro_slot = crate::ext::ExtSlot::default();

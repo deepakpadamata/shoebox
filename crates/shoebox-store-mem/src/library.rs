@@ -17,9 +17,9 @@ pub(crate) struct LibShared {
 }
 
 impl LibShared {
-    pub(crate) fn new(device: EndpointId) -> Self {
+    pub(crate) fn new(device: EndpointId, root: RootPublicKey, library: LibraryId) -> Self {
         Self {
-            state: Mutex::new(LibraryState::new(device)),
+            state: Mutex::new(LibraryState::with_root(device, root, library)),
             subs: Mutex::new(Vec::new()),
         }
     }

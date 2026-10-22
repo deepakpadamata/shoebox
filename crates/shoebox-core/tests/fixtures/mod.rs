@@ -110,6 +110,7 @@ pub fn admin_cert() -> AdminCert {
     AdminCert {
         admin: dev(1),
         hlc: hlc(50, 0, 0),
+        expires_at: None,
         signature: vec![0xCD; 4],
     }
 }

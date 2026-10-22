@@ -209,3 +209,18 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   reviewed first (the benchmark has caveats: Loro spike has no transport, no phone-class device was available, iroh-docs ≥100k fails in this setup). Work on
   M2+ continues against the `LibraryStore` trait, which is unaffected either way. The benchmark also surfaced a quadratic `Effect::touch` (fixed), that per-photo memory
   (~5 KB) is shared by both backends and needs work for phones, and that holdings should be published for originals only.
+- **A-056 · M2-01** · Identity = ed25519 (dalek 3, strict verification). Signatures cover a domain-separated, library-bound message
+  (`shoebox/{admin,device}-cert/v1` + library id + postcard of the cert fields), so a cert cannot be replayed into another library. A device cert signed by the
+  root has `added_by` = the root public key bytes. Authority is judged **at the cert's own HLC time**: the signer needs a root-signed admin cert that had
+  started and not expired by then and must not have been revoked earlier; the chain is replayed in HLC order, so the result never depends on arrival order.
+  `AdminCert` gained `expires_at: Option<Timestamp>` (golden bytes updated). A revoked admin's earlier certs stay valid; later ones do not.
+- **A-057 · M2-01** · `LibraryState` verifies certs only when it knows the root (`with_root`; all three backends pass `cap.root`/`cap.library`). Local API calls
+  (`apply_device_change`) reject bad signatures (`BadSignature`) and unauthorised signers (new `StoreError::NotAuthorized`). **Replicated** entries are kept
+  and re-judged on every change, because a device cert can arrive before the admin cert that authorises it; only broken signatures are dropped. Consequence:
+  anyone holding write access to the library space can park unauthorised-but-correctly-signed certs in memory (bounded by what they can write); they never
+  affect membership. Without a root (unit tests only) the old "non-empty signature" stub applies.
+- **A-058 · M2-01** · `shoebox-dev init` creates a random root key, self-issues an admin cert and a device cert, and keeps the root seed in `dev.json`
+  (dev tool only; real devices never store it, see M2-02). `shoebox-dev join` does not yet obtain a cert: pairing (M2-04) does that.
+- **A-059 · M2-01** · Known flake: `shoebox-store-docs` `autosync::sync_now_waits_for_a_sync_already_in_flight` (300 records, `fast()` 10 s sync timeout) fails
+  intermittently — 1 in 6 runs on the pre-M2 tree (verified with `git stash -u`), more often on a nearly full disk. It is a sync that hangs inside iroh-docs, unrelated
+  to identity. Not fixed; re-run before treating it as a regression. Worth a proper look if it appears in CI.

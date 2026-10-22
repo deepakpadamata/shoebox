@@ -10,6 +10,7 @@
 //! each original, so paging and `at_risk` do not rescan the library.
 
 use crate::hlc::{Hlc, HlcClock};
+use crate::identity::{IdentityError, TrustChain};
 use crate::ids::{Blake3Hash, EndpointId, Timestamp};
 use crate::merge::Lww;
 use crate::model::*;
@@ -86,6 +87,13 @@ impl Effect {
     }
 }
 
+fn identity_err(e: IdentityError) -> StoreError {
+    match e {
+        IdentityError::BadSignature => StoreError::BadSignature,
+        IdentityError::SignerNotAdmin | IdentityError::Expired => StoreError::NotAuthorized,
+    }
+}
+
 type TimelineKey = (Reverse<Timestamp>, PhotoId);
 
 #[derive(Clone)]
@@ -101,6 +109,9 @@ pub struct LibraryState {
     albums: BTreeMap<AlbumId, AlbumMeta>,
     devices: BTreeMap<EndpointId, DeviceCert>,
     admins: BTreeMap<EndpointId, AdminCert>,
+    /// Present once the library's root key is known: certs are then verified (M2-01) and
+    /// `devices`/`admins` only hold the ones that chain to the root.
+    chain: Option<TrustChain>,
     holdings: BTreeMap<(EndpointId, Blake3Hash), Lww<Option<BlobKind>>>,
     settings: BTreeMap<String, Lww<Vec<u8>>>,
     /// Devices currently holding each blob (any kind).
@@ -118,6 +129,22 @@ fn cert_key(c: &DeviceCert) -> (Hlc, bool, Role, &str, &[u8]) {
 }
 
 impl LibraryState {
+    /// A state that verifies device and admin certs against `root` (M2-01).
+    pub fn with_root(device: EndpointId, root: RootPublicKey, library: LibraryId) -> Self {
+        let mut s = Self::new(device);
+        s.chain = Some(TrustChain::new(root, library));
+        s
+    }
+
+    /// Whether `device` is currently certified (and not revoked). Always true when no root is
+    /// known, because nothing can be verified then.
+    pub fn is_member(&self, device: &EndpointId) -> bool {
+        match self.chain {
+            Some(_) => self.devices.get(device).is_some_and(|c| !c.revoked),
+            None => true,
+        }
+    }
+
     pub fn new(device: EndpointId) -> Self {
         Self {
             device,
@@ -133,6 +160,7 @@ impl LibraryState {
             albums: BTreeMap::new(),
             devices: BTreeMap::new(),
             admins: BTreeMap::new(),
+            chain: None,
             holdings: BTreeMap::new(),
             settings: BTreeMap::new(),
             holders_by_blob: BTreeMap::new(),
@@ -433,30 +461,82 @@ impl LibraryState {
     }
 
     pub fn apply_device_change(&mut self, change: &SignedDeviceChange) -> Result<Effect> {
-        // Stub until M2-01: only an empty signature is rejected.
-        let signature = match change {
-            SignedDeviceChange::Device(c) => &c.signature,
-            SignedDeviceChange::Admin(c) => &c.signature,
-        };
-        if signature.is_empty() {
-            return Err(StoreError::BadSignature);
-        }
         let mut fx = Effect::default();
-        match change {
-            SignedDeviceChange::Device(c) => {
-                if self.merge_device(c) {
-                    fx.change(Change::DeviceListChanged);
-                    fx.touch(Touched::Device(c.device));
+        let Some(chain) = &mut self.chain else {
+            // No root known (tests, legacy): only an empty signature is rejected.
+            let signature = match change {
+                SignedDeviceChange::Device(c) => &c.signature,
+                SignedDeviceChange::Admin(c) => &c.signature,
+            };
+            if signature.is_empty() {
+                return Err(StoreError::BadSignature);
+            }
+            match change {
+                SignedDeviceChange::Device(c) => {
+                    if self.merge_device(c) {
+                        fx.change(Change::DeviceListChanged);
+                        fx.touch(Touched::Device(c.device));
+                    }
+                }
+                SignedDeviceChange::Admin(c) => {
+                    if self.merge_admin(c) {
+                        fx.change(Change::DeviceListChanged);
+                        fx.touch(Touched::Admin(c.admin));
+                    }
                 }
             }
+            return Ok(fx);
+        };
+        match change {
             SignedDeviceChange::Admin(c) => {
-                if self.merge_admin(c) {
-                    fx.change(Change::DeviceListChanged);
-                    fx.touch(Touched::Admin(c.admin));
+                chain.check_admin(c).map_err(identity_err)?;
+                chain.add_admin(c.clone());
+            }
+            SignedDeviceChange::Device(c) => {
+                chain.check_device_cert(c).map_err(identity_err)?;
+                chain.add_device(c.clone());
+            }
+        }
+        self.refresh_chain(&mut fx);
+        Ok(fx)
+    }
+
+    /// Recompute the verified device/admin view after certs were added; touched entries are
+    /// the ones that changed.
+    fn refresh_chain(&mut self, fx: &mut Effect) {
+        let Some(chain) = &self.chain else { return };
+        let valid = chain.validate();
+        let mut admins: BTreeMap<EndpointId, AdminCert> = BTreeMap::new();
+        for a in valid.admins {
+            match admins.get(&a.admin) {
+                Some(e) if (e.hlc, &e.signature) >= (a.hlc, &a.signature) => {}
+                _ => {
+                    admins.insert(a.admin, a);
                 }
             }
         }
-        Ok(fx)
+        let devices: BTreeMap<EndpointId, DeviceCert> =
+            valid.devices.into_iter().map(|c| (c.device, c)).collect();
+        let mut changed = false;
+        for (id, cert) in &devices {
+            if self.devices.get(id) != Some(cert) {
+                self.observe(&cert.hlc);
+                fx.touch(Touched::Device(*id));
+                changed = true;
+            }
+        }
+        for (id, cert) in &admins {
+            if self.admins.get(id) != Some(cert) {
+                self.observe(&cert.hlc);
+                fx.touch(Touched::Admin(*id));
+                changed = true;
+            }
+        }
+        if changed {
+            fx.change(Change::DeviceListChanged);
+        }
+        self.devices = devices;
+        self.admins = admins;
     }
 
     /// Single writer: only this replica's own device may be written.
@@ -494,18 +574,38 @@ impl LibraryState {
         match entry {
             StateEntry::Photo(rec) => self.merge_photo(rec, &mut fx),
             StateEntry::Album(album) => self.merge_album(album, &mut fx),
-            StateEntry::Device(cert) => {
-                if self.merge_device(cert) {
-                    fx.change(Change::DeviceListChanged);
-                    fx.touch(Touched::Device(cert.device));
+            StateEntry::Device(cert) => match &mut self.chain {
+                None => {
+                    if self.merge_device(cert) {
+                        fx.change(Change::DeviceListChanged);
+                        fx.touch(Touched::Device(cert.device));
+                    }
                 }
-            }
-            StateEntry::Admin(cert) => {
-                if self.merge_admin(cert) {
-                    fx.change(Change::DeviceListChanged);
-                    fx.touch(Touched::Admin(cert.admin));
+                Some(chain) => {
+                    // A cert may arrive before the admin cert that authorises it, so it is kept
+                    // and judged on every refresh; only a broken signature is dropped.
+                    if !chain.signature_ok(cert) {
+                        return fx;
+                    }
+                    chain.add_device(cert.clone());
+                    self.refresh_chain(&mut fx);
                 }
-            }
+            },
+            StateEntry::Admin(cert) => match &mut self.chain {
+                None => {
+                    if self.merge_admin(cert) {
+                        fx.change(Change::DeviceListChanged);
+                        fx.touch(Touched::Admin(cert.admin));
+                    }
+                }
+                Some(chain) => {
+                    if chain.check_admin(cert).is_err() {
+                        return fx;
+                    }
+                    chain.add_admin(cert.clone());
+                    self.refresh_chain(&mut fx);
+                }
+            },
             StateEntry::Holding {
                 device,
                 blob,

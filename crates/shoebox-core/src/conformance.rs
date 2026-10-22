@@ -12,6 +12,7 @@
 
 use crate::clock::ManualClock;
 use crate::hlc::Hlc;
+use crate::identity::{issue_admin_cert, issue_device_cert, KeyPair};
 use crate::ids::{Blake3Hash, EndpointId, Timestamp};
 use crate::merge::{Lww, OrSet};
 use crate::model::*;
@@ -85,6 +86,7 @@ struct Node<H: Harness> {
     store: Lib<H>,
     dev: EndpointId,
     clock: ManualClock,
+    lib: LibraryId,
 }
 
 fn dev(n: u8) -> EndpointId {
@@ -100,7 +102,10 @@ fn hlc(ms: u64, d: u8) -> Hlc {
         device: dev(d),
     }
 }
-const ROOT: RootPublicKey = RootPublicKey([42; 32]);
+/// The library root key used by the suite (deterministic, so every node can sign as the root).
+fn root_key() -> KeyPair {
+    KeyPair::from_seed([42; 32])
+}
 
 fn blob(n: u8) -> BlobRef {
     BlobRef {
@@ -138,13 +143,17 @@ fn album_meta(n: u8, name: &str) -> AlbumMeta {
 async fn solo<H: Harness>(h: &H, d: u8, start_ms: u64) -> (Node<H>, LibraryCapability) {
     let clock = ManualClock::new(start_ms);
     let backend = h.backend(dev(d), clock.clone()).await;
-    let (store, cap) = backend.create_library(&ROOT).await.expect("create_library");
+    let (store, cap) = backend
+        .create_library(&root_key().root_public())
+        .await
+        .expect("create_library");
     (
         Node {
             backend,
             store,
             dev: dev(d),
             clock,
+            lib: cap.library,
         },
         cap,
     )
@@ -163,6 +172,7 @@ async fn pair<H: Harness>(h: &H) -> (Node<H>, Node<H>) {
             store,
             dev: dev(2),
             clock,
+            lib: cap.library,
         },
     )
 }
@@ -525,7 +535,7 @@ async fn change_stream_events<H: Harness>(h: &H) {
         Change::AlbumChanged(AlbumId([1; 16]))
     );
     a.store
-        .apply_device_change(SignedDeviceChange::Device(device_cert(2, 1)))
+        .apply_device_change(SignedDeviceChange::Device(device_cert(a.lib, 2, 1)))
         .await
         .unwrap();
     assert_eq!(next(&mut stream).await, Change::DeviceListChanged);
@@ -674,26 +684,57 @@ async fn delete_races_favorite<H: Harness>(h: &H) {
     }
 }
 
-fn device_cert(device: u8, hlc_ms: u64) -> DeviceCert {
-    DeviceCert {
-        device: dev(device),
-        role: Role::Keeper,
-        name: format!("device-{device}"),
-        added_by: dev(1),
-        hlc: hlc(hlc_ms, 1),
-        revoked: false,
-        signature: vec![1, 2, 3],
-    }
+/// A cert for device `device`, signed by the library root.
+fn device_cert(lib: LibraryId, device: u8, hlc_ms: u64) -> DeviceCert {
+    issue_device_cert(
+        &root_key(),
+        lib,
+        dev(device),
+        Role::Keeper,
+        &format!("device-{device}"),
+        hlc(hlc_ms, 1),
+        false,
+    )
+}
+
+async fn apply<H: Harness>(n: &Node<H>, c: SignedDeviceChange) -> Result<()> {
+    n.store.apply_device_change(c).await
 }
 
 async fn device_list_is_signed_and_order_independent<H: Harness>(h: &H) {
     let (a, b) = pair(h).await;
-    let mut unsigned = device_cert(3, 5);
+    let lib = a.lib;
+
+    // Unsigned, tampered and unauthorised certs are all refused and change nothing.
+    let mut unsigned = device_cert(lib, 3, 5);
     unsigned.signature.clear();
     assert_eq!(
-        a.store
-            .apply_device_change(SignedDeviceChange::Device(unsigned))
-            .await,
+        apply(&a, SignedDeviceChange::Device(unsigned)).await,
+        Err(StoreError::BadSignature)
+    );
+    let mut tampered = device_cert(lib, 3, 5);
+    tampered.role = Role::Phone;
+    assert_eq!(
+        apply(&a, SignedDeviceChange::Device(tampered)).await,
+        Err(StoreError::BadSignature)
+    );
+    let mallory = KeyPair::from_seed([66; 32]);
+    let forged = issue_device_cert(
+        &mallory,
+        lib,
+        dev(3),
+        Role::Keeper,
+        "evil",
+        hlc(5, 1),
+        false,
+    );
+    assert_eq!(
+        apply(&a, SignedDeviceChange::Device(forged)).await,
+        Err(StoreError::NotAuthorized)
+    );
+    let forged_admin = issue_admin_cert(&mallory, lib, mallory.endpoint_id(), hlc(1, 1), None);
+    assert_eq!(
+        apply(&a, SignedDeviceChange::Admin(forged_admin)).await,
         Err(StoreError::BadSignature)
     );
     assert_eq!(
@@ -702,36 +743,46 @@ async fn device_list_is_signed_and_order_independent<H: Harness>(h: &H) {
     );
 
     // Revocation (later HLC) wins even if it is applied before the original cert.
-    let cert = device_cert(2, 10);
-    let mut revoked = device_cert(2, 20);
-    revoked.revoked = true;
-    a.store
-        .apply_device_change(SignedDeviceChange::Device(revoked.clone()))
+    let cert = device_cert(lib, 2, 10);
+    let revoked = issue_device_cert(
+        &root_key(),
+        lib,
+        dev(2),
+        Role::Keeper,
+        "device-2",
+        hlc(20, 1),
+        true,
+    );
+    apply(&a, SignedDeviceChange::Device(revoked.clone()))
         .await
         .unwrap();
-    a.store
-        .apply_device_change(SignedDeviceChange::Device(cert.clone()))
+    apply(&a, SignedDeviceChange::Device(cert.clone()))
         .await
         .unwrap();
-    a.store
-        .apply_device_change(SignedDeviceChange::Device(cert.clone()))
+    apply(&a, SignedDeviceChange::Device(cert.clone()))
         .await
         .unwrap(); // idempotent
-    b.store
-        .apply_device_change(SignedDeviceChange::Device(cert))
+    apply(&b, SignedDeviceChange::Device(cert)).await.unwrap();
+    apply(&b, SignedDeviceChange::Device(device_cert(lib, 1, 3)))
         .await
         .unwrap();
-    b.store
-        .apply_device_change(SignedDeviceChange::Device(device_cert(1, 3)))
+
+    // An admin delegated by the root can certify further devices.
+    let admin_key = KeyPair::from_seed([7; 32]);
+    let admin = issue_admin_cert(&root_key(), lib, admin_key.endpoint_id(), hlc(1, 1), None);
+    apply(&b, SignedDeviceChange::Admin(admin.clone()))
         .await
         .unwrap();
-    let admin = AdminCert {
-        admin: dev(1),
-        hlc: hlc(1, 1),
-        signature: vec![9],
-    };
-    b.store
-        .apply_device_change(SignedDeviceChange::Admin(admin.clone()))
+    let by_admin = issue_device_cert(
+        &admin_key,
+        lib,
+        dev(3),
+        Role::Phone,
+        "phone",
+        hlc(30, 1),
+        false,
+    );
+    apply(&b, SignedDeviceChange::Device(by_admin))
         .await
         .unwrap();
 
@@ -743,7 +794,7 @@ async fn device_list_is_signed_and_order_independent<H: Harness>(h: &H) {
     assert_eq!(la, lb);
     assert_eq!(
         la.devices.iter().map(|d| d.device).collect::<Vec<_>>(),
-        vec![dev(1), dev(2)]
+        vec![dev(1), dev(2), dev(3)]
     );
     assert!(la.devices[1].revoked && la.devices[1].hlc == revoked.hlc);
     assert_eq!(la.admins, vec![admin]);

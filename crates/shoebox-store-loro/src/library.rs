@@ -29,14 +29,14 @@ pub(crate) struct LibraryShared {
 }
 
 impl LibraryShared {
-    pub(crate) fn new(device: EndpointId) -> Self {
+    pub(crate) fn new(device: EndpointId, root: RootPublicKey, library: LibraryId) -> Self {
         let doc = LoroDoc::new();
         // A stable Loro peer id per device keeps its operations in one lane.
         let peer = u64::from_le_bytes(device.0[..8].try_into().expect("8 bytes"));
         let _ = doc.set_peer_id(peer.max(1));
         Self {
             inner: Mutex::new(Inner {
-                state: LibraryState::new(device),
+                state: LibraryState::with_root(device, root, library),
                 doc,
                 author: hex_short(&device),
                 known: HashMap::new(),

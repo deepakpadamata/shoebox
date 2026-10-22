@@ -103,6 +103,7 @@ impl StoreBackend for DocsBackend {
             self.device,
             self.clock.clone(),
             Capability::Write,
+            (cap.root, cap.library),
         )
         .await?;
         Ok((library, cap))
@@ -141,6 +142,7 @@ impl StoreBackend for DocsBackend {
             self.device,
             self.clock.clone(),
             mode,
+            (cap.root, cap.library),
         )
         .await
     }

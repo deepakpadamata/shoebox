@@ -9,10 +9,14 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use shoebox_core::clock::SystemClock;
-use shoebox_core::ids::{Blake3Hash, EndpointId};
+use shoebox_core::clock::{Clock, SystemClock};
+use shoebox_core::identity::{issue_admin_cert, issue_device_cert, KeyPair};
+use shoebox_core::ids::EndpointId;
 use shoebox_core::model::{BlobKind, PhotoRecord, Role};
-use shoebox_core::store::{LibraryStore, Page, PeerAddr, RootPublicKey, StoreBackend, TimeRange};
+use shoebox_core::store::{
+    LibraryStore, Page, PeerAddr, SignedDeviceChange, StoreBackend, TimeRange,
+};
+use shoebox_core::Hlc;
 use shoebox_node::{
     FetcherConfig, ImportMode, ImportOptions, LibraryNode, LibraryTicket, MaintenanceConfig, Node,
     NodeConfig, NodeEvent, PathKind, PresenceConfig, RelaySetting,
@@ -96,6 +100,9 @@ struct DevState {
     /// The ticket that created or joined the library (its capability is what matters).
     ticket: String,
     peers: Vec<PeerAddr>,
+    /// Dev tool only: hex seed of the library root key, present on the device that ran `init`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    root_seed: Option<String>,
 }
 
 struct Session {
@@ -284,15 +291,36 @@ async fn cmd_init(cli: &Cli, name: &str, role: &str) -> Result<()> {
     let node = Node::open(node_config(cli, &dir, name, role)).await?;
     let device = EndpointId(*node.id().as_bytes());
     let backend = DocsBackend::for_node(node.clone(), SystemClock);
-    // Placeholder root key until M2 introduces real library identity.
-    let root = RootPublicKey(
-        *Blake3Hash::of_bytes(&[&device.0[..], b"dev-root"].concat())
-            .0
-            .as_slice()
-            .first_chunk::<32>()
-            .expect("32 bytes"),
-    );
-    let (library, cap) = backend.create_library(&root).await?;
+    // A real root key (M2-01). The dev tool keeps its seed in dev.json for convenience; real
+    // devices never store it (it lives only in the recovery kit, M2-02).
+    let root = KeyPair::generate();
+    let (library, cap) = backend.create_library(&root.root_public()).await?;
+    // This device is the library's first admin and first member.
+    let now = Hlc {
+        physical_ms: SystemClock.now_ms(),
+        counter: 0,
+        device,
+    };
+    library
+        .apply_device_change(SignedDeviceChange::Admin(issue_admin_cert(
+            &root,
+            cap.library,
+            device,
+            now,
+            None,
+        )))
+        .await?;
+    library
+        .apply_device_change(SignedDeviceChange::Device(issue_device_cert(
+            &root,
+            cap.library,
+            device,
+            role,
+            name,
+            now,
+            false,
+        )))
+        .await?;
     let ln =
         LibraryNode::new(node.clone(), Arc::new(library), SystemClock).with_capability(cap.clone());
     let ticket = ln.ticket()?.to_string();
@@ -301,6 +329,7 @@ async fn cmd_init(cli: &Cli, name: &str, role: &str) -> Result<()> {
         role,
         ticket: ticket.clone(),
         peers: vec![],
+        root_seed: Some(hex::encode(root.seed())),
     };
     std::fs::write(state_path(&dir), serde_json::to_string_pretty(&state)?)?;
     node.shutdown().await?;
@@ -366,6 +395,7 @@ async fn cmd_join(cli: &Cli, ticket_text: &str, name: &str, role: &str) -> Resul
         role,
         ticket: ticket_text.trim().to_string(),
         peers: ticket.peers.clone(),
+        root_seed: None,
     };
     std::fs::write(state_path(&dir), serde_json::to_string_pretty(&state)?)?;
     node.shutdown().await?;

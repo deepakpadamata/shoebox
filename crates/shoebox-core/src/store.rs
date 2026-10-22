@@ -34,6 +34,8 @@ pub enum StoreError {
     ReadOnly,
     #[error("bad signature")]
     BadSignature,
+    #[error("signer is not authorised to do this")]
+    NotAuthorized,
     #[error("invite expired")]
     Expired,
     #[error("peer unreachable: {0}")]

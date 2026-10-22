@@ -10,6 +10,7 @@ pub mod codec;
 pub mod conformance;
 pub mod entry_codec;
 pub mod hlc;
+pub mod identity;
 pub mod ids;
 pub mod library_state;
 pub mod merge;

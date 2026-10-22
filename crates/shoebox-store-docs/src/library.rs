@@ -92,11 +92,12 @@ impl DocsLibrary {
         device: EndpointId,
         clock: Arc<dyn Clock>,
         mode: Capability,
+        trust: (RootPublicKey, LibraryId),
     ) -> Result<Self> {
         let events = replica.doc.subscribe().await.map_err(backend_err)?;
         let inner = Arc::new(Inner {
             core: AsyncMutex::new(Core {
-                state: LibraryState::new(device),
+                state: LibraryState::with_root(device, trust.0, trust.1),
                 replica,
             }),
             subs: Mutex::new(vec![]),

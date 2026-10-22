@@ -127,6 +127,8 @@ pub struct DeviceCert {
 pub struct AdminCert {
     pub admin: EndpointId,
     pub hlc: Hlc,
+    /// The delegation stops being valid after this time (`None` = never expires).
+    pub expires_at: Option<Timestamp>,
     pub signature: Vec<u8>,
 }
 

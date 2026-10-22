@@ -53,13 +53,13 @@ impl MemBackend {
         }
     }
 
-    fn library(&self, id: LibraryId, mode: Capability) -> MemLibrary {
+    fn library(&self, id: LibraryId, root: RootPublicKey, mode: Capability) -> MemLibrary {
         let shared = {
             let mut inner = self.network.0.lock().unwrap();
             inner
                 .libs
                 .entry((id, self.device))
-                .or_insert_with(|| Arc::new(LibShared::new(self.device)))
+                .or_insert_with(|| Arc::new(LibShared::new(self.device, root, id)))
                 .clone()
         };
         MemLibrary::new(shared, self.network.clone(), id, self.clock.clone(), mode)
@@ -89,11 +89,11 @@ impl StoreBackend for MemBackend {
             mode: Capability::Write,
             backend: vec![],
         };
-        Ok((self.library(id, Capability::Write), cap))
+        Ok((self.library(id, *root, Capability::Write), cap))
     }
 
     async fn open_library(&self, cap: &LibraryCapability) -> Result<MemLibrary> {
-        Ok(self.library(cap.library, cap.mode))
+        Ok(self.library(cap.library, cap.root, cap.mode))
     }
 
     async fn create_album(&self, meta: SharedAlbumMeta) -> Result<MemAlbum> {

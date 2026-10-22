@@ -13,6 +13,7 @@ pub mod ids;
 pub mod library_state;
 pub mod merge;
 pub mod model;
+pub mod policy;
 pub mod store;
 
 pub use hlc::{Hlc, HlcClock};

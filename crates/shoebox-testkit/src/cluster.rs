@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Result};
 use shoebox_core::clock::ManualClock;
+use shoebox_core::model::Role;
 use shoebox_node::{Node, NodeConfig};
 use std::collections::HashSet;
 use std::future::Future;
@@ -20,11 +21,17 @@ pub struct Cluster {
 
 impl Cluster {
     pub async fn new(n: usize) -> Result<Cluster> {
+        Self::with_roles(&vec![Role::Keeper; n]).await
+    }
+
+    /// One node per role, in order (node `i` gets `roles[i]`).
+    pub async fn with_roles(roles: &[Role]) -> Result<Cluster> {
         let dir = tempfile::tempdir()?;
-        let mut nodes = Vec::with_capacity(n);
-        for i in 0..n {
-            let cfg =
+        let mut nodes = Vec::with_capacity(roles.len());
+        for (i, role) in roles.iter().enumerate() {
+            let mut cfg =
                 NodeConfig::local_only(dir.path().join(format!("node-{i}")), format!("node-{i}"));
+            cfg.role = *role;
             nodes.push(Node::open(cfg).await?);
         }
         for a in &nodes {

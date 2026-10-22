@@ -35,6 +35,7 @@ shoebox-core = { workspace = true, features = ["testing"] }
 shoebox-store-docs = { path = ".", features = ["testing"] }
 shoebox-testkit.workspace = true
 tempfile.workspace = true
+xtask = { path = "../../xtask" }
 
 [lints]
 workspace = true

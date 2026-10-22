@@ -32,6 +32,9 @@ pub struct NodeConfig {
     /// Folders imported automatically whenever files appear in them.
     #[serde(default)]
     pub watched_folders: Vec<PathBuf>,
+    /// Originals (photo ids, hex) the user pinned on this device; never replicated.
+    #[serde(default)]
+    pub pinned_originals: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -54,6 +57,7 @@ impl NodeConfig {
             mdns: false,
             gc_interval_ms: default_gc_interval_ms(),
             watched_folders: vec![],
+            pinned_originals: vec![],
         }
     }
 

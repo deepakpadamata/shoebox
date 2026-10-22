@@ -3834,6 +3834,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "xtask",
 ]
 
 [[package]]

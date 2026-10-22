@@ -168,3 +168,13 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   after the request* counts, and a stale finish triggers a fresh request. (3) iroh-docs fetches an entry's content once per sync run and
   never retries, so the replica fetches content that has been missing for 750 ms itself, from peers it has exchanged entries with, retrying
   every 4 s and rescanning every 500 ms while anything is pending. Flake rate went from ~15% to 0 in 90 consecutive runs.
+- **A-048 · M1-12** · The fetch policy is `shoebox_core::policy` (pure): Keeper = all; Phone = thumbs+previews, plus an original only when pinned or
+  it is this phone's own capture with fewer copies than the redundancy target; Viewer = thumbs+previews. Shared-album items: previews, and the
+  original (or the location-stripped `shared_hash` copy) only for Keepers with "keep originals". Videos use the original as thumb/preview until
+  M3-10, so a viewer *does* have to be able to open them on demand, but never pulls them in the background (the placeholder is only ever
+  planned as an original). Queue order: all thumbs → all previews → all originals, newest first. Holder choice: best network path (LAN >
+  direct > relay > unknown), then most recently seen, then id; failures fall through to the next holder, and a failed blob cools down for `retry`.
+- **A-049 · M1-12** · Pins are per-device and live in `config.toml` (`pinned_originals`), not replicated. iroh reports download progress as
+  "bytes available" (local + received) and requests only missing ranges, so resumption is verified by the first progress event starting at the
+  already-held half (a 32 MB blob with its first 16 MB pre-imported). `missing_blobs` lists the whole library each pass (O(n) records cloned),
+  fine for the prototype but a candidate for an incremental index at 100k+ photos (M1-15 will say).

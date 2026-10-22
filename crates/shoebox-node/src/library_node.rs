@@ -32,6 +32,7 @@ pub(crate) struct Inner<L: LibraryStore> {
     pub(crate) cap: Mutex<Option<LibraryCapability>>,
     pub(crate) presence: Mutex<Option<crate::presence::PresenceState>>,
     pub(crate) devices: Mutex<HashMap<EndpointId, crate::presence::DeviceRecord>>,
+    pub(crate) fetcher: crate::fetcher::FetcherState,
 }
 
 pub struct LibraryNode<L: LibraryStore> {
@@ -76,6 +77,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 cap: Mutex::new(None),
                 presence: Mutex::new(None),
                 devices: Mutex::new(HashMap::new()),
+                fetcher: Default::default(),
             }),
         };
         ln.start_sync_manager(nudge_rx);

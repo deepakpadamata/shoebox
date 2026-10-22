@@ -17,6 +17,8 @@ export const app = $state({
   pairVersion: 0,
   importProgress: null as null | { done: number; total: number },
   removed: false,
+  backup: null as null | import('./api').BackupStatus,
+  backupProgress: null as null | { done: number; total: number },
   /** What the sync manager is doing right now: peers mid-sync, and the last failure. */
   syncing: [] as string[],
   syncError: '',
@@ -37,7 +39,10 @@ export function fail(e: unknown) {
 
 export async function refreshState() {
   app.state = await api.appState();
-  if (app.state.has_library) app.counts = await api.counts();
+  if (app.state.has_library) {
+    app.counts = await api.counts();
+    app.backup = await api.backupStatus().catch(() => null);
+  }
 }
 
 let countsTimer: ReturnType<typeof setTimeout> | undefined;
@@ -67,6 +72,12 @@ function handle(e: AppEvent) {
       app.version++;
     } else if ('PeerConnected' in e || 'PeerDisconnected' in e) {
       app.devicesVersion++;
+    } else if ('BackupProgress' in e) {
+      const { done, total } = e.BackupProgress;
+      app.backupProgress = done >= total ? null : { done, total };
+      app.version++;
+    } else if ('BackupPaused' in e) {
+      if (app.backup) app.backup = { ...app.backup, paused: e.BackupPaused.reason };
     } else if ('Sync' in e) {
       const { peer, phase } = e.Sync;
       if (phase === 'Started') {

@@ -106,20 +106,21 @@ impl AppCore {
     }
 
     pub async fn backup_status(&self) -> Result<BackupStatus> {
-        let st = self.backup.lock().await;
-        let (permission, paused) = match self.photo_source.lock().unwrap().clone() {
+        let source = self.photo_source.lock().unwrap().clone();
+        let (permission, conditions) = match source {
             None => ("unavailable".to_string(), None),
             Some(src) => {
-                drop(st);
                 let perm = src.permission().await.unwrap_or(Permission::Denied);
-                let cond = src.conditions().await.ok();
-                let st = self.backup.lock().await;
-                let paused = cond
-                    .and_then(|c| pause_reason(&st.policy, &c))
-                    .map(String::from);
-                return Ok(self.status_of(&st, format!("{perm:?}").to_lowercase(), paused));
+                (
+                    format!("{perm:?}").to_lowercase(),
+                    src.conditions().await.ok(),
+                )
             }
         };
+        let st = self.backup.lock().await;
+        let paused = conditions
+            .and_then(|c| pause_reason(&st.policy, &c))
+            .map(String::from);
         Ok(self.status_of(&st, permission, paused))
     }
 

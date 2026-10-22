@@ -116,7 +116,10 @@ pub fn run() {
         )
         .init();
 
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(crate::android_photos::init());
+    let app = builder
         .invoke_handler(tauri::generate_handler![command])
         .register_asynchronous_uri_scheme_protocol("shoebox", |ctx, request, responder| {
             let core = ctx.app_handle().try_state::<Core>().map(|c| c.0.clone());
@@ -179,6 +182,15 @@ pub fn run() {
                     let _ = handle.emit("app-event", ev);
                 }
             });
+            #[cfg(target_os = "android")]
+            {
+                // `set_photo_source` starts a background task: do it inside the runtime.
+                let source = std::sync::Arc::new(crate::android_photos::AndroidPhotoSource(
+                    app.state::<crate::android_photos::PhotoLibrary>().0.clone(),
+                ));
+                let core = core.clone();
+                tauri::async_runtime::block_on(async move { core.set_photo_source(source) });
+            }
             app.manage(Core(core));
             Ok(())
         })

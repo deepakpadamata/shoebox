@@ -3,6 +3,9 @@
 import type { AlbumInfo } from '../bindings/AlbumInfo';
 import type { AppEvent } from '../bindings/AppEvent';
 import type { AppState } from '../bindings/AppState';
+import type { BackupPolicy } from '../bindings/BackupPolicy';
+import type { BackupReport } from '../bindings/BackupReport';
+import type { BackupStatus } from '../bindings/BackupStatus';
 import type { CreatedLibrary } from '../bindings/CreatedLibrary';
 import type { DeviceInfo } from '../bindings/DeviceInfo';
 import type { ExportReport } from '../bindings/ExportReport';
@@ -18,7 +21,7 @@ import type { PhotoSummary } from '../bindings/PhotoSummary';
 import type { Settings } from '../bindings/Settings';
 
 export type {
-  AlbumInfo, AppEvent, AppState, CreatedLibrary, DeviceInfo, ExportReport, FreeUpReport, Health, ImportSummary,
+  AlbumInfo, AppEvent, BackupPolicy, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, ExportReport, FreeUpReport, Health, ImportSummary,
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Settings,
 };
 
@@ -113,6 +116,9 @@ export const api = {
   renameDevice: (name: string) => call<{}>('rename_device', { name }),
   renameAlbum: (album: string, name: string) => call<{}>('rename_album', { album, name }),
   setPoster: (id: string, data: string) => call<{}>('set_poster', { id, data }),
+  backupStatus: () => call<BackupStatus>('backup_status'),
+  backupConfigure: (policy: BackupPolicy) => call<BackupStatus>('backup_configure', { policy }),
+  backupRun: () => call<BackupReport>('backup_run'),
   exportLibrary: (dest: string) => call<ExportReport>('export_library', { dest }),
   watchFolder: (dir: string) => call<{}>('watch_folder', { dir }),
 };

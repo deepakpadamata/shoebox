@@ -1,6 +1,9 @@
 /* Design tokens, ported from design/mockups/assets/mockup.css (M3-05), with a dark scheme. */
 
 :root {
+  /* System bars / notch. On Android the shell reports them (see main.ts); elsewhere env() works. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
   --bg: #ecebe6;
   --surface: #ffffff;
   --surface-2: #f5f4f0;

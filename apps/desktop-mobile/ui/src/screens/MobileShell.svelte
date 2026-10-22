@@ -51,6 +51,8 @@
     <div class="banners"><Banner tone="risk" icon="⛔">This device was removed from the library.</Banner></div>
   {:else if atRisk > 0 && sec === 'library'}
     <div class="banners"><Banner tone="risk" action="View" onaction={() => go('health')}><b>{plural(atRisk, 'photo')}</b> not backed up on enough devices yet.</Banner></div>
+  {:else if app.backup && app.backup.permission !== 'unavailable' && !app.backup.policy.enabled && sec === 'library'}
+    <div class="banners"><Banner tone="info" icon="☁︎" action="Turn on" onaction={() => go('settings')}>Back up your camera roll to your other devices.</Banner></div>
   {:else if app.state && !app.state.recovery_kit_saved && sec === 'library'}
     <div class="banners"><Banner tone="accent" icon="🔑" action="I saved it" onaction={() => (kitOpen = true)}>Confirm you saved your recovery kit.</Banner></div>
   {/if}
@@ -90,7 +92,7 @@
 </Sheet>
 
 <style>
-  .phone { display: flex; flex-direction: column; height: 100%; background: var(--surface); padding-top: env(safe-area-inset-top); }
+  .phone { display: flex; flex-direction: column; height: 100%; background: var(--surface); padding-top: var(--safe-top); }
   .navbar { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 6px 16px 10px; gap: 10px; }
   .navbar h2 { margin: 0; font-size: 28px; letter-spacing: -0.02em; }
   .back { background: none; border: 0; color: var(--accent); font-size: 15px; padding: 0; cursor: pointer; }
@@ -98,7 +100,7 @@
   .badge { position: absolute; right: -1px; top: -1px; width: 10px; height: 10px; border-radius: 50%; background: var(--risk); border: 2px solid var(--surface); }
   .banners { padding: 0 16px 8px; }
   .content { flex: 1; min-height: 0; overflow: hidden; }
-  .tabbar { flex: none; display: flex; justify-content: space-around; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface); }
+  .tabbar { flex: none; display: flex; justify-content: space-around; padding: 8px 0 calc(8px + var(--safe-bottom)); border-top: 1px solid var(--line); background: var(--surface); }
   .t { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10px; color: var(--ink-3); text-decoration: none; min-width: 64px; }
   .t .i { font-size: 20px; line-height: 1; }
   .t.on { color: var(--accent); }

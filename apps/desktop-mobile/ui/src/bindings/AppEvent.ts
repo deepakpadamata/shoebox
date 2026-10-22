@@ -3,4 +3,4 @@
 /**
  * Everything the UI is told about as it happens.
  */
-export type AppEvent = "LibraryChanged" | "DevicesChanged" | { "PeerConnected": { id: string, } } | { "PeerDisconnected": { id: string, } } | { "Sync": { peer: string, phase: string, } } | { "Fetched": { photo: string | null, kind: string, } } | { "ImportProgress": { done: number, total: number, } } | { "PairingCode": { sas: string, peer_name: string, peer_role: string, } } | "PairingDone" | { "PairingFailed": { reason: string, } } | "RemovedFromLibrary" | "LibraryRotated";
+export type AppEvent = "LibraryChanged" | "DevicesChanged" | { "PeerConnected": { id: string, } } | { "PeerDisconnected": { id: string, } } | { "Sync": { peer: string, phase: string, } } | { "Fetched": { photo: string | null, kind: string, } } | { "ImportProgress": { done: number, total: number, } } | { "PairingCode": { sas: string, peer_name: string, peer_role: string, } } | "PairingDone" | { "PairingFailed": { reason: string, } } | "RemovedFromLibrary" | "LibraryRotated" | { "BackupProgress": { done: number, total: number, } } | { "BackupPaused": { reason: string | null, } };

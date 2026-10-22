@@ -155,8 +155,8 @@
   .overlay { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.7); padding: 10px 14px; border-radius: 12px; display: flex; flex-direction: column; gap: 4px; align-items: center; font-size: 13px; }
   .info { width: 320px; flex: none; background: var(--surface); color: var(--ink); padding: 18px 16px; overflow: auto; border-left: 1px solid var(--line); }
   @media (max-width: 720px) {
-    .viewer { flex-direction: column; padding-top: env(safe-area-inset-top); }
-    .info { width: auto; max-height: 48vh; border-left: 0; border-top: 1px solid var(--line); border-radius: 18px 18px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+    .viewer { flex-direction: column; padding-top: var(--safe-top); }
+    .info { width: auto; max-height: 48vh; border-left: 0; border-top: 1px solid var(--line); border-radius: 18px 18px 0 0; padding-bottom: calc(18px + var(--safe-bottom)); }
     .media { padding: 52px 4px 8px; }
     img, video { max-height: calc(100vh - 140px); }
     .nav { display: none; }

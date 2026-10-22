@@ -7,6 +7,7 @@
   import List from '../components/List.svelte';
   import Row from '../components/Row.svelte';
   import Segmented from '../components/Segmented.svelte';
+  import BackupCard from '../components/BackupCard.svelte';
 
   let s = $state<Settings | null>(null);
   let name = $state('');
@@ -59,6 +60,8 @@
 
 <div class="page">
   {#if s}
+    <BackupCard />
+
     <div class="section">This device</div>
     <div class="card pad stack">
       <span class="small muted">Name</span>

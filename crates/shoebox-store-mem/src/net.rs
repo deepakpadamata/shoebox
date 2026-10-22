@@ -62,14 +62,7 @@ impl MemBackend {
                 .or_insert_with(|| Arc::new(LibShared::new(self.device)))
                 .clone()
         };
-        MemLibrary::new(
-            shared,
-            self.network.clone(),
-            id,
-            self.device,
-            self.clock.clone(),
-            mode,
-        )
+        MemLibrary::new(shared, self.network.clone(), id, self.clock.clone(), mode)
     }
 }
 

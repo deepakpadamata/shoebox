@@ -11,7 +11,7 @@
 </script>
 
 <button class="tile" class:selected style="width:{size}px;height:{size}px" {onclick} aria-label="Photo" aria-pressed={selecting ? selected : undefined}>
-  {#if hasThumb}
+  {#if hasThumb && !video}
     <img src={blobUrl(id, 'thumb')} alt="" loading="lazy" decoding="async" draggable="false" />
   {:else}
     <span class="placeholder" aria-hidden="true"></span>
@@ -27,6 +27,7 @@
   .tile { position: relative; overflow: hidden; padding: 0; border: 0; background: var(--surface-2); cursor: pointer; display: block; }
   img { width: 100%; height: 100%; object-fit: cover; display: block; user-select: none; }
   .placeholder { position: absolute; inset: 0; background: linear-gradient(135deg, var(--surface-2), var(--surface-3)); }
+  /* Videos have no poster frame yet (M3-10): a neutral tile with the play mark. */
   .b { position: absolute; right: 4px; bottom: 4px; font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 6px; background: rgba(0,0,0,.55); color: #fff; }
   .b.risk { background: var(--risk); color: #fff; }
   .b.sync { background: var(--info); color: #fff; }

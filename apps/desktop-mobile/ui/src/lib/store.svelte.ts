@@ -13,6 +13,8 @@ export const app = $state({
   /** Peers currently connected, by device id (for the "n devices online" line). */
   pairing: null as null | { sas: string; peer_name: string; peer_role: string },
   pairingError: '',
+  /** Bumped when a pairing this device took part in finished. */
+  pairVersion: 0,
   importProgress: null as null | { done: number; total: number },
   removed: false,
   /** What the sync manager is doing right now: peers mid-sync, and the last failure. */
@@ -52,6 +54,7 @@ function handle(e: AppEvent) {
     app.removed = true;
   } else if (e === 'PairingDone') {
     app.pairing = null;
+    app.pairVersion++;
     refreshState().catch(() => {});
   } else if (typeof e === 'object') {
     if ('PairingCode' in e) app.pairing = e.PairingCode;

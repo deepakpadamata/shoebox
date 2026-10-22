@@ -48,10 +48,16 @@
   }
 
   // The sheet closes itself once the pairing finished (the list refreshes through the event).
+  let pairSeen = app.pairVersion;
   $effect(() => {
-    if (addOpen && pair && !app.pairing && app.devicesVersion >= 0 && devices.length) {
-      /* nothing: kept open until the user closes it or the ticket is used */
-    }
+    const v = app.pairVersion;
+    untrack(() => {
+      if (addOpen && v > pairSeen) {
+        toast('Device added');
+        closeAdd();
+      }
+      pairSeen = v;
+    });
   });
 
   function closeAdd() {

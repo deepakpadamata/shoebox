@@ -292,3 +292,22 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   (10/min, then refusal). The device is found through a `PeerLink` (`shoebox-peer1…`, no secret) that a surviving device shows (`LibraryNode::peer_link`, `shoebox-keeper address`). Not covered: finding a
   surviving device automatically (mDNS/relay lookup by library) and recovery when *no* device survives (the data is gone by design; the kit only restores identity). Recovering onto a rotated library works (the
   member answers with its current epoch). `shoebox-keeper recover` is the CLI entry.
+- **A-069 · M3 (architecture)** · The desktop app is `AppCore` (all logic, no UI toolkit) + two thin adapters: the Tauri shell and an HTTP bridge (feature `http`). Both call the same
+  `commands::dispatch(name, json)`, so what the browser-based review and the end-to-end tests exercise is what the shell runs. The UI therefore talks to the core through **one** `command`
+  invoke / `POST /api/<command>` and one event channel (`app-event` / `/events` SSE); `ui/src/lib/api.ts` is the typed client. Blobs go through `shoebox://localhost/blob/<photo id>?kind=…`
+  (`http://shoebox.localhost/…` on Windows and Android). The dev bridge listens on loopback only and is not part of a shipped app. Verified in a browser pane against the real core: onboarding, kit,
+  timeline with 9.5k photos, viewer, devices (QR + code check between two live instances), storage, settings, live updates over SSE. **Not verified:** anything that needs the actual Tauri window
+  (rendering in WKWebView/WebView2/WebKitGTK, the `shoebox://` scheme in a real webview, tray, Keychain prompts, single-instance across launches).
+- **A-070 · M3-01** · The app keeps its own `app.json` (device name, role, library ticket, relay) under the app data dir and does not read `shoebox-dev`'s `dev.json`; "opens an existing dev
+  library created with `shoebox-dev`" is therefore not met (the formats differ and the dev tool keeps the root seed in the file). A one-off import command would be small but was not built.
+  Single instance = an exclusive `app.lock` file in the data dir (second launch exits); the OS-level "focus the first window" is not wired. Closing the window hides it (tray keeps syncing).
+- **A-071 · M3-03** · TypeScript bindings come from `ts-rs` (`#[ts(export)]` on the shared types, written to `ui/src/bindings` by `cargo test`, `git diff --exit-code` in CI) instead of `tauri-specta`:
+  the command surface is one generic `command(name, args)` shared with the HTTP bridge, which specta's per-command generation does not fit. Argument shapes are checked at run time (`commands.rs`
+  `arg`/`opt`), results are typed on the TS side. A mismatch in a *result* type fails the build; a mismatch in an *argument* only fails when called. 64-bit numbers cross as JSON numbers
+  (`f64` in the bindings): fine for millisecond timestamps and sizes, not for ids (those are hex strings).
+- **A-072 · M3-07** · The recovery phrase exists only in the `create_library` result and the onboarding screen's memory: the root key is dropped on the Rust side and nothing is stored, so a reload
+  before "Continue" loses it (the library exists; the kit was never saved). The reminder banner can only ask the user to confirm they saved it. Mockup 1d's import/role step is replaced by the
+  Import button in the toolbar. The `AppCore` `recover` path (phrase + `shoebox-peer1…` link) is in the UI; automatic discovery of a surviving device is not.
+- **A-073 · M3 (UI behaviour)** · The timeline loads every page (2,000 per request) into memory and lays out by day; it reloads (debounced) on `LibraryChanged`. Fine for tens of thousands of photos,
+  not yet incremental for 500k (a windowed fetch is the next step). Delete = "Recently Deleted" (restorable, purged after 30 days by the node's maintenance); there is no manual purge. Video tiles
+  show a neutral tile (no poster frame, M3-10). The export names files `<date>_<time>_<id8>.<ext>` because original file names are not stored in the library.

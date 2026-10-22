@@ -96,7 +96,7 @@
         <!-- svelte-ignore a11y_media_has_caption -->
         <video src={blobUrl(photo.id, 'original')} controls autoplay></video>
       {:else}
-        {#key photo.id}<img {src} alt="" style="transform: translateY({pullY}px) scale({zoom}); opacity: {1 - Math.min(0.5, pullY / 400)}" ondblclick={() => (zoom = zoom > 1 ? 1 : 2.5)} />{/key}
+        {#key photo.id}<img {src} alt={`${photo.is_video ? 'Video' : 'Photo'} from ${dateTime(photo.taken_at)}`} style="transform: translateY({pullY}px) scale({zoom}); opacity: {1 - Math.min(0.5, pullY / 400)}" ondblclick={() => (zoom = zoom > 1 ? 1 : 2.5)} />{/key}
       {/if}
       {#if detail && !originalReady}
         <div class="overlay">

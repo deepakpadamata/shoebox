@@ -3,14 +3,36 @@
   interface Props { title?: string; open: boolean; onclose: () => void; width?: number; children: Snippet; }
   import { viewport } from '../lib/viewport.svelte';
   let { title, open, onclose, width = 460, children }: Props = $props();
-  function key(e: KeyboardEvent) { if (e.key === 'Escape') onclose(); }
+  let box: HTMLDivElement | undefined = $state();
+  let opener: Element | null = null;
+  const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  // A dialog takes focus when it opens, keeps it inside (Tab wraps) and gives it back on close.
+  $effect(() => {
+    if (open && box) {
+      opener = document.activeElement;
+      const first = box.querySelector<HTMLElement>('input, textarea, ' + FOCUSABLE) ?? box;
+      first.focus({ preventScroll: true });
+      return () => { (opener as HTMLElement | null)?.focus?.({ preventScroll: true }); };
+    }
+  });
+  function key(e: KeyboardEvent) {
+    if (!open) return;
+    if (e.key === 'Escape') onclose();
+    if (e.key === 'Tab' && box) {
+      const items = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (items.length === 0) return;
+      const [first, last] = [items[0], items[items.length - 1]];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
 </script>
 
 <svelte:window onkeydown={key} />
 
 {#if open}
   <div class="scrim" role="presentation" onclick={onclose}></div>
-  <div class="sheet" class:bottom={viewport.mobile} role="dialog" aria-modal="true" aria-label={title} style={viewport.mobile ? '' : `width:min(${width}px, 94vw)`}>
+  <div class="sheet" bind:this={box} tabindex="-1" class:bottom={viewport.mobile} role="dialog" aria-modal="true" aria-label={title} style={viewport.mobile ? '' : `width:min(${width}px, 94vw)`}>
     {#if title}<div class="head"><b>{title}</b><button class="x" aria-label="Close" onclick={onclose}>✕</button></div>{/if}
     <div class="body">{@render children()}</div>
   </div>

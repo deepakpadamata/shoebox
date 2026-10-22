@@ -10,14 +10,14 @@
   --surface-3: #e6e3dc;
   --ink: #1d1c1a;
   --ink-2: #5e5b55;
-  --ink-3: #9a968e;
+  --ink-3: #6e6a62;
   --line: #e2e0da;
-  --accent: #c8691c; /* shoebox cardboard / amber */
+  --accent: #a9540f; /* shoebox cardboard / amber (darkened from the mockup for 4.5:1 text contrast) */
   --accent-ink: #ffffff;
   --accent-soft: #fbeedf;
-  --ok: #2f8a4c;
+  --ok: #287a42;
   --ok-soft: #e3f3e7;
-  --warn: #b7791f;
+  --warn: #8a5a0c;
   --warn-soft: #fbf1dc;
   --risk: #c2412d;
   --risk-soft: #fbe6e1;
@@ -39,7 +39,7 @@
   --surface-3: #33312d;
   --ink: #f1efe9;
   --ink-2: #b2aea5;
-  --ink-3: #7d7a72;
+  --ink-3: #96938b;
   --line: #34322e;
   --accent: #e08a3c;
   --accent-ink: #1b1005;
@@ -65,7 +65,7 @@
     --surface-3: #33312d;
     --ink: #f1efe9;
     --ink-2: #b2aea5;
-    --ink-3: #7d7a72;
+    --ink-3: #96938b;
     --line: #34322e;
     --accent: #e08a3c;
     --accent-ink: #1b1005;
@@ -159,4 +159,16 @@ a {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Motion is optional: people who ask for less get none. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

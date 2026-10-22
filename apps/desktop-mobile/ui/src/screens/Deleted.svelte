@@ -6,6 +6,7 @@
   import { app, fail, toast } from '../lib/store.svelte';
   import Tile from '../components/Tile.svelte';
   import Button from '../components/Button.svelte';
+  import { go } from '../lib/route.svelte';
 
   let items = $state<PhotoSummary[]>([]);
   let selected = $state<string[]>([]);
@@ -26,7 +27,7 @@
 
 <div class="page">
   {#if items.length === 0}
-    <div class="empty"><b>Nothing here</b><span class="muted">Deleted photos stay for 30 days, then are removed from every device.</span></div>
+    <div class="empty"><b>Nothing here</b><span class="muted">Deleted photos stay for 30 days, then are removed from every device.</span><div style="margin-top:10px"><Button onclick={() => go('library')}>Back to the library</Button></div></div>
   {:else}
     <div class="row-flex bar">
       <span class="grow muted small">{plural(items.length, 'photo')} · removed from every device after 30 days</span>

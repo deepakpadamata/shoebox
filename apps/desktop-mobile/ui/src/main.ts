@@ -1,6 +1,7 @@
 import { mount } from 'svelte';
 import './app.css';
 import App from './App.svelte';
+import { applyTextSize, savedTextSize } from './lib/textsize';
 
 // The Android WebView does not report the status and navigation bars through env(): the shell
 // exposes them (`ShoeboxInsets`, see MainActivity.kt) and they become the --safe-* variables.
@@ -15,5 +16,7 @@ function applyInsets() {
 applyInsets();
 addEventListener('resize', applyInsets);
 setTimeout(applyInsets, 300);
+
+applyTextSize(savedTextSize());
 
 export default mount(App, { target: document.getElementById('app')! });

@@ -8,6 +8,8 @@
   import { longPressDrag, pinch, stepDensity } from '../lib/gestures';
   import { viewport as media } from '../lib/viewport.svelte';
   import { app, fail, toast } from '../lib/store.svelte';
+  import ProgressBar from '../components/ProgressBar.svelte';
+  import { go } from '../lib/route.svelte';
   import Tile from '../components/Tile.svelte';
   import Button from '../components/Button.svelte';
   import Sheet from '../components/Sheet.svelte';
@@ -54,6 +56,26 @@
     if (id && !selectedSet.has(id)) selected = [...selected, id];
     lastClicked = i;
   }
+  // First sync: a new device has the list of photos long before it has their previews.
+  let samples = $state<{ t: number; n: number }[]>([]);
+  const wantThumbs = $derived(items.filter((p) => !p.is_video));
+  const missingThumbs = $derived(wantThumbs.filter((p) => !p.has_thumb).length);
+  $effect(() => {
+    const n = missingThumbs;
+    const t = Date.now();
+    untrack(() => { samples = [...samples.filter((s) => t - s.t < 120_000), { t, n }]; });
+  });
+  const gettingEta = $derived.by(() => {
+    if (samples.length < 2) return '';
+    const [a, b] = [samples[0], samples[samples.length - 1]];
+    const dt = (b.t - a.t) / 1000;
+    const rate = (a.n - b.n) / dt;
+    if (!(rate > 0) || dt < 5) return '';
+    const s = Math.ceil(b.n / rate);
+    return s < 90 ? ' about a minute left' : s < 3600 ? ` about ${Math.ceil(s / 60)} min left` : ` about ${Math.ceil(s / 3600)} h left`;
+  });
+  const firstSync = $derived(source === 'all' && wantThumbs.length > 0 && missingThumbs > 0 && app.peersOnline > 0);
+
   const layout = $derived(buildLayout(items, { width, minTile, gap: GAP, headHeight: HEAD }));
   const range = $derived(visibleRows(layout, scrollTop, viewport));
   const shown = $derived(layout.rows.slice(range[0], range[1]));
@@ -160,6 +182,13 @@
 <svelte:window onkeydown={keydown} />
 
 <div class="wrap">
+  {#if firstSync && !selecting}
+    <div class="getting" role="status">
+      <b>Getting your photos</b>
+      <span class="muted small">{(wantThumbs.length - missingThumbs).toLocaleString('en')} of {wantThumbs.length.toLocaleString('en')} previews are on this device.{gettingEta}</span>
+      <ProgressBar total={wantThumbs.length} segments={[{ value: wantThumbs.length - missingThumbs, tone: 'info' }]} label="Previews downloaded" />
+    </div>
+  {/if}
   {#if selecting}
     <div class="selbar">
       <b>{selected.length} selected</b>
@@ -184,7 +213,19 @@
     {:else if items.length === 0}
       <div class="empty">
         <b>{source === 'favorites' ? 'No favorites yet' : source === 'album' ? 'This album is empty' : 'No photos yet'}</b>
-        <span class="muted">{source === 'all' ? 'Import a folder from the toolbar, or pair a phone to start backing up.' : 'Select photos in your library and add them here.'}</span>
+        <span class="muted">{source === 'all' ? 'Bring photos in from a folder, or add another device to start backing up.' : source === 'favorites' ? 'Tap the heart on a photo to find it here quickly.' : 'Select photos in your library and add them here.'}</span>
+        {#if source === 'all'}
+          <div class="row-flex" style="justify-content:center;margin-top:10px">
+            {#if media.mobile}
+              <Button kind="primary" onclick={() => go(app.backup && app.backup.permission !== 'unavailable' ? 'settings' : 'devices')}>{app.backup && app.backup.permission !== 'unavailable' ? 'Turn on camera backup' : 'Add a device'}</Button>
+            {:else}
+              <Button kind="primary" onclick={() => app.importRequest++}>Import photos</Button>
+              <Button onclick={() => go('devices')}>Add a device</Button>
+            {/if}
+          </div>
+        {:else}
+          <div style="margin-top:10px"><Button kind="primary" onclick={() => go('library')}>Open the library</Button></div>
+        {/if}
       </div>
     {:else}
       <div class="canvas" style="height:{layout.height}px">
@@ -197,7 +238,7 @@
             <div class="tiles" style="top:{row.top}px;height:{row.height}px;gap:{GAP}px">
               {#each items.slice(row.from, row.to) as p, k (p.id)}
                 <Tile index={row.from + k} id={p.id} size={layout.tile} favorite={p.favorite} video={p.is_video} copies={p.copies} {target}
-                  hasThumb={p.has_thumb} hasPoster={p.has_poster} hasOriginal={p.has_original} selected={selectedSet.has(p.id)} {selecting} onclick={(e) => click(row.from + k, e)} />
+                  takenAt={p.taken_at} hasThumb={p.has_thumb} hasPoster={p.has_poster} hasOriginal={p.has_original} selected={selectedSet.has(p.id)} {selecting} onclick={(e) => click(row.from + k, e)} />
               {/each}
             </div>
           {/if}
@@ -232,6 +273,7 @@
   .head b { font-size: 15px; }
   .head span { font-size: 12px; color: var(--ink-3); }
   .tiles { position: absolute; left: 0; right: 0; display: flex; }
+  .getting { padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; background: var(--info-soft); }
   .empty { height: 100%; display: grid; place-content: center; text-align: center; gap: 6px; color: var(--ink-2); padding: 20px; }
   .input { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 0 12px; color: var(--ink); font: inherit; }
 </style>

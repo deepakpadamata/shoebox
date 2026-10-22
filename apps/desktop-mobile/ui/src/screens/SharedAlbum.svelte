@@ -197,7 +197,11 @@
 
     {#if tab === 'photos' || selecting}
       {#if items.length === 0}
-        <p class="muted empty">{canAdd ? 'No photos yet. Add some, or invite people to add theirs.' : 'No photos yet.'}</p>
+        <div class="empty">
+          <p class="muted">{canAdd ? 'No photos yet. Add some, or invite people to add theirs.' : 'No photos yet. They show up here when someone adds them.'}</p>
+          {#if canAdd}<Button kind="primary" onclick={openAdd}>Add photos</Button>{/if}
+          {#if isOwner}<Button onclick={() => { inviteOpen = true; invite = null; }}>Invite people</Button>{/if}
+        </div>
       {:else}
         <div class="grid">
           {#each items as it, i (it.id)}

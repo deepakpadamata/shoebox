@@ -29,6 +29,7 @@
   ];
 
   let importOpen = $state(false);
+  $effect(() => { if (app.importRequest > 0) importOpen = true; });
   let importPath = $state('');
   let busy = $state(false);
   let kitOpen = $state(false);

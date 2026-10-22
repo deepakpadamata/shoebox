@@ -88,6 +88,14 @@
     <Button kind="primary" size="sm" onclick={() => { addOpen = true; pair = null; }}>＋ Add a device</Button>
   </div>
 
+  {#if devices.length > 0 && devices.filter((d) => !d.revoked).length === 1}
+    <div class="callout">
+      <b>This is your only device</b>
+      <span class="muted small">Photos on one device are one lost phone away from gone. Add a second device (a computer, or a small always-on keeper) and your library is backed up between them.</span>
+      <div><Button kind="primary" size="sm" onclick={() => { addOpen = true; pair = null; }}>Add a device</Button></div>
+    </div>
+  {/if}
+
   <List>
     {#each devices.filter((d) => !d.revoked) as d (d.id)}
       <Row title={d.is_this_device ? `${d.name} (this device)` : d.name} subtitle={`${d.role}${d.admin ? ' · admin' : ''}${d.latency_ms != null ? ` · ${d.latency_ms} ms` : ''}`}>
@@ -151,6 +159,7 @@
 </Sheet>
 
 <style>
+  .callout { display: flex; flex-direction: column; gap: 6px; padding: 14px; margin: 10px 0; border-radius: 12px; background: var(--accent-soft); }
   .page { padding: 18px; max-width: 760px; overflow: auto; height: 100%; }
   @media (max-width: 720px) { .page { padding: 12px 14px; } }
   .head { margin-bottom: 14px; }

@@ -12,6 +12,8 @@ export const app = $state({
   devicesVersion: 0,
   /** Bumped when something changed in a shared album. */
   sharedVersion: 0,
+  /** Bumped when a screen asks the shell to open the import sheet. */
+  importRequest: 0,
   /** Peers currently connected, by device id (for the "n devices online" line). */
   pairing: null as null | { sas: string; peer_name: string; peer_role: string },
   pairingError: '',

@@ -28,7 +28,7 @@
     <Button type="submit" kind="primary" disabled={!name.trim()}>Create album</Button>
   </form>
   {#if albums.length === 0}
-    <p class="muted" style="margin-top:24px">No albums yet. Select photos in the library and choose “Add to album”.</p>
+    <div style="margin-top:24px"><p class="muted">No albums yet. Name one above, then select photos in the library and choose “Add to album”.</p><Button onclick={() => go('library')}>Open the library</Button></div>
   {:else}
     <div class="grid">
       {#each albums as a (a.id)}

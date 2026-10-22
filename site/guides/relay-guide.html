@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relay guide · Shoebox</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="top"><a class="brand" href="../index.html">📦 Shoebox</a><nav><a href="../index.html#downloads">Download</a><a href="user-guide.html">Guides</a></nav></header>
+<main class="doc">
+<h1>Using your own relay</h1>
+<p>Devices try to connect directly. When they cannot (different networks, strict firewalls) they fall back to a <strong>relay</strong>: a small server that forwards already-encrypted traffic between them. By default Shoebox uses the public relays that the iroh project operates. A relay sees which device keys talk to each other, when and how much; it cannot read photos or metadata.</p>
+<h2>Why run your own</h2>
+<ul><li>you do not want any third party to see connection metadata;</li><li>you want predictable performance for a family spread across continents;</li><li>you are on a network that blocks the public relays.</li></ul>
+<h2>Run a relay</h2>
+<p>Shoebox uses the standard iroh relay protocol, so you run iroh's relay server (<code>iroh-relay</code>, from the <a href="https://github.com/n0-computer/iroh">iroh</a> project) on any machine with a public name and a TLS certificate. Follow the iroh relay documentation for the current install and configuration steps; you end up with a URL such as <code>https://relay.example.org</code>.</p>
+<blockquote>The instructions above were not exercised as part of this project's own tests (the automated tests use direct loopback connections and no relay), so check the relay's own documentation and test a connection before relying on it.</blockquote>
+<h2>Tell the devices</h2>
+<ul><li><strong>Desktop and phone:</strong> <em>Settings → Connection → Relay</em> → <em>Custom</em> → enter the URL. Choose <em>Off</em> to allow only direct connections (devices on the same network, or reachable addresses).</li><li><strong>Keeper:</strong> <code>shoebox-keeper run --relay https://relay.example.org</code>, or <code>--relay off</code>.</li></ul>
+<p>Every device in a library must use a relay they can all reach. Use the same URL on all of them.</p>
+<h2>Check that it works</h2>
+<p><em>Devices</em> shows how each device is reached: <strong>Same network</strong>, <strong>Direct</strong>, or <strong>Via relay</strong>, with the latency. If two devices on different networks show <em>Connecting</em> for a long time, they cannot reach a common relay.</p>
+</main>
+<footer>Shoebox collects no data. <a href="../index.html">Home</a></footer>
+</body>
+</html>

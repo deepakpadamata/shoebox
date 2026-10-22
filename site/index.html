@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shoebox · your photos on your own devices</title>
+<meta name="description" content="Shoebox keeps your photos on your own devices and syncs them directly between them. No account, no cloud.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top"><a class="brand" href="index.html">📦 Shoebox</a><nav><a href="#how">How it works</a><a href="#privacy">Privacy</a><a href="#downloads">Download</a><a href="guides/user-guide.html">Guides</a></nav></header>
+
+<div class="hero">
+  <h1>Your photos, on your own devices.</h1>
+  <p>Shoebox syncs your library directly between your phone, your computer and a small always-on box at home. There is no account to create and no company holding your pictures.</p>
+  <a class="btn" href="#downloads">Download</a><a class="btn alt" href="guides/user-guide.html">Read the guide</a>
+</div>
+
+<section id="how">
+  <h2>How it works</h2>
+  <div class="cards">
+    <div class="card"><h3>Devices are the account</h3><p>Add a device by scanning a code and comparing six digits. Lose one, and you remove it from another.</p></div>
+    <div class="card"><h3>A keeper makes it safe</h3><p>A Raspberry Pi, a NAS or a spare computer holds every original. Your phone keeps previews and frees space safely.</p></div>
+    <div class="card"><h3>Copy count, not guesswork</h3><p>Every photo shows how many devices hold it. The app tells you what is not backed up yet and when it will be.</p></div>
+    <div class="card"><h3>Share without a cloud</h3><p>Shared albums travel between households. Take the location off a photo before it leaves, and remove a person later if you need to.</p></div>
+    <div class="card"><h3>Your files stay yours</h3><p>Export everything as plain folders at any time. Nothing is locked in.</p></div>
+    <div class="card"><h3>Open source</h3><p>Built on <a href="https://iroh.computer">iroh</a> peer-to-peer connections. Read the code and the threat model.</p></div>
+  </div>
+</section>
+
+<section id="privacy">
+  <h2>Privacy</h2>
+  <p>Devices connect directly and everything is encrypted end to end. When two devices cannot reach each other the traffic goes through a relay that only forwards encrypted bytes; you can run your own. Shoebox has no analytics, no tracking and no accounts. The app's help report contains counts and versions only: no photos, names, places or file names, and it is never sent unless you send it.</p>
+  <p class="note">Read the <a href="guides/user-guide.html">user guide</a>, the <a href="guides/keeper-guide.html">keeper guide</a> and the <a href="guides/relay-guide.html">relay guide</a>.</p>
+</section>
+
+<section id="downloads">
+  <h2>Download</h2>
+  <div class="dl" id="dl">
+    <a href="downloads/#desktop">Desktop<small>macOS, Windows, Linux</small></a>
+    <a href="downloads/#keeper">Keeper<small>Linux (x86-64, ARM64), macOS</small></a>
+    <a href="downloads/#android">Android<small>Google Play</small></a>
+    <a href="downloads/#ios">iPhone and iPad<small>App Store</small></a>
+  </div>
+  <p class="note">Builds and store links are published with each release; see <a href="downloads/">the download page</a> for the current version, checksums and signatures.</p>
+</section>
+
+<footer>Shoebox collects no data. · <a href="guides/user-guide.html">Guides</a></footer>
+</body>
+</html>

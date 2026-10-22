@@ -6,7 +6,7 @@ spare computer or a small cloud server.
 
 ## Sizing
 
-* **Disk:** your library's original size, plus about 3% for thumbnails, previews and metadata. Leave 20% free.
+* **Disk:** your library's original size, plus roughly 10% for thumbnails (256 px) and previews (2,048 px on the long edge) and metadata. Leave 20% free.
   Example: 400 GB of originals → a 1 TB disk.
 * **Memory:** the library's metadata lives in memory (about 7 KB per photo per device today), so 100,000
   photos need roughly 700 MB. A Pi 4 with 4 GB is fine.

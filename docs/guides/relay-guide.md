@@ -24,7 +24,7 @@ Follow the iroh relay documentation for the current install and configuration st
 
 ## Tell the devices
 
-* **Desktop and phone:** *Settings → Network → Relay* → *Custom* → enter the URL. Choose *Off* to allow only
+* **Desktop and phone:** *Settings → Connection → Relay* → *Custom* → enter the URL. Choose *Off* to allow only
   direct connections (devices on the same network, or reachable addresses).
 * **Keeper:** `shoebox-keeper run --relay https://relay.example.org`, or `--relay off`.
 

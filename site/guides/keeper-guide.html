@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keeper guide · Shoebox</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="top"><a class="brand" href="../index.html">📦 Shoebox</a><nav><a href="../index.html#downloads">Download</a><a href="user-guide.html">Guides</a></nav></header>
+<main class="doc">
+<h1>Keeper guide</h1>
+<p>A <strong>keeper</strong> is a Shoebox device that is always on and holds every original of your library. It is the backstop that makes "my phone fell in the sea" a non-event. It can be a Raspberry Pi 4 with a USB disk, a NAS, a spare computer or a small cloud server.</p>
+<h2>Sizing</h2>
+<ul><li><strong>Disk:</strong> your library's original size, plus roughly 10% for thumbnails (256 px) and previews (2,048 px on the long edge) and metadata. Leave 20% free. Example: 400 GB of originals → a 1 TB disk.</li><li><strong>Memory:</strong> the library's metadata lives in memory (about 7 KB per photo per device today), so 100,000 photos need roughly 700 MB. A Pi 4 with 4 GB is fine.</li><li><strong>Network:</strong> the first sync copies everything once. On gigabit Ethernet 100 GB takes about 20 minutes; over a relay it is limited by your uplink. An interrupted transfer resumes where it stopped.</li></ul>
+<h2>Install</h2>
+<p>Download <code>shoebox-keeper-&lt;platform&gt;.tar.gz</code> from the release page (Linux x86-64 and ARM64, macOS), check the published checksum, and put the binary somewhere on the path:</p>
+<pre><code>tar -xzf shoebox-keeper-linux-aarch64.tar.gz
+sudo install shoebox-keeper /usr/local/bin/</code></pre>
+<p>Or build from source: <code>cargo build --release -p keeper</code>.</p>
+<h2>Join your library</h2>
+<ol><li>On a device already in the library: <em>Devices → Add a device → Keeper</em>. It shows a pairing code.</li><li>On the keeper machine:</li></ol>
+<p>   ``<code>bash    shoebox-keeper run --name "Pi in the hall" &amp;        # or use the service below    shoebox-keeper pair &lt;the code&gt; --name "Pi in the hall"    </code>``</p>
+<ol><li>Compare the six digits shown on both screens, answer <em>yes</em> on both.</li></ol>
+<p>The keeper then syncs the library and downloads every original. <code>shoebox-keeper status</code> shows progress (photos, originals held, at-risk photos, connected devices and how it reaches them).</p>
+<h2>Run it as a service</h2>
+<pre><code>shoebox-keeper service install            # systemd user unit (Linux) or launchd agent (macOS)
+shoebox-keeper service install --system --user shoebox   # system-wide, as a dedicated user (needs root)
+shoebox-keeper service install --print    # show the unit without installing</code></pre>
+<p>Data lives in <code>~/.local/share/shoebox</code> (<code>~/Library/Application Support/shoebox</code> on macOS) unless you pass <code>--storage DIR</code> or set <code>$SHOEBOX_STORAGE</code>. Put it on the big disk. Back up that directory <em>only</em> if you also back up the 24-word recovery phrase separately.</p>
+<h2>Everyday commands</h2>
+<table><thead><tr><th>Command</th><th>Use</th></tr></thead><tbody><tr><td><code>status [--json]</code></td><td>what the keeper holds and who it talks to</td></tr><tr><td><code>devices</code> / <code>devices revoke &lt;id&gt;</code></td><td>list devices, remove one (the keeper must be an admin; the first device is)</td></tr><tr><td><code>address</code></td><td>the link another device needs to recover through this keeper</td></tr><tr><td><code>album list</code> / <code>album join &lt;invitation&gt;</code> / <code>album keep &lt;id&gt;</code> / <code>album drop &lt;id&gt;</code></td><td>shared albums the keeper is in; <code>keep</code> makes it hold every original of an album</td></tr><tr><td><code>stop</code></td><td>shut the daemon down cleanly</td></tr></tbody></table>
+<p>Full reference: <code>docs/keeper-cli.md</code>.</p>
+<h2>Upgrading</h2>
+<p>Stop the service, replace the binary, start it. The data directory carries a format marker: a newer keeper upgrades older data after copying the small files to <code>backups/</code>, and an older keeper refuses data a newer one wrote (it tells you to update). Devices on neighbouring versions keep syncing with each other.</p>
+<h2>Reaching the keeper from outside your home</h2>
+<p>Nothing needs to be opened on your router: devices find each other through iroh's discovery and, when a direct path fails, a relay. For a keeper on a cloud server, nothing special is needed either. To avoid the public relay, see <code>relay-guide.md</code>.</p>
+<h2>Troubleshooting</h2>
+<ul><li><code>a keeper is already running on …</code> – another process holds <code>keeper.lock</code>; stop it or use another <code>--storage</code>.</li><li><code>not paired with a library yet</code> – run <code>pair</code> first.</li><li>Status shows <code>relay</code> for a device on the same network – mDNS may be blocked; both devices will still sync.</li><li>Disk full – the keeper keeps what it already has, reports the failure in its log, and resumes by itself when space is available.</li></ul>
+</main>
+<footer>Shoebox collects no data. <a href="../index.html">Home</a></footer>
+</body>
+</html>

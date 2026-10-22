@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Downloads · Shoebox</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="top"><a class="brand" href="../index.html">📦 Shoebox</a><nav><a href="../guides/user-guide.html">Guides</a></nav></header>
+<main class="doc">
+  <h1>Downloads</h1>
+  <p class="note">Nothing has been released yet. This page is filled from <code>release.json</code> when a version is published (<code>python3 site/release.py</code>), so a link can never point at a file that does not exist.</p>
+  <div id="releases"><p>No release has been published.</p></div>
+  <h2 id="desktop">Desktop</h2><p>Signed installers for macOS, Windows and Linux appear here with each release.</p>
+  <h2 id="keeper">Keeper</h2><p>Static binaries for Linux (x86-64, ARM64) and a universal macOS binary, with SHA-256 checksums. See the <a href="../guides/keeper-guide.html">keeper guide</a>.</p>
+  <h2 id="android">Android</h2><p>Google Play listing and a direct APK for people without Google services.</p>
+  <h2 id="ios">iPhone and iPad</h2><p>App Store listing.</p>
+</main>
+<script>
+fetch('release.json').then(r => r.ok ? r.json() : null).then(rel => {
+  if (!rel) return;
+  const box = document.getElementById('releases');
+  box.innerHTML = '<h2>Version ' + rel.version + '</h2><ul>' + rel.files.map(f =>
+    '<li><a href="' + f.url + '">' + f.name + '</a> <span class="note">' + f.sha256.slice(0, 12) + '…</span></li>').join('') + '</ul>';
+}).catch(() => {});
+</script>
+<footer>Shoebox collects no data.</footer>
+</body>
+</html>

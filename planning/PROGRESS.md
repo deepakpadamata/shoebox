@@ -101,3 +101,25 @@ Implementation status per issue. Assumptions made along the way are logged in
 | M5-07 Save to my library | ✅ | same blobs, idempotent |
 | M5-08 Shared album UI | ◐ | list, album, add, invite, accept, location sheet, people, activity, settings on desktop and phone; not every mockup detail |
 
+
+## M6 · Hardening & beta — everything that can be done without testers, a VPS or devices
+
+| Issue | Status | Notes |
+|---|---|---|
+| M6-01 Real-network nightly | ◐ | `scripts/real-network/scenario.py` (pair, import, sync, fetch every original, revoke) passes locally; workflow written; **never run against a VPS** (none, no repository remote) |
+| M6-02 Scale and endurance | ◐ | store benchmarks from M1; fixed two scale bugs found while testing 50k-photo albums; **mobile memory < 300 MB at 100k is not met** (about 500–700 MB), 600 GB / Pi / device profiling not run: `docs/notes/scale-endurance.md` |
+| M6-03 Failure scenarios | ✅ | late keeper, delete/favorite race, revocation mid-transfer, disk full, ±1 day clock skew, plus the earlier suites; `docs/notes/failure-scenarios.md` |
+| M6-04 Security review | ◐ | threat model and self-review committed (`docs/security/threat-model.md`); one real finding fixed (album keys file permissions) and one design flaw fixed while building albums (per-protocol gate); **no external review** |
+| M6-05 Format versioning | ✅ | `format.json` marker, migration runner with backup-before-migrate, refusal of newer data, upgrade of a marker-less library tested, protocol-version rule tested |
+| M6-06 Empty states, first sync, accessibility | ◐ | empty states with actions, first-sync progress with ETA, contrast-checked tokens, reduced motion, text size, dialog focus handling, descriptive labels; **VoiceOver/TalkBack walk-through not done** (no device) |
+| M6-07 Diagnostics bundle | ✅ | counts, versions, roles and a redacted log tail; redaction tests including a hostile line; shown to copy or save, never uploaded (no OS share sheet yet) |
+| M6-08 Closed beta | ⬜ | needs people |
+
+## M7 · MVP release
+
+| Issue | Status | Notes |
+|---|---|---|
+| M7-01 Documentation | ◐ | user guide, keeper guide, relay guide (`docs/guides`); nobody has followed them yet; the relay steps point to iroh's own docs and were not exercised |
+| M7-02 Website | ◐ | static site with the guides built from the docs, a download page filled from `release.json`, link checker, CI check; **not hosted**, and there are no downloads to verify yet |
+| M7-03 Store submission | ⬜ | needs signing identities, store accounts and the iOS app |
+| M7-04 1.0 release | ⬜ | needs the above; versions are still 0.0.1 |

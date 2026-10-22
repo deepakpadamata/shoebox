@@ -1,6 +1,6 @@
 # Planning · Shoebox MVP
 
-The executable plan: 8 milestones, **81 issues**, in strict execution order for a **solo developer** (decision #20).
+The executable plan: 8 milestones, **82 issues**, in strict execution order for a **solo developer** (decision #20).
 The product and technical context is in `docs/`. Read [`05-prototype-plan.md`](../docs/05-prototype-plan.md) first.
 
 ```
@@ -20,14 +20,14 @@ interruptions, review and unknowns.
 | Milestone | Issues | Dev-days | Weeks (buffered) | Cumulative weeks |
 |---|---|---|---|---|
 | M0 · Foundations | 8 | 9.5 | 2.3 | 2 |
-| M1 · Sync core | 15 | 32.5 | 7.8 | 10 |
-| M2 · Identity, pairing & keeper | 9 | 19.5 | 4.7 | 15 |
-| M3 · Desktop app | 17 | 40 | 9.6 | 24 |
-| M4 · Mobile apps | 12 | 33.5 | 8.0 | 32 |
-| M5 · Shared albums | 8 | 20.5 | 4.9 | 37 |
-| M6 · Hardening & beta | 8 | 19 | 4.6 | 42 |
-| M7 · MVP release | 4 | 6.5 | 1.6 | 43 |
-| **Total** | **81** | **181** | **43** | |
+| M1 · Sync core | 16 | 48.5 | 11.6 | 14 |
+| M2 · Identity, pairing & keeper | 9 | 19.5 | 4.7 | 19 |
+| M3 · Desktop app | 17 | 40 | 9.6 | 28 |
+| M4 · Mobile apps | 12 | 33.5 | 8.0 | 36 |
+| M5 · Shared albums | 8 | 20.5 | 4.9 | 41 |
+| M6 · Hardening & beta | 8 | 19 | 4.6 | 46 |
+| M7 · MVP release | 4 | 6.5 | 1.6 | 47 |
+| **Total** | **82** | **197** | **47** | |
 
 That's roughly **10 months** to MVP for one person, plus the beta's calendar time
 (3–4 weeks, overlapping M7) and app-store review.

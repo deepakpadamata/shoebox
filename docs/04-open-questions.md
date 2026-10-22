@@ -19,7 +19,7 @@ Decisions from the first review pass (2026-10-22). Each one notes where it shows
 
 | # | Question | Decision | Affects |
 |---|---|---|---|
-| 7 | iroh-docs vs own CRDT | Put metadata sync **behind a `LibraryStore` interface**. Prototype on iroh-docs; benchmark a CRDT (Loro / Automerge over gossip + blobs) at 100k+ entries before committing. | architecture §Building blocks |
+| 7 | iroh-docs vs own CRDT | Metadata sync sits **behind a `LibraryStore` interface**. **Benchmarked in M1-15 (see `docs/notes/store-benchmark.md`):** Loro syncs 100k photos in 0.8 s (500k in 6.8 s) and persists 100k in 60 MB; iroh-docs as used (one entry + one blob per record) takes 29 s at 60k and does not complete at 100k. **Decision: personal library → Loro (issue M1-16); shared albums → iroh-docs** (needs its capability model, albums are bounded). To be reviewed before M1-16 starts. | architecture §Building blocks, M1-15 |
 | 8 | Location stripping vs content addressing | **Share originals by default.** When adding photos that contain location to a shared album, **prompt** the user, who can strip location. Stripped items become derived copies with their own hash; the album records `originalHash → sharedHash`. | F8.3, mockups 4c/4e/6b |
 | 9 | Library identity | **Per-device keys + a signed device list.** A library root key (kept in the recovery kit) signs device additions and revocations. | F1.4, F4.5, architecture §Identity |
 | 10 | Mobile background sync | **Best-effort.** Opportunistic OS background tasks, a clear "open the app to finish syncing" state, and the keeper as the redundancy backstop. No real-time promise. | F4.4, architecture §Platforms |
@@ -51,5 +51,5 @@ Decisions from the first review pass (2026-10-22). Each one notes where it shows
 - **Background sync on iOS** (#10). Validate what Tauri 2 can reach of BGTaskScheduler / BGProcessingTask, or whether a small native plugin is needed.
 - **iroh-docs status** (#7). In 2025 n0 said it wasn't ready for 1.0. Check the current repo/changelog before the spike.
 - **Shared album limits** (part of old #5). Max members/items for v1 are not decided yet.
-- **Metadata backend** (#7). Decided by the benchmark issue M1-15 (decision gate).
+- **Metadata backend** (#7). Decided by M1-15: Loro for the personal library, iroh-docs for shared albums (review pending, see the benchmark note).
 - **Exact iroh crate versions.** Pinned in M0-01. Neither iroh-docs' status nor which versions work together could be confirmed from public sources during planning.

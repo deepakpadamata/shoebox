@@ -1,10 +1,23 @@
 [package]
 name = "store-bench"
+description = "Benchmark of LibraryStore backends at 100k/500k photos (M1-15, decides #7)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "Apache-2.0 OR MIT"
 publish = false
+
+[dependencies]
+shoebox-core.workspace = true
+shoebox-node.workspace = true
+shoebox-store-docs.workspace = true
+shoebox-store-loro.workspace = true
+shoebox-store-mem.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+anyhow.workspace = true
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+tempfile.workspace = true
 
 [lints]
 workspace = true

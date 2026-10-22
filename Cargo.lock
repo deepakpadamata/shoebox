@@ -4780,6 +4780,18 @@ dependencies = [
 [[package]]
 name = "store-bench"
 version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde_json",
+ "shoebox-core",
+ "shoebox-node",
+ "shoebox-store-docs",
+ "shoebox-store-loro",
+ "shoebox-store-mem",
+ "tempfile",
+ "tokio",
+]
 
 [[package]]
 name = "strsim"

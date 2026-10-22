@@ -204,3 +204,8 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   codec moved to `core::entry_codec` and is shared), so the benchmark compares the replication layers rather than two query engines. Its sync is
   simulated in-process with real Loro export/import (no network), shared albums are not implemented, and the conformance suite gained `run_only` /
   `SCENARIOS` to run a subset. The `loro` cargo feature is on by default for the crate; depend with `default-features = false` to leave it out.
+- **A-055 · M1-15** · Decision #7 recorded as **hybrid: personal library on Loro, shared albums on iroh-docs** (issue M1-16, +16 dev-days, planning README
+  re-estimated: M1 now 16 issues, total 82 issues / 197 dev-days / ~47 weeks). I made the *recommendation*; the switch itself is **not** done and should be
+  reviewed first (the benchmark has caveats: Loro spike has no transport, no phone-class device was available, iroh-docs ≥100k fails in this setup). Work on
+  M2+ continues against the `LibraryStore` trait, which is unaffected either way. The benchmark also surfaced a quadratic `Effect::touch` (fixed), that per-photo memory
+  (~5 KB) is shared by both backends and needs work for phones, and that holdings should be published for originals only.

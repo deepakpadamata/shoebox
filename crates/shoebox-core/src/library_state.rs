@@ -65,8 +65,11 @@ pub enum Touched {
 pub struct Effect {
     /// Observable changes, in order.
     pub changes: Vec<Change>,
-    /// Records to persist (deduplicated, sorted).
+    /// Records to persist (deduplicated, in first-touched order).
     pub touched: Vec<Touched>,
+    /// Membership index for `touched`: a linear `contains` made merging a 100k-photo library
+    /// quadratic (it took 18 s).
+    seen: std::collections::HashSet<Touched>,
 }
 
 impl Effect {
@@ -74,7 +77,7 @@ impl Effect {
         self.changes.push(c);
     }
     fn touch(&mut self, t: Touched) {
-        if !self.touched.contains(&t) {
+        if self.seen.insert(t.clone()) {
             self.touched.push(t);
         }
     }

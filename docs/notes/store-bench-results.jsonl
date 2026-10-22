@@ -1,0 +1,9 @@
+{"backend": "mem", "photos": 100000, "holdings": "originals", "initial_sync_s": 0.37, "peak_rss_mb": 990, "note": "after Effect::touch fix"}
+{"backend": "loro", "photos": 10000, "holdings": "originals", "populate_s": 0.04, "initial_sync_s": 0.06, "incremental_sync_ms": 14.5, "disk_mb": 6.0, "peak_rss_mb": 153.8}
+{"backend": "loro", "photos": 100000, "holdings": "originals", "populate_s": 0.43, "initial_sync_s": 0.86, "incremental_sync_ms": 232.6, "disk_mb": 60.3, "peak_rss_mb": 1249.6, "at_risk_all_ms": 16.1}
+{"backend": "loro", "photos": 500000, "holdings": "originals", "populate_s": 2.83, "initial_sync_s": 6.83, "incremental_sync_ms": 1530.0, "disk_mb": 302.7, "peak_rss_mb": 2751.8, "at_risk_all_ms": 220.9}
+{"backend": "loro", "photos": 100000, "holdings": "all", "populate_s": 0.54, "initial_sync_s": 1.81, "incremental_sync_ms": 461.1, "disk_mb": 104.1, "peak_rss_mb": 1926.4, "at_risk_all_ms": 31.8}
+{"backend": "docs", "photos": 10000, "holdings": "originals", "populate_s": 1.38, "initial_sync_s": 3.29, "incremental_sync_ms": 83.4, "disk_mb": 50.5, "peak_rss_mb": 237.2}
+{"backend": "docs", "photos": 30000, "holdings": "originals", "populate_s": 4.32, "initial_sync_s": 9.83, "incremental_sync_ms": 185.0, "disk_mb": 101.1, "peak_rss_mb": 629.0}
+{"backend": "docs", "photos": 60000, "holdings": "originals", "populate_s": 9.57, "initial_sync_s": 28.67, "incremental_sync_ms": 295.4, "disk_mb": 202.1, "peak_rss_mb": 1315.4}
+{"backend": "docs", "photos": 100000, "holdings": "originals", "populate_s": 17.3, "initial_sync_s": null, "note": "iroh-blobs panicked: poisoned storage; sync never completed"}

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>03 · Viewer — Shoebox mockups</title>
+<link rel="stylesheet" href="assets/mockup.css?v=2">
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <a class="crumb" href="index.html">← All screens</a>
+    <h1>03 · Photo viewer</h1>
+  </div>
+  <p class="page-intro">Opens instantly from the local preview. If the original isn't on this device, it streams
+    from whichever peer has it — and the UI says which one.</p>
+
+  <div class="screens">
+
+    <!-- 3a Viewer fetching original -->
+    <figure class="screen">
+      <div class="phone dark">
+        <div class="statusbar"><span>9:41</span><span class="island" style="background:#333"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span class="back" style="color:#fff">‹</span>
+          <div class="center" style="font-size:13px"><b>Yesterday</b><br><span style="color:#aaa">14:32 · Sintra</span></div>
+          <span style="color:#fff">⋯</span></div>
+        <div class="body" style="justify-content:center;position:relative">
+          <div data-photo="62" style="height:440px"></div>
+          <div style="position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);background:rgba(0,0,0,.6);backdrop-filter:blur(8px);padding:10px 14px;border-radius:12px;font-size:12.5px;display:flex;gap:10px;align-items:center;white-space:nowrap">
+            <svg width="26" height="26" viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" fill="none" stroke="#555" stroke-width="4"/><circle cx="18" cy="18" r="15" fill="none" stroke="#fff" stroke-width="4" stroke-dasharray="94" stroke-dashoffset="35" transform="rotate(-90 18 18)"/></svg>
+            <div>Loading original from <b>MacBook</b><br><span style="color:#bbb">18.4 of 29 MB · direct · LAN</span></div>
+          </div>
+        </div>
+        <div style="height:120px;display:flex;justify-content:space-around;align-items:center;font-size:22px;padding-bottom:20px">
+          <span>⤴︎</span><span>♡</span><span>ⓘ</span><span>🗑</span>
+        </div>
+      </div>
+      <figcaption><b>3a · Viewer, original streaming</b>Preview shows immediately; original is fetched on zoom or when opened long enough. Source + path (LAN / direct / relay) are visible, not hidden.
+        <div class="tags"><span class="tag">F3.1</span><span class="tag">F3.2</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 3b Info panel -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div data-photo="62" style="height:170px;flex:none;margin-top:-40px"></div>
+        <div class="body pad" style="margin-top:-18px;background:var(--surface);border-radius:20px 20px 0 0;padding-top:16px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <h3 style="margin:0">Wed 21 Oct 2026, 14:32</h3><span style="color:var(--accent)">Edit</span>
+          </div>
+          <p class="small muted" style="margin:2px 0 10px">IMG_4821.HEIC · 29.1 MB · 48 MP</p>
+          <div class="card soft" style="padding:10px 12px" class="small">
+            <div class="small"><b>iPhone 17 Pro</b> — Main camera 24 mm ƒ1.78</div>
+            <div class="small muted">ISO 80 · 1/1250 s · 4032 × 3024</div>
+            <div class="small muted">📍 Palácio da Pena, Sintra</div>
+          </div>
+
+          <div class="section-title">Stored on · 3 of 4 devices</div>
+          <div class="list">
+            <div class="row"><div class="ico">💻</div><div class="grow"><div class="t1">MacBook</div><div class="t2">Original</div></div><span class="pill ok">✓</span></div>
+            <div class="row"><div class="ico">🗄️</div><div class="grow"><div class="t1">Home NAS</div><div class="t2">Original</div></div><span class="pill ok">✓</span></div>
+            <div class="row"><div class="ico">📱</div><div class="grow"><div class="t1">This iPhone</div><div class="t2">Preview only</div></div><span class="pill mute">preview</span></div>
+            <div class="row"><div class="ico">📲</div><div class="grow"><div class="t1">iPad</div><div class="t2">Not yet synced · offline 2d</div></div><span class="pill mute">—</span></div>
+          </div>
+          <div class="list" style="margin-top:10px">
+            <div class="row"><div class="grow"><div class="t1">Keep original on this iPhone</div><div class="t2">Available offline</div></div><div class="toggle"></div></div>
+          </div>
+          <p class="mono muted" style="margin:10px 0 0;font-size:10.5px">blake3 · 7f3a…c91e <span style="color:var(--accent)">copy</span></p>
+        </div>
+      </div>
+      <figcaption><b>3b · Info &amp; "where is this stored"</b>Answers "if I lose this phone, do I lose this photo?" directly. The hash is tucked away but available for power users.
+        <div class="tags"><span class="tag">F3.3</span><span class="tag">F3.4</span><span class="tag">F3.5</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 3c Unavailable -->
+    <figure class="screen">
+      <div class="phone dark">
+        <div class="statusbar"><span>9:41</span><span class="island" style="background:#333"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span class="back" style="color:#fff">‹</span>
+          <div class="center" style="font-size:13px"><b>12 Mar 2019</b><br><span style="color:#aaa">Film scan</span></div>
+          <span style="color:#fff">⋯</span></div>
+        <div class="body" style="justify-content:center;position:relative">
+          <div data-photo="77" style="height:440px;filter:blur(1.5px) saturate(.8)"></div>
+          <div style="position:absolute;left:16px;right:16px;bottom:24px;background:rgba(30,30,32,.92);border-radius:16px;padding:14px">
+            <b style="font-size:14px">Original isn't reachable right now</b>
+            <p style="margin:4px 0 10px;color:#bbb;font-size:12.5px">It's on <b style="color:#fff">Home NAS</b> (last seen 3 h ago). You're seeing the preview.</p>
+            <div style="display:flex;gap:8px">
+              <span class="btn sm" style="background:#333;border-color:#444;color:#fff">Notify me when available</span>
+              <span class="btn sm" style="background:#333;border-color:#444;color:#fff">Why?</span>
+            </div>
+          </div>
+        </div>
+        <div style="height:120px;display:flex;justify-content:space-around;align-items:center;font-size:22px;padding-bottom:20px">
+          <span>⤴︎</span><span>♡</span><span>ⓘ</span><span>🗑</span>
+        </div>
+      </div>
+      <figcaption><b>3c · Original unavailable</b>Honest offline state. The preview is still usable; the user can ask to be told when a holder comes online.
+        <div class="tags"><span class="tag">F3.2</span><span class="tag">F4.2</span></div>
+      </figcaption>
+    </figure>
+
+  </div>
+</div>
+<script src="assets/mockup.js?v=2"></script>
+</body>
+</html>

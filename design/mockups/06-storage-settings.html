@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>06 · Storage &amp; settings — Shoebox mockups</title>
+<link rel="stylesheet" href="assets/mockup.css?v=2">
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <a class="crumb" href="index.html">← All screens</a>
+    <h1>06 · Storage &amp; settings</h1>
+  </div>
+  <p class="page-intro">Redundancy is the product's core promise, so storage gets a dedicated health screen.
+    "Free up space" is only ever safe — it never deletes the last copies.</p>
+
+  <div class="screens">
+
+    <!-- 6a Library health -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span class="back">‹ Settings</span><h3>Storage</h3><span style="width:60px"></span></div>
+        <div class="body pad">
+          <div class="scroll">
+            <div class="card" style="padding:16px">
+              <div class="small muted">Library health</div>
+              <div style="font-size:22px;font-weight:700;margin:2px 0 10px">23,896 of 24,108 safe</div>
+              <div class="bar" style="height:12px"><i style="width:91%;background:var(--ok)"></i><i style="width:8%;background:var(--info)"></i><i style="width:1%;background:var(--risk)"></i></div>
+              <div style="display:flex;flex-direction:column;gap:4px;margin-top:10px" class="small">
+                <div><span class="dot on"></span> 3+ copies · 21,950</div>
+                <div><span class="dot" style="background:var(--info)"></span> 2 copies · 1,946</div>
+                <div><span class="dot" style="background:var(--risk)"></span> 1 copy · 212 <span style="color:var(--risk);font-weight:600">· View</span></div>
+              </div>
+            </div>
+            <div class="list" style="margin-top:12px">
+              <div class="row"><div class="grow"><div class="t1">Keep every original on</div></div><span class="muted small">at least 2 devices ›</span></div>
+            </div>
+
+            <div class="section-title">This iPhone</div>
+            <div class="card" style="padding:14px">
+              <div class="bar" style="height:12px"><i style="width:34%;background:var(--accent)"></i><i style="width:9%;background:#e3b98d"></i><i style="width:4%;background:#cfcac0"></i></div>
+              <div class="small muted" style="margin-top:8px">Originals 31 GB · Previews 8 GB · Thumbnails 2 GB</div>
+              <div class="btn primary block" style="margin-top:12px">Free up 27 GB</div>
+              <p class="small muted" style="margin:8px 0 0">Removes originals already safe on MacBook and Home NAS. You'll still see everything, and originals reload on demand.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>6a · Library health &amp; free up space</b>Copy-count buckets with a configurable redundancy target. The free-up figure only counts originals that already meet the target elsewhere.
+        <div class="tags"><span class="tag">F7.1</span><span class="tag">F7.2</span><span class="tag">F7.3</span><span class="tag">F7.4</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 6b Settings -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><h2>Settings</h2><span></span></div>
+        <div class="body pad">
+          <div class="scroll">
+            <div class="list">
+              <div class="row"><div class="avatar">D</div><div class="grow"><div class="t1">Deepak</div><div class="t2">Profile shown in shared albums</div></div><span class="chev">›</span></div>
+              <div class="row"><div class="ico">🔑</div><div class="grow"><div class="t1">Recovery kit</div><div class="t2">Saved 3 Mar 2026</div></div><span class="pill ok">✓</span></div>
+            </div>
+            <div class="section-title">Backup &amp; sync</div>
+            <div class="list">
+              <div class="row"><div class="grow t1">Back up camera roll</div><div class="toggle on"></div></div>
+              <div class="row"><div class="grow t1">Only on Wi-Fi</div><div class="toggle on"></div></div>
+              <div class="row"><div class="grow t1">Only while charging</div><div class="toggle"></div></div>
+              <div class="row"><div class="grow t1">Storage</div><span class="chev">›</span></div>
+            </div>
+            <div class="section-title">Sharing &amp; privacy</div>
+            <div class="list">
+              <div class="row"><div class="grow t1">Location when sharing</div><span class="muted small">Ask each time ›</span></div>
+              <div class="row"><div class="grow t1">Hidden photos</div><span class="pill mute">v1.x</span></div>
+            </div>
+            <div class="section-title">Network</div>
+            <div class="list">
+              <div class="row"><div class="grow"><div class="t1">Relay servers</div><div class="t2">Default public relays</div></div><span class="chev">›</span></div>
+              <div class="row"><div class="grow"><div class="t1">Find devices on local network</div></div><div class="toggle on"></div></div>
+              <div class="row"><div class="grow t1">Diagnostics</div><span class="chev">›</span></div>
+            </div>
+            <div class="section-title">Your data</div>
+            <div class="list">
+              <div class="row"><div class="grow t1">Export library to a folder</div><span class="chev">›</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="t"><span class="i">▦</span>Library</div>
+          <div class="t"><span class="i">▤</span>Albums</div>
+          <div class="t"><span class="i">👥</span>Shared</div>
+          <div class="t"><span class="i">⇄</span>Devices</div>
+        </div>
+      </div>
+      <figcaption><b>6b · Settings</b>Reached from the avatar in the Library header (not a tab). Network section exposes relay choice and LAN discovery.
+        <div class="tags"><span class="tag">F1.3</span><span class="tag">F1.4</span><span class="tag">F8.1</span><span class="tag">F8.2</span><span class="tag">F8.3</span><span class="tag">F8.4</span><span class="tag">F8.5</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 6c Relay settings -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span class="back">‹ Settings</span><h3>Relay servers</h3><span style="width:60px"></span></div>
+        <div class="body pad">
+          <p class="small muted" style="margin:4px 0 14px">When two devices can't connect directly, traffic is forwarded through a relay. Relays only see encrypted data — they can't view your photos.</p>
+          <div class="list">
+            <div class="row"><div class="grow"><div class="t1">Default public relays</div><div class="t2">Closest: eu1 · 31 ms</div></div><span style="color:var(--accent);font-size:18px">◉</span></div>
+            <div class="row"><div class="grow"><div class="t1">My own relay</div><div class="t2">For self-hosters</div></div><span class="muted" style="font-size:18px">○</span></div>
+          </div>
+          <div class="card soft mono" style="padding:10px 12px;margin-top:10px;color:var(--ink-3)">https://relay.example.org</div>
+          <div class="section-title">Right now</div>
+          <div class="list">
+            <div class="row"><div class="grow"><div class="t1">MacBook</div></div><span class="pill ok">direct</span></div>
+            <div class="row"><div class="grow"><div class="t1">Home NAS</div></div><span class="pill warn">relay eu1</span></div>
+            <div class="row"><div class="grow"><div class="t1">Ana (Family)</div></div><span class="pill ok">direct</span></div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>6c · Relay servers</b>Plain-language explanation of relays; option to point at a self-hosted iroh relay.
+        <div class="tags"><span class="tag">F8.2</span><span class="tag">F8.4</span></div>
+      </figcaption>
+    </figure>
+
+  </div>
+</div>
+<script src="assets/mockup.js?v=2"></script>
+</body>
+</html>

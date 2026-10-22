@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>04 · Albums &amp; sharing — Shoebox mockups</title>
+<link rel="stylesheet" href="assets/mockup.css?v=2">
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <a class="crumb" href="index.html">← All screens</a>
+    <h1>04 · Albums &amp; sharing</h1>
+  </div>
+  <p class="page-intro">Personal albums are just lists of photo hashes. A shared album is its own little replicated
+    space; inviting someone means handing them a ticket that can either view or add.</p>
+
+  <div class="screens">
+
+    <!-- 4a Albums tab -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><h2>Albums</h2><div class="actions"><span style="font-size:24px">＋</span></div></div>
+        <div class="body pad">
+          <div class="scroll">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+              <div><div class="tile r" data-photo="14"></div><div class="small" style="margin-top:5px"><b>Lisbon 2026</b><div class="muted">214</div></div></div>
+              <div><div class="tile r" data-photo="27"></div><div class="small" style="margin-top:5px"><b>Kitchen renovation</b><div class="muted">58</div></div></div>
+              <div><div class="tile r" data-photo="8"></div><div class="small" style="margin-top:5px"><b>Film scans</b><div class="muted">1,022</div></div></div>
+              <div><div class="tile r" data-photo="33"></div><div class="small" style="margin-top:5px"><b>Best of 2025</b><div class="muted">40</div></div></div>
+            </div>
+            <div class="section-title">Shared with you</div>
+            <div class="list">
+              <div class="row"><div class="tile r" data-photo="41" style="width:48px;flex:none"></div>
+                <div class="grow"><div class="t1">Family</div><div class="t2">Ana added 12 · 2h ago</div></div>
+                <span style="width:8px;height:8px;border-radius:50%;background:var(--accent)"></span></div>
+              <div class="row"><div class="tile r" data-photo="52" style="width:48px;flex:none"></div>
+                <div class="grow"><div class="t1">Ana's wedding</div><div class="t2">View only · 6 people</div></div><span class="chev">›</span></div>
+            </div>
+            <div class="section-title">Library</div>
+            <div class="list">
+              <div class="row"><div class="ico">♥</div><div class="grow t1">Favorites</div><span class="muted small">312</span></div>
+              <div class="row"><div class="ico">▶</div><div class="grow t1">Videos</div><span class="muted small">1,940</span></div>
+              <div class="row"><div class="ico">🗑</div><div class="grow t1">Recently deleted</div><span class="muted small">18</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="t"><span class="i">▦</span>Library</div>
+          <div class="t on"><span class="i">▤</span>Albums</div>
+          <div class="t"><span class="i">👥</span>Shared</div>
+          <div class="t"><span class="i">⇄</span>Devices</div>
+        </div>
+      </div>
+      <figcaption><b>4a · Albums</b>Personal albums first, then shared ones. Unread dot when someone added photos.
+        <div class="tags"><span class="tag">F5.1</span><span class="tag">F5.3</span><span class="tag">F2.8</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 4b Shared album -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span class="back">‹ Albums</span><div class="actions"><span>Invite</span><span>⋯</span></div></div>
+        <div class="body">
+          <div class="pad">
+            <h2 style="margin:0;font-size:26px">Family</h2>
+            <div style="display:flex;align-items:center;gap:10px;margin:8px 0 14px">
+              <div class="avatars">
+                <div class="avatar">D</div><div class="avatar" style="background:#7a5bb5">A</div>
+                <div class="avatar" style="background:#2f8a7a">M</div><div class="avatar" style="background:#b54a6a">R</div>
+              </div>
+              <span class="small muted">4 members · 2 online</span>
+            </div>
+          </div>
+          <div class="scroll">
+            <div class="pad" style="display:flex;gap:10px;align-items:center;margin:4px 0 8px">
+              <div class="avatar" style="background:#7a5bb5;width:26px;height:26px;font-size:11px">A</div>
+              <div class="small"><b>Ana</b> added 12 photos <span class="muted">· 2h ago</span></div>
+            </div>
+            <div class="grid c3" data-photos="6" data-seed="11" data-badges="sync:4,5"></div>
+            <div class="pad small muted" style="margin:6px 0 14px">↻ 2 still arriving from Ana's phone</div>
+            <div class="pad" style="display:flex;gap:10px;align-items:center;margin:4px 0 8px">
+              <div class="avatar" style="background:#2f8a7a;width:26px;height:26px;font-size:11px">M</div>
+              <div class="small"><b>Mum</b> added 3 photos and a video <span class="muted">· yesterday</span></div>
+            </div>
+            <div class="grid" data-photos="4" data-seed="13" data-video="3"></div>
+          </div>
+          <div class="pad" style="padding-bottom:28px;padding-top:10px;border-top:1px solid var(--line)">
+            <div class="btn primary block">＋ Add photos</div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>4b · Shared album</b>Feed grouped by contribution, not a flat grid — "who added what" is the main thing people want from a family album.
+        <div class="tags"><span class="tag">F6.3</span><span class="tag">F6.4</span><span class="tag">F6.5</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 4c Invite sheet -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="body" style="position:relative">
+          <div class="grid c3" data-photos="12" data-seed="11"></div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <h3 style="margin:0 0 2px">Invite to “Family”</h3>
+            <p class="small muted" style="margin:0 0 14px">Anyone with this invite can join. Send it privately.</p>
+            <div class="seg" style="margin-bottom:14px"><span>Can view</span><span class="on">Can add photos</span></div>
+            <div style="display:flex;justify-content:center"><div class="qr" data-qr="family-invite"></div></div>
+            <div class="card soft mono" style="padding:9px 12px;margin:14px 0 10px;display:flex;justify-content:space-between;align-items:center">
+              <span>shoebox://join/docaaa7…qk3p</span><span style="color:var(--accent);font-family:var(--font);font-weight:600">Copy</span>
+            </div>
+            <div class="list">
+              <div class="row"><div class="grow"><div class="t1">Expires</div></div><span class="muted small">after 1 use · 7 days ›</span></div>
+            </div>
+            <div class="btn primary block" style="margin-top:14px">Share invite…</div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>4c · Invite</b>The invite is an iroh ticket for this album only. Permission chosen up front; invites are single-use/expiring by default because tickets are bearer tokens.
+        <div class="tags"><span class="tag">F6.1</span><span class="tag">F6.2</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 4d Accept invite -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span class="back">Cancel</span></div>
+        <div class="body pad" style="padding-bottom:28px">
+          <div style="display:grid;grid-template-columns:2fr 1fr;grid-template-rows:1fr 1fr;gap:4px;height:180px;border-radius:18px;overflow:hidden;margin-top:6px">
+            <div data-photo="41" style="grid-row:span 2"></div><div data-photo="45"></div><div data-photo="49"></div>
+          </div>
+          <p class="small muted" style="margin:16px 0 2px">Deepak invited you to</p>
+          <h2 style="margin:0 0 8px;font-size:26px">Family</h2>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
+            <span class="pill mute">1,288 items</span><span class="pill mute">4 members</span><span class="pill ok">You can add photos</span>
+          </div>
+          <div class="card soft small" style="padding:12px">
+            Joining downloads previews of the album (~180 MB). Originals load when you open them. Photos you add are shared with all 4 members.
+          </div>
+          <div class="list" style="margin-top:10px">
+            <div class="row"><div class="grow"><div class="t1">Keep originals on my keeper</div><div class="t2">Home NAS stores everyone's full-size photos (~42 GB)</div></div><div class="toggle"></div></div>
+          </div>
+          <div style="flex:1"></div>
+          <p class="small muted" style="margin:0 0 6px">Join as</p>
+          <div class="card" style="padding:10px 12px;display:flex;gap:10px;align-items:center;margin-bottom:14px">
+            <div class="avatar" style="background:#b54a6a">R</div><b class="grow">Riya</b><span style="color:var(--accent)" class="small">Change</span>
+          </div>
+          <div class="btn primary block">Join album</div>
+        </div>
+      </div>
+      <figcaption><b>4d · Accept invite</b>Recipient sees what they're joining and the storage cost before accepting. Works for people without a full library — the app can be "shared albums only".
+        <div class="tags"><span class="tag">F6.1</span><span class="tag">F6.2</span><span class="tag">F6.9</span><span class="tag">F1.3</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 4e Location prompt when adding to shared album -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="body" style="position:relative">
+          <div class="grid c3" data-photos="18" data-seed="5" data-selected="0,1,2,4,5,7,8,9,10,12,13,14"></div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div style="font-size:26px;margin-bottom:4px">📍</div>
+            <h3 style="margin:0 0 4px">Share location too?</h3>
+            <p class="small muted" style="margin:0 0 14px">9 of 12 photos include where they were taken (Sintra, Lisbon). All 4 members of <b style="color:var(--ink)">Family</b> will be able to see it.</p>
+            <div class="grid c6" style="gap:3px;border-radius:10px;overflow:hidden;margin-bottom:16px" data-photos="6" data-seed="5"></div>
+            <div class="stack">
+              <div class="btn primary block">Share with location</div>
+              <div class="btn block">Remove location</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:14px" class="small muted">
+              <span style="width:18px;height:18px;border-radius:5px;border:2px solid var(--ink-3)"></span> Remember for this album
+            </div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>4e · Location prompt</b>Originals are shared as-is by default. Only when the photos being added carry location does the app ask; removing it creates location-free copies for this album.
+        <div class="tags"><span class="tag">F8.3</span><span class="tag">F5.2</span><span class="tag">F6.1</span></div>
+      </figcaption>
+    </figure>
+
+  </div>
+</div>
+<script src="assets/mockup.js?v=2"></script>
+</body>
+</html>

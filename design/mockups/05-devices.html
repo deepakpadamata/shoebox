@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>05 · Devices &amp; sync — Shoebox mockups</title>
+<link rel="stylesheet" href="assets/mockup.css?v=2">
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <a class="crumb" href="index.html">← All screens</a>
+    <h1>05 · Devices &amp; sync</h1>
+  </div>
+  <p class="page-intro">In a peer-to-peer app the devices <em>are</em> the cloud, so they get a first-class tab:
+    who's online, how they're connected, what each one keeps, and what's moving right now.</p>
+
+  <div class="screens">
+
+    <!-- 5a Devices list -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><h2>Devices</h2><div class="actions"><span>Add</span></div></div>
+        <div class="body pad">
+          <div class="scroll">
+            <div class="card" style="padding:12px 14px;display:flex;gap:12px;align-items:center;background:var(--ok-soft);border-color:#c6e6cf">
+              <span style="font-size:22px">✓</span>
+              <div class="small"><b>Library is protected</b><br>Every original exists on at least 2 devices, except 212 new ones syncing now.</div>
+            </div>
+
+            <div class="section-title">Your devices</div>
+            <div class="list">
+              <div class="row"><div class="ico">📱</div>
+                <div class="grow"><div class="t1">This iPhone</div><div class="t2">Phone · 41 GB used</div></div><span class="pill mute">this device</span></div>
+              <div class="row"><div class="ico">💻</div>
+                <div class="grow"><div class="t1">MacBook</div><div class="t2"><span class="dot on"></span> Direct · LAN · Keeper · 612 GB</div></div><span class="chev">›</span></div>
+              <div class="row"><div class="ico">🗄️</div>
+                <div class="grow"><div class="t1">Home NAS</div><div class="t2"><span class="dot relay"></span> Via relay (eu) · Keeper · 610 GB</div></div><span class="chev">›</span></div>
+              <div class="row"><div class="ico">📲</div>
+                <div class="grow"><div class="t1">iPad</div><div class="t2"><span class="dot"></span> Last seen 2 days ago · Viewer</div></div><span class="chev">›</span></div>
+            </div>
+
+            <div class="section-title">Activity</div>
+            <div class="list">
+              <div class="row"><div class="grow"><div class="t1">Sending to MacBook</div>
+                <div class="bar" style="margin:6px 0 4px"><i style="width:64%;background:var(--info)"></i></div>
+                <div class="t2">136 of 212 · 1.2 GB left · 38 MB/s</div></div></div>
+              <div class="row"><div class="grow"><div class="t1">Sending to Home NAS</div>
+                <div class="bar" style="margin:6px 0 4px"><i style="width:22%;background:var(--warn)"></i></div>
+                <div class="t2">Slower via relay · will speed up at home</div></div></div>
+              <div class="row"><div class="grow"><div class="t1">Paused: iPad</div><div class="t2">Offline</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="t"><span class="i">▦</span>Library</div>
+          <div class="t"><span class="i">▤</span>Albums</div>
+          <div class="t"><span class="i">👥</span>Shared</div>
+          <div class="t on"><span class="i">⇄</span>Devices</div>
+        </div>
+      </div>
+      <figcaption><b>5a · Devices</b>Protection status on top, then the roster with connection path (LAN / direct / relay) and role, then live transfer activity.
+        <div class="tags"><span class="tag">F4.2</span><span class="tag">F4.3</span><span class="tag">F4.4</span><span class="tag">F4.7</span><span class="tag">F7.1</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 5b Add device (show QR) -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span class="back">Cancel</span><h3>Add a device</h3><span style="width:44px"></span></div>
+        <div class="body pad center" style="align-items:center">
+          <p class="muted small" style="margin:8px 0 18px;max-width:270px">On the new device, install Shoebox and choose <b style="color:var(--ink)">“I use Shoebox on another device”</b>, then scan:</p>
+          <div class="qr" data-qr="pair-device" style="width:230px;height:230px"></div>
+          <p class="small muted" style="margin:16px 0 4px">Or on a computer without a camera:</p>
+          <div class="card soft mono" style="padding:8px 12px">shoebox-keeper pair <b>endpointaaq7…mx2a</b></div>
+          <p class="small muted" style="margin:6px 0 0">Code expires in 4:52</p>
+          <div style="flex:1"></div>
+          <div class="card" style="padding:12px;text-align:left;margin-bottom:28px;width:100%">
+            <div class="small"><b>Adding a computer or home server?</b> Make it a <b>Keeper</b> so it holds every original — it's the best way to keep your library safe.</div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>5b · Add device</b>Counterpart to onboarding 1c. Pairing ticket contains this device's endpoint address + a one-time secret; a CLI string covers headless keepers.
+        <div class="tags"><span class="tag">F4.1</span><span class="tag">F4.6</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 5c Device detail -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span class="back">‹ Devices</span><span></span></div>
+        <div class="body pad">
+          <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px">
+            <div class="ico" style="width:52px;height:52px;font-size:26px">🗄️</div>
+            <div><h3 style="margin:0">Home NAS</h3><div class="small muted">Shoebox keeper 0.4 · Linux</div></div>
+          </div>
+          <div class="list">
+            <div class="row"><div class="grow"><div class="t1">Status</div></div><span class="pill warn"><span class="dot relay"></span> Online via relay</span></div>
+            <div class="row"><div class="grow"><div class="t1">Role</div></div><span class="muted small">Keeper ›</span></div>
+            <div class="row"><div class="grow"><div class="t1">Storage</div>
+              <div class="bar" style="margin:6px 0 4px"><i style="width:61%;background:var(--accent)"></i></div>
+              <div class="t2">610 GB of 1 TB · 24,108 originals</div></div></div>
+            <div class="row"><div class="grow"><div class="t1">Added</div></div><span class="muted small">3 Mar 2026 by MacBook</span></div>
+          </div>
+          <div class="section-title">Connection</div>
+          <div class="list">
+            <div class="row"><div class="grow"><div class="t1">Path</div><div class="t2">Relay eu1 → hole-punch failed (symmetric NAT)</div></div></div>
+            <div class="row"><div class="grow"><div class="t1">Latency</div></div><span class="muted small">48 ms</span></div>
+            <div class="row"><div class="grow"><div class="t1">Endpoint ID</div><div class="t2 mono">k51q…9fz2</div></div><span style="color:var(--accent)" class="small">Copy</span></div>
+          </div>
+          <div style="flex:1"></div>
+          <div class="btn block" style="color:var(--risk);margin-bottom:28px">Remove device…</div>
+        </div>
+      </div>
+      <figcaption><b>5c · Device detail</b>Diagnostics live here, not buried in settings. Removing a device revokes its access to the library going forward.
+        <div class="tags"><span class="tag">F4.2</span><span class="tag">F4.3</span><span class="tag">F4.5</span><span class="tag">F8.4</span></div>
+      </figcaption>
+    </figure>
+
+  </div>
+
+  <h2 style="margin:56px 0 4px;font-size:20px">Mobile background sync</h2>
+  <p class="page-intro">Best-effort (decision #10). The OS decides when the app runs in the background, so the
+    app asks the user to open it when there's real work waiting and a peer is reachable. It never nags when nothing is waiting.</p>
+
+  <div class="screens">
+
+    <!-- 5d Lock screen nudge -->
+    <figure class="screen">
+      <div class="phone" style="background:#000">
+        <div class="body" style="position:relative">
+          <div data-photo="3" style="position:absolute;inset:0;filter:saturate(1.1) brightness(.8)"></div>
+          <div class="statusbar" style="position:relative;color:#fff"><span>21:07</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+          <div class="lock" style="position:relative">
+            <div class="date">Thursday 22 October</div>
+            <div class="time">21:07</div>
+            <div style="flex:1"></div>
+            <div class="notif">
+              <div class="appico">▣</div>
+              <div class="grow">
+                <div style="display:flex;justify-content:space-between"><b>Shoebox</b><span class="muted small">now</span></div>
+                <div><b>212 photos aren't backed up yet</b></div>
+                <div>You're home and Home NAS is reachable. Open Shoebox for about 3 minutes to finish.</div>
+              </div>
+            </div>
+            <div class="notif" style="margin-top:8px;opacity:.85">
+              <div class="appico" style="background:#7a5bb5">👥</div>
+              <div class="grow">
+                <div style="display:flex;justify-content:space-between"><b>Shoebox · Family</b><span class="muted small">2h ago</span></div>
+                <div>Ana added 12 photos</div>
+              </div>
+            </div>
+            <div style="height:60px"></div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>5d · "Open the app to finish" notification</b>Sent only when <i>all</i> of these are true: there are at-risk photos, a keeper or other device is reachable (LAN or direct), and background time ran out before the work finished. At most once a day. It gives an estimated time so it feels finite.
+        <div class="tags"><span class="tag">F4.4</span><span class="tag">F7.1</span><span class="tag">Decision #10</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 5e Foreground finishing -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>21:08</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><h2>Devices</h2><div class="actions"><span>Add</span></div></div>
+        <div class="body pad">
+          <div class="card" style="padding:14px;background:var(--info-soft);border-color:#c7d9f0">
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <b>Finishing backup…</b><span class="small" style="color:var(--info);font-weight:600">~2 min</span>
+            </div>
+            <div class="bar" style="margin:10px 0 8px;height:10px;background:#fff"><i style="width:66%;background:var(--info)"></i></div>
+            <div class="small" style="color:#2a4f7c">140 of 212 to <b>Home NAS</b> · direct · LAN · 41 MB/s</div>
+            <div class="small" style="color:#2a4f7c;margin-top:8px;padding-top:8px;border-top:1px solid #c7d9f0">
+              Keep Shoebox open. iPhone pauses syncing when the app is in the background. Leaving it open with the screen dimmed works too.
+            </div>
+          </div>
+
+          <div class="section-title">While you wait</div>
+          <div class="list">
+            <div class="row"><div class="ico">🔌</div><div class="grow"><div class="t1">Plug in to sync overnight</div><div class="t2" style="white-space:normal">On charge and Wi-Fi, iOS gives Shoebox more background time</div></div></div>
+            <div class="row"><div class="grow"><div class="t1">Keep screen awake until done</div></div><div class="toggle on"></div></div>
+          </div>
+
+          <div class="section-title">Your devices</div>
+          <div class="list">
+            <div class="row"><div class="ico">🗄️</div><div class="grow"><div class="t1">Home NAS</div><div class="t2"><span class="dot on"></span> Direct · LAN · Keeper</div></div><span class="pill info">receiving</span></div>
+            <div class="row"><div class="ico">💻</div><div class="grow"><div class="t1">MacBook</div><div class="t2"><span class="dot"></span> Asleep · 3h ago</div></div><span class="chev">›</span></div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="t"><span class="i">▦</span>Library</div>
+          <div class="t"><span class="i">▤</span>Albums</div>
+          <div class="t"><span class="i">👥</span>Shared</div>
+          <div class="t on"><span class="i">⇄</span>Devices</div>
+        </div>
+      </div>
+      <figcaption><b>5e · Finishing in the foreground</b>Opening from the notification lands here. The app says plainly why it needs to stay open. An optional keep-awake toggle stops auto-lock until the queue is empty.
+        <div class="tags"><span class="tag">F4.4</span><span class="tag">F8.1</span><span class="tag">Decision #10</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 5f Library header variant -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>13:30</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar" style="align-items:flex-end">
+          <div>
+            <h2>Library</h2>
+            <div class="small muted" style="display:flex;align-items:center;gap:6px;margin-top:2px">
+              <span class="dot"></span> No devices reachable · 212 waiting
+            </div>
+          </div>
+          <div class="actions"><span>Select</span><div class="avatar" style="width:30px;height:30px">D</div></div>
+        </div>
+        <div class="body">
+          <div class="pad" style="margin-bottom:4px">
+            <div class="card" style="padding:10px 12px;display:flex;gap:10px;align-items:flex-start;background:var(--warn-soft);border-color:#efd9a8">
+              <span style="font-size:18px">⏸</span>
+              <div class="grow small"><b>Backup paused: none of your devices are reachable.</b><br>
+                Home NAS was last seen 4h ago. Photos stay safe on this phone, and backup resumes when a device is reachable.</div>
+            </div>
+          </div>
+          <div class="scroll">
+            <div class="day-head"><b>Today</b><span>Lisbon · 14</span></div>
+            <div class="grid" data-photos="8" data-seed="2" data-badges="risk:0,1,2,3,4,5,6,7"></div>
+            <div class="day-head"><b>Yesterday</b><span>Sintra · 31</span></div>
+            <div class="grid" data-photos="12" data-seed="5" data-badges="risk:0,1,2,3"></div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="t on"><span class="i">▦</span>Library</div>
+          <div class="t"><span class="i">▤</span>Albums</div>
+          <div class="t"><span class="i">👥</span>Shared</div>
+          <div class="t"><span class="i">⇄</span>Devices</div>
+        </div>
+      </div>
+      <figcaption><b>5f · Nothing reachable</b>The opposite case: opening the app won't help, so it doesn't ask the user to. The banner explains, and the "1 copy" badges stay until a peer confirms it holds the photo.
+        <div class="tags"><span class="tag">F2.6</span><span class="tag">F4.2</span><span class="tag">Decision #10</span></div>
+      </figcaption>
+    </figure>
+
+  </div>
+
+  <h2 style="margin:56px 0 4px;font-size:20px">Headless keeper</h2>
+  <p class="page-intro">The keeper has no camera or screen, so pairing runs the other way round from 5b. The phone shows a
+    ticket string; the keeper's CLI dials it; both sides show the same code; the user confirms on the phone.</p>
+
+  <div class="screens">
+
+    <div style="flex:1 1 640px;max-width:760px;display:flex;flex-direction:column;gap:40px">
+    <!-- 5g Terminal pairing -->
+    <figure class="screen wide">
+      <div class="terminal">
+        <div class="tbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="title">you@nas: ~</span></div>
+<pre><span class="p">you@nas:~$</span> <span class="c">shoebox-keeper pair endpointaaq7…mx2a</span>
+<span class="d">Shoebox keeper 0.4.0 · endpoint k51q…9fz2</span>
+
+Connecting to pairing ticket…
+  <span class="ok">✓</span> Connected to <span class="hl">“Deepak's iPhone”</span>  <span class="d">(direct · LAN 192.168.1.23)</span>
+
+  Verification code:   <span class="hl">481 207</span>
+
+  Check that your phone shows the same code, then tap <span class="hl">“Yes, add Home NAS”</span>.
+  Waiting for confirmation… <span class="d">(Ctrl-C to cancel, expires in 4:41)</span>
+
+  <span class="ok">✓</span> Confirmed on Deepak's iPhone
+  <span class="ok">✓</span> Device list signed by library root  <span class="d">(added by Deepak's iPhone)</span>
+
+Device name     <span class="hl">Home NAS</span>            <span class="d">(change: --name)</span>
+Role            <span class="hl">keeper</span>              <span class="d">(keeps every original)</span>
+Storage         <span class="hl">/srv/shoebox</span>        <span class="d">1.0 TB free</span>
+Shared albums   <span class="hl">previews only</span>       <span class="d">(per album: shoebox-keeper album keep &lt;name&gt;)</span>
+
+Syncing library metadata…  <span class="ok">24,108 items</span>
+Fetching originals…        <span class="w">0 / 24,108 · 612 GB</span>  <span class="d">— runs in the background</span>
+
+Next: keep it running as a service
+  <span class="c">sudo shoebox-keeper service install</span>   <span class="d"># systemd unit, starts on boot</span>
+<span class="p">you@nas:~$</span> <span style="background:#e6e1d6"> </span></pre>
+      </div>
+      <figcaption><b>5g · Pairing a keeper from the terminal</b>Same SAS check as phone pairing (1c). Sensible defaults are printed with the flag to change each one. The service install is suggested, not automatic.
+        <div class="tags"><span class="tag">F4.1</span><span class="tag">F4.3</span><span class="tag">F4.6</span><span class="tag">F6.9</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 5i Status -->
+    <figure class="screen wide">
+      <div class="terminal">
+        <div class="tbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="title">you@nas: ~</span></div>
+<pre><span class="p">you@nas:~$</span> <span class="c">shoebox-keeper status</span>
+Home NAS · keeper · <span class="ok">running</span> (systemd, up 6d 4h)
+Relay      eu1 (n0 public) · direct paths: 2 of 3 peers
+
+DEVICE              STATUS                     LAST SEEN
+Deepak's iPhone     <span class="ok">● direct · LAN</span>             now
+MacBook             <span class="w">● relay eu1</span>                now
+iPad                <span class="d">○ offline</span>                  2d ago
+
+LIBRARY             24,108 items · 612 GB on disk
+  originals here    <span class="ok">24,108 / 24,108</span>
+  at risk (1 copy)  <span class="w">212</span>   <span class="d">← waiting on Deepak's iPhone (receiving, 140/212)</span>
+
+SHARED ALBUMS       ROLE        ORIGINALS
+  Family            can add     <span class="ok">kept</span> (1,288)
+  Ana's wedding     can view    previews only
+
+<span class="p">you@nas:~$</span> <span style="background:#e6e1d6"> </span></pre>
+      </div>
+      <figcaption><b>5i · Keeper status</b>The CLI equivalent of the Devices tab and Library health. It answers "is my keeper doing its job?" over SSH.
+        <div class="tags"><span class="tag">F4.2</span><span class="tag">F4.6</span><span class="tag">F7.1</span><span class="tag">F8.4</span></div>
+      </figcaption>
+    </figure>
+
+    </div>
+
+    <!-- 5h Phone confirm -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="body" style="position:relative">
+          <div class="navbar"><span class="back">Cancel</span><h3>Add a device</h3><span style="width:44px"></span></div>
+          <div class="pad center" style="opacity:.35">
+            <div class="qr" data-qr="pair-device" style="width:200px;height:200px;margin:10px auto"></div>
+            <div class="card soft mono" style="padding:8px 12px;display:inline-block">shoebox-keeper pair <b>endpointaaq7…mx2a</b></div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">
+              <div class="ico" style="width:46px;height:46px;font-size:24px">🗄️</div>
+              <div><b>“Home NAS” wants to join</b><div class="small muted">Linux · keeper · direct · LAN</div></div>
+            </div>
+            <p class="small muted center" style="margin:0 0 8px">Does the terminal show this code?</p>
+            <div class="code"><span>4</span><span>8</span><span>1</span><span>·</span><span>2</span><span>0</span><span>7</span></div>
+            <div class="card soft small" style="padding:10px 12px;margin-top:14px">
+              It will keep a copy of <b>every original</b> (612 GB) and can add and delete photos in your library.
+            </div>
+            <div style="display:flex;gap:10px;margin-top:14px">
+              <div class="btn" style="flex:1">No</div>
+              <div class="btn primary" style="flex:2">Yes, add Home NAS</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>5h · Confirm on the phone</b>The phone holds the root key, so it signs the new device into the list (decision #9). The sheet states exactly what the keeper will be able to do.
+        <div class="tags"><span class="tag">F4.1</span><span class="tag">F4.6</span><span class="tag">Decision #9</span></div>
+      </figcaption>
+    </figure>
+
+  </div>
+</div>
+<script src="assets/mockup.js?v=2"></script>
+</body>
+</html>

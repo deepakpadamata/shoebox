@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02 · Library — Shoebox mockups</title>
+<link rel="stylesheet" href="assets/mockup.css?v=2">
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <a class="crumb" href="index.html">← All screens</a>
+    <h1>02 · Library</h1>
+  </div>
+  <p class="page-intro">The everyday view. Looks like any photos app; the decentralized bits show up as a quiet
+    sync line under the title and as badges only on photos that need attention.</p>
+
+  <div class="screens">
+
+    <!-- 2a Mobile timeline -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar" style="align-items:flex-end">
+          <div>
+            <h2>Library</h2>
+            <div class="small muted" style="display:flex;align-items:center;gap:6px;margin-top:2px">
+              <span class="dot on"></span> 2 devices online <span style="color:var(--info)">· ↻ 34 left</span>
+            </div>
+          </div>
+          <div class="actions"><span>Select</span><div class="avatar" style="width:30px;height:30px">D</div></div>
+        </div>
+        <div class="body">
+          <div class="pad" style="margin-bottom:4px">
+            <div class="card" style="padding:10px 12px;display:flex;gap:10px;align-items:center;background:var(--risk-soft);border-color:#f2c9c0">
+              <span style="font-size:18px">⚠︎</span>
+              <div class="grow small"><b>212 photos are only on this phone.</b> Your MacBook will copy them next time it's online.</div>
+              <span style="color:var(--risk);font-weight:600" class="small">View</span>
+            </div>
+          </div>
+          <div class="scroll">
+            <div class="day-head"><b>Today</b><span>Lisbon · 14</span></div>
+            <div class="grid" data-photos="8" data-seed="2" data-badges="risk:0,1,2;sync:3" data-video="5"></div>
+            <div class="day-head"><b>Yesterday</b><span>Sintra · 31</span></div>
+            <div class="grid" data-photos="12" data-seed="5" data-fav="2,9" data-badges="sync:0"></div>
+            <div class="day-head"><b>Sun, 18 Oct</b><span>9</span></div>
+            <div class="grid" data-photos="8" data-seed="9"></div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="t on"><span class="i">▦</span>Library</div>
+          <div class="t"><span class="i">▤</span>Albums</div>
+          <div class="t"><span class="i">👥</span>Shared</div>
+          <div class="t"><span class="i">⇄</span>Devices</div>
+        </div>
+      </div>
+      <figcaption><b>2a · Timeline (mobile)</b>Badges only where it matters: red "1 copy" = not yet backed up anywhere else, blue ↻ = transferring. Everything else is assumed safe.
+        <div class="tags"><span class="tag">F2.3</span><span class="tag">F2.6</span><span class="tag">F4.4</span><span class="tag">F7.1</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 2b Multi-select -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar">
+          <h3>3 selected</h3>
+          <div class="actions"><span>Cancel</span></div>
+        </div>
+        <div class="body">
+          <div class="scroll">
+            <div class="day-head"><b>Yesterday</b><span>Sintra · 31</span></div>
+            <div class="grid c3" data-photos="18" data-seed="5" data-selected="1,3,4"></div>
+          </div>
+          <div class="sheet" style="position:relative;border-radius:22px 22px 0 0;padding-bottom:22px">
+            <div class="grab"></div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center" class="small">
+              <div><div class="ico" style="margin:0 auto 4px;width:48px;height:48px">⤴︎</div>Share</div>
+              <div><div class="ico" style="margin:0 auto 4px;width:48px;height:48px">＋</div>Add to album</div>
+              <div><div class="ico" style="margin:0 auto 4px;width:48px;height:48px">♥</div>Favorite</div>
+              <div><div class="ico" style="margin:0 auto 4px;width:48px;height:48px">📌</div>Keep on phone</div>
+            </div>
+            <div class="list" style="margin-top:14px">
+              <div class="row"><div class="grow"><div class="t1">Add to shared album…</div></div><span class="chev">›</span></div>
+              <div class="row"><div class="grow"><div class="t1">Send to nearby device</div><div class="t2">One-off transfer, any platform</div></div><span class="pill mute">v1.x</span></div>
+              <div class="row"><div class="grow"><div class="t1" style="color:var(--risk)">Delete from all devices</div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>2b · Multi-select actions</b>"Delete" is explicit about scope — it removes from every device (via Recently Deleted). "Keep on phone" pins originals locally.
+        <div class="tags"><span class="tag">F2.7</span><span class="tag">F2.8</span><span class="tag">F3.5</span><span class="tag">F5.2</span><span class="tag">F6.6</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 2d Recovery kit nag -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar" style="align-items:flex-end">
+          <div>
+            <h2>Library</h2>
+            <div class="small muted" style="display:flex;align-items:center;gap:6px;margin-top:2px">
+              <span class="dot on"></span> 2 devices online
+            </div>
+          </div>
+          <div class="actions"><span>Select</span><div style="position:relative"><div class="avatar" style="width:30px;height:30px">D</div><span style="position:absolute;right:-2px;top:-2px;width:10px;height:10px;border-radius:50%;background:var(--risk);border:2px solid #fff"></span></div></div>
+        </div>
+        <div class="body">
+          <div class="pad" style="margin-bottom:4px">
+            <div class="card" style="padding:12px;background:var(--accent-soft);border-color:#ecd3b8">
+              <div style="display:flex;gap:10px">
+                <span style="font-size:20px">🔑</span>
+                <div class="grow small">
+                  <b>Save your recovery kit</b>
+                  <div style="color:#6b4a2c;margin:2px 0 10px">If you lose all 3 devices, it's the only way to get your library back. Takes 30 seconds.</div>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <span class="btn sm primary">Save now</span>
+                    <span class="small" style="color:#6b4a2c">Remind me tomorrow</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="scroll">
+            <div class="day-head"><b>Today</b><span>Lisbon · 14</span></div>
+            <div class="grid" data-photos="8" data-seed="2"></div>
+            <div class="day-head"><b>Yesterday</b><span>Sintra · 31</span></div>
+            <div class="grid" data-photos="12" data-seed="5" data-fav="2,9"></div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="t on"><span class="i">▦</span>Library</div>
+          <div class="t"><span class="i">▤</span>Albums</div>
+          <div class="t"><span class="i">👥</span>Shared</div>
+          <div class="t"><span class="i">⇄</span>Devices</div>
+        </div>
+      </div>
+      <figcaption><b>2d · Recovery kit reminder</b>Appears at the top of Library until the kit is saved. "Remind me tomorrow" hides it for a day, and there's no "never". A red dot on the avatar leads to the same action in Settings. Risk banners (2a) take priority if both apply.
+        <div class="tags"><span class="tag">F1.4</span><span class="tag">Decision #2</span></div>
+      </figcaption>
+    </figure>
+
+    <div class="note" style="align-self:center">Should every tile show its copy count (e.g. "2×")? Current proposal: no — only at-risk and in-flight items get a badge, to keep the grid calm. See open question 13.</div>
+
+    <!-- 2c Desktop library -->
+    <figure class="screen wide" style="width:100%">
+      <div class="desktop">
+        <div class="titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="title">Shoebox</span></div>
+        <div class="split">
+          <aside class="sidebar">
+            <div class="it on">▦ Library <span class="n">24,108</span></div>
+            <div class="it">♥ Favorites <span class="n">312</span></div>
+            <div class="it">▶ Videos <span class="n">1,940</span></div>
+            <div class="it">🗑 Recently deleted <span class="n">18</span></div>
+            <div class="grp">Albums</div>
+            <div class="it">Lisbon 2026</div>
+            <div class="it">Kitchen renovation</div>
+            <div class="it">Film scans</div>
+            <div class="grp">Shared</div>
+            <div class="it">👥 Family <span class="n">● 2</span></div>
+            <div class="it">👥 Ana's wedding</div>
+            <div class="grp">Devices</div>
+            <div class="it"><span class="dot on"></span> This Mac <span class="n">keeper</span></div>
+            <div class="it"><span class="dot on"></span> Pixel 9 <span class="n">phone</span></div>
+            <div class="it"><span class="dot relay"></span> NAS <span class="n">relay</span></div>
+            <div class="it"><span class="dot"></span> iPad <span class="n">2d ago</span></div>
+          </aside>
+          <div class="main">
+            <div class="toolbar">
+              <h3>Library</h3>
+              <span class="pill info">↻ Receiving 34 from Pixel 9</span>
+              <div style="flex:1"></div>
+              <div class="seg" style="width:200px"><span>Years</span><span>Months</span><span class="on">Days</span></div>
+              <div class="search">⌕ Search</div>
+              <span class="btn sm primary">Import…</span>
+            </div>
+            <div class="scroll" style="padding:0 6px">
+              <div class="day-head"><b>Today · Lisbon</b><span>14 photos · 2 only on Pixel 9</span></div>
+              <div class="grid c7" data-photos="14" data-seed="2" data-badges="risk:0,1;sync:2,3" data-video="5"></div>
+              <div class="day-head"><b>Yesterday · Sintra</b><span>31 photos</span></div>
+              <div class="grid c7" data-photos="21" data-seed="5" data-fav="2,9"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>2c · Library (desktop)</b>Sidebar doubles as a live device roster — at a glance you see which devices are reachable and how (green = direct, amber = via relay). Drag-and-drop anywhere to import.
+        <div class="tags"><span class="tag">F2.2</span><span class="tag">F2.3</span><span class="tag">F2.6</span><span class="tag">F2.8</span><span class="tag">F4.2</span><span class="tag">F4.4</span></div>
+      </figcaption>
+    </figure>
+
+  </div>
+</div>
+<script src="assets/mockup.js?v=2"></script>
+</body>
+</html>

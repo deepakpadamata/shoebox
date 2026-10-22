@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>01 · Onboarding — Shoebox mockups</title>
+<link rel="stylesheet" href="assets/mockup.css?v=2">
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <a class="crumb" href="index.html">← All screens</a>
+    <h1>01 · Onboarding</h1>
+  </div>
+  <p class="page-intro">No sign-up. The first launch creates a device key; the user either starts a new library
+    or joins one they already have on another device. Two paths, both under a minute.</p>
+
+  <div class="screens">
+
+    <!-- 1a Welcome -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="body pad" style="justify-content:space-between;padding-bottom:28px">
+          <div>
+            <div class="grid c3 gap" style="margin:26px 6px 0" data-photos="9" data-seed="1" data-rounded></div>
+          </div>
+          <div>
+            <h2 style="font-size:30px;line-height:1.1;letter-spacing:-.02em;margin:0 0 10px">Your photos.<br>On your devices.</h2>
+            <p class="muted" style="margin:0 0 20px">Shoebox keeps your library in sync between your phone, computer and anything else you own — directly, without a cloud account.</p>
+            <div class="stack">
+              <div class="btn primary block">Start a new library</div>
+              <div class="btn block">I use Shoebox on another device</div>
+            </div>
+            <p class="small center muted" style="margin:14px 0 0">Joining a shared album? <span style="color:var(--accent);font-weight:600">Open invite link</span></p>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>1a · Welcome</b>Two clear paths: new library vs. join existing. Album invites are a third, lighter door.
+        <div class="tags"><span class="tag">F1.1</span><span class="tag">F1.2</span><span class="tag">F6.1</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 1b Profile + recovery -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span class="back">‹ Back</span><span class="small muted">Step 1 of 3</span></div>
+        <div class="body pad">
+          <h2 style="margin:4px 0 6px;font-size:24px">What should people call you?</h2>
+          <p class="muted small" style="margin:0 0 18px">Shown only to people you share albums with.</p>
+          <div style="display:flex;gap:12px;align-items:center;margin-bottom:22px">
+            <div class="avatar" style="width:56px;height:56px;font-size:20px">D</div>
+            <div class="card" style="flex:1;padding:12px 14px;font-size:16px">Deepak<span style="color:var(--accent)">|</span></div>
+          </div>
+
+          <div class="card" style="padding:14px;border-color:#ecd3b8;background:var(--accent-soft)">
+            <div style="display:flex;gap:10px">
+              <div style="font-size:22px">🔑</div>
+              <div>
+                <b>Save your recovery kit</b>
+                <p class="small" style="margin:4px 0 10px;color:#6b4a2c">There's no account to reset. If every device you own is lost, this kit is the only way to recover your library's identity and shared albums.</p>
+                <div style="display:flex;gap:8px">
+                  <span class="btn sm primary">Save to Files</span>
+                  <span class="btn sm">Show phrase</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="flex:1"></div>
+          <div class="btn primary block" style="margin-bottom:28px">Continue</div>
+        </div>
+      </div>
+      <figcaption><b>1b · Name &amp; recovery kit</b>Recovery kit is pushed hard here but skippable; a persistent banner nags until saved.
+        <div class="tags"><span class="tag">F1.3</span><span class="tag">F1.4</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 1c Join existing: scan + confirm code -->
+    <figure class="screen">
+      <div class="phone dark">
+        <div class="statusbar"><span>9:41</span><span class="island" style="background:#333"></span><span class="icons">●●● ▮</span></div>
+        <div class="body" style="position:relative">
+          <div style="position:absolute;inset:0;background:radial-gradient(circle at 50% 35%,#4a4a52,#111 70%)"></div>
+          <div style="position:relative;padding:8px 20px;text-align:center">
+            <h3 style="margin:6px 0 4px;font-size:18px">Scan the code on your other device</h3>
+            <p style="margin:0;color:#aaa;font-size:13px">Open Shoebox there → Devices → <b style="color:#fff">Add device</b></p>
+          </div>
+          <div style="position:relative;margin:28px auto 0;width:230px;height:230px;border-radius:24px;box-shadow:0 0 0 2000px rgba(0,0,0,.35)">
+            <svg viewBox="0 0 230 230" style="position:absolute;inset:0" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round">
+              <path d="M4 50V20Q4 4 20 4h30M180 4h30q16 0 16 16v30M226 180v30q0 16-16 16h-30M50 226H20Q4 226 4 210v-30"/>
+            </svg>
+          </div>
+          <div class="sheet" style="color:var(--ink)">
+            <div class="grab"></div>
+            <p class="small muted center" style="margin:0 0 6px">Connected to <b style="color:var(--ink)">Deepak's MacBook</b> · direct</p>
+            <h3 class="center" style="margin:0 0 12px">Does this code match?</h3>
+            <div class="code"><span>4</span><span>8</span><span>1</span><span>·</span><span>2</span><span>0</span><span>7</span></div>
+            <div style="display:flex;gap:10px;margin-top:16px">
+              <div class="btn" style="flex:1">No</div>
+              <div class="btn primary" style="flex:2">Yes, add this phone</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>1c · Join an existing library</b>Scan QR from a device already in the library, then confirm a short code shown on both screens (SAS) to rule out pairing with the wrong device.
+        <div class="tags"><span class="tag">F1.2</span><span class="tag">F4.1</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 1d Backup source + role -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span class="back">‹ Back</span><span class="small muted">Step 3 of 3</span></div>
+        <div class="body pad">
+          <h2 style="margin:4px 0 6px;font-size:24px">Back up this phone</h2>
+          <p class="muted small" style="margin:0 0 14px">Found <b style="color:var(--ink)">8,412 photos</b> and <b style="color:var(--ink)">391 videos</b> in your camera roll.</p>
+          <div class="list">
+            <div class="row"><div class="grow"><div class="t1">Back up camera roll</div><div class="t2">New photos too, automatically</div></div><div class="toggle on"></div></div>
+            <div class="row"><div class="grow"><div class="t1">Only on Wi-Fi</div></div><div class="toggle on"></div></div>
+          </div>
+
+          <div class="section-title">What should this phone keep?</div>
+          <div class="list">
+            <div class="row" style="background:var(--accent-soft)">
+              <div class="ico" style="background:#fff">📱</div>
+              <div class="grow"><div class="t1">Phone <span class="pill info" style="margin-left:4px">Recommended</span></div>
+                <div class="t2" style="white-space:normal">Previews of everything. Originals of photos taken here until they're safe on 2 devices.</div></div>
+              <div style="color:var(--accent);font-size:18px">◉</div>
+            </div>
+            <div class="row">
+              <div class="ico">🗄️</div>
+              <div class="grow"><div class="t1">Keeper</div><div class="t2" style="white-space:normal">Every original. For computers &amp; home servers.</div></div>
+              <div class="muted" style="font-size:18px">○</div>
+            </div>
+            <div class="row">
+              <div class="ico">🖼️</div>
+              <div class="grow"><div class="t1">Viewer</div><div class="t2">Previews only. Uses the least space.</div></div>
+              <div class="muted" style="font-size:18px">○</div>
+            </div>
+          </div>
+          <div style="flex:1"></div>
+          <div class="btn primary block" style="margin-bottom:28px">Start backup</div>
+        </div>
+      </div>
+      <figcaption><b>1d · Import source &amp; device role</b>Roles are the core storage idea: say what this device is for, Shoebox decides which bytes live here.
+        <div class="tags"><span class="tag">F1.5</span><span class="tag">F2.1</span><span class="tag">F4.3</span><span class="tag">F8.1</span></div>
+      </figcaption>
+    </figure>
+
+  </div>
+</div>
+<script src="assets/mockup.js?v=2"></script>
+</body>
+</html>

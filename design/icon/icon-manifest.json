@@ -1,0 +1,8 @@
+{
+  "default": "shoebox-icon.png",
+  "bg_color": "#2b5f5a",
+  "android_bg": "shoebox-icon-bg.png",
+  "android_fg": "shoebox-icon-fg.png",
+  "android_fg_scale": 85,
+  "android_monochrome": "shoebox-icon-mono.png"
+}

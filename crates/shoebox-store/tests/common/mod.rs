@@ -77,10 +77,13 @@ pub struct Rig {
 /// Node 0 creates a library whose root key the test holds; every node is certified as `roles[i]`
 /// (node 0 also becomes an admin), and the certificates are replicated to the others.
 pub async fn rig(c: &Cluster, roles: &[Role]) -> (Rig, Vec<Library>) {
+    rig_with_root(c, KeyPair::generate(), roles).await
+}
+
+pub async fn rig_with_root(c: &Cluster, root: KeyPair, roles: &[Role]) -> (Rig, Vec<Library>) {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
-    let root = KeyPair::generate();
     let backends: Vec<HybridBackend> = (0..c.len())
         .map(|i| HybridBackend::for_node(c.node(i).clone(), c.clock().clone()))
         .collect();
@@ -141,8 +144,16 @@ pub async fn rig(c: &Cluster, roles: &[Role]) -> (Rig, Vec<Library>) {
 }
 
 /// Like [`rig`], wrapped in `LibraryNode`s that sync on their own.
-pub async fn library_nodes(c: &Cluster, roles: &[Role]) -> (Rig, Vec<LibraryNode<Library>>) {
-    let (rig, libs) = rig(c, roles).await;
+pub async fn library_nodes_roles(c: &Cluster, roles: &[Role]) -> (Rig, Vec<LibraryNode<Library>>) {
+    library_nodes_with_root(c, KeyPair::generate(), roles).await
+}
+
+pub async fn library_nodes_with_root(
+    c: &Cluster,
+    root: KeyPair,
+    roles: &[Role],
+) -> (Rig, Vec<LibraryNode<Library>>) {
+    let (rig, libs) = rig_with_root(c, root, roles).await;
     let mut nodes = vec![];
     for (i, l) in libs.into_iter().enumerate() {
         let ln = LibraryNode::with_sync_config(
@@ -181,4 +192,10 @@ pub async fn converged(nodes: &[LibraryNode<Library>]) -> bool {
         }
     }
     true
+}
+
+/// Certify every node with the role in its own config (Cluster::with_roles).
+pub async fn library_nodes_auto(c: &Cluster) -> Vec<LibraryNode<Library>> {
+    let roles: Vec<Role> = (0..c.len()).map(|i| c.node(i).config().role).collect();
+    library_nodes_roles(c, &roles).await.1
 }

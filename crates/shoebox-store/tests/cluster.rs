@@ -85,7 +85,7 @@ async fn three_nodes_partition_edit_heal_converge() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn edits_flow_between_library_nodes_without_explicit_sync_calls() {
     let c = Cluster::new(3).await.unwrap();
-    let (_rig, nodes) = library_nodes(&c, &[Role::Keeper, Role::Keeper, Role::Keeper]).await;
+    let (_rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Keeper, Role::Keeper]).await;
     nodes[0].store().upsert_photo(photo(9, 90)).await.unwrap();
     wait_until(Duration::from_secs(20), || async {
         nodes[1].store().photo(&hash(9)).await.unwrap().is_some()
@@ -115,7 +115,7 @@ async fn edits_flow_between_library_nodes_without_explicit_sync_calls() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn offline_edits_converge_after_reconnect() {
     let c = Cluster::new(3).await.unwrap();
-    let (_rig, nodes) = library_nodes(&c, &[Role::Keeper, Role::Keeper, Role::Keeper]).await;
+    let (_rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Keeper, Role::Keeper]).await;
     nodes[0].store().upsert_photo(photo(1, 10)).await.unwrap();
     wait_until(Duration::from_secs(20), || async {
         nodes[2].store().photo(&hash(1)).await.unwrap().is_some()

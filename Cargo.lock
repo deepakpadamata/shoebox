@@ -4603,7 +4603,9 @@ name = "shoebox-store"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "bytes",
  "hex",
+ "iroh-blobs",
  "shoebox-core",
  "shoebox-node",
  "shoebox-store-docs",
@@ -4612,6 +4614,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing-subscriber",
+ "xtask",
 ]
 
 [[package]]

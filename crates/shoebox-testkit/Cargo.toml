@@ -1,10 +1,22 @@
 [package]
 name = "shoebox-testkit"
+description = "Multi-node test harness: in-process clusters, partitions, fake clock, convergence assertions."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "Apache-2.0 OR MIT"
 publish = false
+
+[dependencies]
+shoebox-core.workspace = true
+shoebox-node.workspace = true
+tokio.workspace = true
+tempfile.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+shoebox-store-mem.workspace = true
+futures.workspace = true
 
 [lints]
 workspace = true

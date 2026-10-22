@@ -59,7 +59,9 @@ impl AppCore {
         let mut best = at_risk;
         let mut last_progress = Instant::now();
         let mut reason = None;
-        if reached == 0 && total > 0 {
+        if total == 0 {
+            reason = Some("no other devices are paired yet".to_string());
+        } else if reached == 0 {
             reason = Some("none of your devices could be reached".to_string());
         } else {
             while at_risk > 0 {

@@ -90,24 +90,36 @@ async fn serve_blob(
 /// it), a file otherwise (with a warning).
 fn secret_store(app: &tauri::AppHandle, data_dir: &std::path::Path) -> Arc<dyn SecretStore> {
     #[cfg(target_os = "android")]
-    {
-        let store: Arc<dyn SecretStore> = Arc::new(crate::android_photos::AndroidKeystore(
-            app.state::<crate::android_photos::PhotoLibrary>().0.clone(),
-        ));
-        // Keys written by earlier builds (a key file under node/, or the file store) move into
-        // the keystore, so the device keeps its identity.
-        if let Err(e) = migrate_file_key(&data_dir.join("node"), store.as_ref(), "endpoint-key") {
-            tracing::warn!("could not move the device key into the keystore: {e:#}");
-        }
-        let files = FileStore::new(data_dir.join("secrets"));
-        if let Err(e) = crate::keystore::migrate_from_files(&files, store.as_ref(), "endpoint-key")
-        {
-            tracing::warn!("could not move the device key into the keystore: {e:#}");
-        }
-        return store;
-    }
+    return android_secret_store(app, data_dir);
     #[cfg(not(target_os = "android"))]
-    let _ = app;
+    {
+        let _ = app;
+        desktop_secret_store(data_dir)
+    }
+}
+
+#[cfg(target_os = "android")]
+fn android_secret_store(
+    app: &tauri::AppHandle,
+    data_dir: &std::path::Path,
+) -> Arc<dyn SecretStore> {
+    let store: Arc<dyn SecretStore> = Arc::new(crate::android_photos::AndroidKeystore(
+        app.state::<crate::android_photos::PhotoLibrary>().0.clone(),
+    ));
+    // Keys written by earlier builds (a key file under node/, or the file store) move into the
+    // keystore, so the device keeps its identity.
+    if let Err(e) = migrate_file_key(&data_dir.join("node"), store.as_ref(), "endpoint-key") {
+        tracing::warn!("could not move the device key into the keystore: {e:#}");
+    }
+    let files = FileStore::new(data_dir.join("secrets"));
+    if let Err(e) = crate::keystore::migrate_from_files(&files, store.as_ref(), "endpoint-key") {
+        tracing::warn!("could not move the device key into the keystore: {e:#}");
+    }
+    store
+}
+
+#[cfg(not(target_os = "android"))]
+fn desktop_secret_store(data_dir: &std::path::Path) -> Arc<dyn SecretStore> {
     #[cfg(all(feature = "keyring", desktop))]
     {
         let store = crate::keystore::KeyringStore::new("org.shoebox.desktop");

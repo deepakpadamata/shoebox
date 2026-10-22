@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Debug builds only. Run one background burst:
+             adb shell am broadcast -n org.shoebox.desktop/.BurstNow -a org.shoebox.desktop.BURST_NOW -->
+        <receiver android:name=".BurstNow" android:exported="true">
+            <intent-filter><action android:name="org.shoebox.desktop.BURST_NOW" /></intent-filter>
+        </receiver>
+    </application>
+</manifest>

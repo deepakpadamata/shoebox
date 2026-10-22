@@ -14,6 +14,7 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    BackgroundSync.schedule(applicationContext)
   }
 
   // The WebView draws edge to edge but does not report the system bars to CSS: hand the insets

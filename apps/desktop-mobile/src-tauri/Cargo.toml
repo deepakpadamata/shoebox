@@ -55,6 +55,9 @@ getrandom = "0.3"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"], optional = true }
 
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+
 [dev-dependencies]
 tempfile.workspace = true
 shoebox-core = { workspace = true, features = ["testing"] }
@@ -65,5 +68,10 @@ http-body-util = "0.1"
 [build-dependencies]
 tauri-build = { version = "2", optional = true , features = [] }
 
-[lints]
-workspace = true
+# Like the workspace (no unsafe code), except that the JNI entry point of the Android background
+# bridge needs `#[no_mangle]`; that one module opts in.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

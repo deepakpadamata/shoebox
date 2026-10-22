@@ -1347,6 +1347,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "http-body-util",
+ "jni 0.21.1",
  "keyring",
  "qrcode",
  "serde",

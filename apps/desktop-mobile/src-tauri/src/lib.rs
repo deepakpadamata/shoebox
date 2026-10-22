@@ -21,6 +21,8 @@ pub mod http;
 pub mod shell;
 
 #[cfg(all(feature = "tauri-app", target_os = "android"))]
+pub mod android_bridge;
+#[cfg(all(feature = "tauri-app", target_os = "android"))]
 pub mod android_photos;
 
 pub use crate::backup::pause_reason;

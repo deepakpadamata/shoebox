@@ -43,10 +43,7 @@ async fn subcommands_talk_to_the_running_daemon() {
         assert!(!ok && err.contains("not paired"), "{err}");
 
         let (ok, _, err) = run(&storage2, &["album", "list"]);
-        assert!(
-            !ok && err.contains("available after shared albums"),
-            "{err}"
-        );
+        assert!(!ok && err.contains("not paired"), "{err}");
 
         let (ok, _, err) = run(&storage2, &["pair", "not-a-ticket", "--yes"]);
         assert!(!ok && err.contains("pairing ticket"), "{err}");

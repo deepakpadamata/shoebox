@@ -14,7 +14,7 @@ be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held w
 | `address` | print this keeper's link (`shoebox-peer1…`), which a recovering device uses to reach it |
 | `status [--json]` | library counts, at-risk, devices and paths |
 | `devices [--json]` / `devices revoke <id>` | list devices / revoke one (this keeper must be an admin) |
-| `album list\|keep\|drop` | stubs: "available after shared albums" until M5-04 |
+| `album list [--json]` / `album keep <id>` / `album drop <id>` / `album join <invitation>` | shared albums this keeper is in; `keep` fetches every original of the album, `drop` lets them go; ids may be shortened to a unique prefix |
 | `service install [--system] [--user U] [--print]` / `service uninstall` | systemd unit (Linux) / launchd plist (macOS) |
 | `stop` | ask the daemon to shut down |
 
@@ -28,7 +28,7 @@ be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held w
                "redundancy_target": 2, "recovery_kit_saved": false },
   "devices": 3,
   "peers": [ { "id": "<64 hex>", "name": "Asha's phone", "path": "lan | direct | relay | none", "latency_ms": 12 } ],
-  "shared_albums": []
+  "shared_albums": [ { "id": "<32 hex>", "name": "Trip", "photos": 12, "members": 3, "keep_originals": false } ]
 }
 ```
 Unpaired keepers return only the top-level fields with `"paired": false`.

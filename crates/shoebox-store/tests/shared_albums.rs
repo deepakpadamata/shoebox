@@ -220,7 +220,7 @@ async fn the_background_loop_keeps_members_up_to_date_and_keep_originals_fetches
     .await
     .expect("thumbnail arrives on its own");
 
-    friend.set_keep_originals(&id, true).unwrap();
+    friend.set_keep_originals(&id, true).await.unwrap();
     let orig = it.original.hash;
     wait_until(Duration::from_secs(40), || {
         let f = f.clone();
@@ -228,6 +228,29 @@ async fn the_background_loop_keeps_members_up_to_date_and_keep_originals_fetches
     })
     .await
     .expect("original arrives once the album is kept in full");
+
+    // Turning it off lets go of the originals (the next cleanup frees them).
+    let held = |n: &Node, h: &Blake3Hash| {
+        let (n, h) = (n.clone(), *h);
+        async move {
+            n.blobs()
+                .protections(&h)
+                .await
+                .unwrap()
+                .iter()
+                .any(|p| matches!(p, Protection::Album(_)))
+        }
+    };
+    assert!(held(c.node(1), &orig).await);
+    friend.set_keep_originals(&id, false).await.unwrap();
+    assert!(
+        !held(c.node(1), &orig).await,
+        "the album no longer holds the original"
+    );
+    assert!(
+        held(c.node(1), &hash).await,
+        "but still holds the thumbnail"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

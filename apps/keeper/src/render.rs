@@ -67,6 +67,32 @@ pub fn status(v: &Value) -> String {
     out
 }
 
+pub fn albums(v: &Value) -> String {
+    let rows = v["albums"].as_array().cloned().unwrap_or_default();
+    if rows.is_empty() {
+        return "No shared albums. Join one with `shoebox-keeper album join <invitation>`.\n"
+            .into();
+    }
+    let mut out = String::from("ID        PHOTOS  PEOPLE  ORIGINALS  NAME\n");
+    for a in rows {
+        let id = a["id"].as_str().unwrap_or("");
+        let _ = writeln!(
+            out,
+            "{:<9} {:<7} {:<7} {:<10} {}",
+            &id[..id.len().min(8)],
+            a["photos"].as_u64().unwrap_or(0),
+            a["members"].as_u64().unwrap_or(0),
+            if a["keep_originals"] == true {
+                "kept"
+            } else {
+                "on demand"
+            },
+            a["name"].as_str().unwrap_or("")
+        );
+    }
+    out
+}
+
 pub fn devices(v: &Value) -> String {
     let mut out = String::from("ID        NAME                 ROLE     STATE\n");
     for d in v["devices"].as_array().into_iter().flatten() {

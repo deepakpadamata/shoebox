@@ -557,10 +557,26 @@ impl SharedAlbums {
         Ok((r.keep_originals, r.location.clone()))
     }
 
-    pub fn set_keep_originals(&self, id: &AlbumId, keep: bool) -> Result<()> {
-        self.entry(id)?.reg.lock().unwrap().keep_originals = keep;
+    /// Keep every original of the album on this device, or let them go: turning it off drops
+    /// the album's hold on the originals (they are freed by the next cleanup unless the library
+    /// or a pin needs them).
+    pub async fn set_keep_originals(&self, id: &AlbumId, keep: bool) -> Result<()> {
+        let e = self.entry(id)?;
+        e.reg.lock().unwrap().keep_originals = keep;
         self.save()?;
-        self.inner.wake.notify_one();
+        if keep {
+            self.inner.wake.notify_one();
+        } else {
+            for item in e.album.items(Page::all()).await? {
+                let h = item_blob(&item, BlobKind::Original);
+                let _ = self
+                    .inner
+                    .node
+                    .blobs()
+                    .unprotect(&h, Protection::Album(*id))
+                    .await;
+            }
+        }
         Ok(())
     }
 

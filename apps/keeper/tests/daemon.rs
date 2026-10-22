@@ -343,3 +343,106 @@ async fn an_unpaired_keeper_recovers_with_the_phrase_through_a_surviving_device(
     assert!(a["link"].as_str().unwrap().starts_with("shoebox-peer1"));
     d.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_keeper_joins_an_album_and_keeps_every_original_when_told_to() {
+    use shoebox_core::model::SharedItem;
+    let dir = tempfile::tempdir().unwrap();
+    let (inode, ln) = inviter(dir.path(), &["photo-gps.jpg", "IMG_0001.jpg"]).await;
+    let ticket = ln
+        .start_pairing(Role::Keeper, Duration::from_secs(300), accept())
+        .await
+        .unwrap();
+    let d = Daemon::start(opts(dir.path())).await.unwrap();
+    Client::connect(d.control_path())
+        .await
+        .unwrap()
+        .pair(&ticket.to_string(), "pi", |_| true)
+        .await
+        .unwrap();
+
+    // The laptop shares one photo in an album and invites the keeper.
+    let albums =
+        shoebox_store::SharedAlbums::open(inode.clone(), &dir.path().join("laptop-albums"), true)
+            .await
+            .unwrap();
+    std::fs::create_dir_all(dir.path().join("laptop-albums")).ok();
+    let id = albums.create("Trip", "laptop").await.unwrap();
+    // A photo that is not in the keeper's library (so the library does not bring it along).
+    let mk = |seed: u8, len: usize| {
+        let node = inode.clone();
+        async move {
+            let hash = node
+                .blobs()
+                .add_bytes(vec![seed; len], shoebox_node::Protection::Library)
+                .await
+                .unwrap();
+            shoebox_core::model::BlobRef {
+                hash,
+                size: len as u64,
+                mime: "image/jpeg".into(),
+            }
+        }
+    };
+    let original = mk(1, 20_000).await;
+    let item = SharedItem {
+        id: original.hash,
+        original,
+        shared_hash: None,
+        preview: mk(2, 900).await,
+        thumb: mk(3, 100).await,
+        added_by: ln.device(),
+        added_at: shoebox_core::Timestamp(1),
+        taken_at: shoebox_core::Timestamp(0),
+    };
+    albums.add_items(&id, vec![item.clone()]).await.unwrap();
+    let invite = albums
+        .invite(&id, shoebox_core::model::MemberRole::Contributor, 7)
+        .await
+        .unwrap();
+
+    let mut c = Client::connect(d.control_path()).await.unwrap();
+    let joined = c
+        .call_raw(serde_json::json!({"cmd":"album","action":"join","text":invite}))
+        .await
+        .unwrap();
+    assert_eq!(joined["name"], "Trip");
+    let list = c
+        .call_raw(serde_json::json!({"cmd":"album","action":"list"}))
+        .await
+        .unwrap();
+    assert_eq!(list["albums"][0]["keep_originals"], false);
+    let short = &list["albums"][0]["id"].as_str().unwrap()[..6].to_string();
+    // Previews arrive on their own; the original only once the keeper is told to keep it all.
+    let preview = item.preview.hash;
+    assert!(
+        wait_for(30, || async {
+            d.node().blobs().has(&preview).await.unwrap()
+        })
+        .await,
+        "preview arrives"
+    );
+    assert!(
+        !d.node().blobs().has(&item.original.hash).await.unwrap(),
+        "originals are on demand until the keeper is told to keep them"
+    );
+    c.call_raw(serde_json::json!({"cmd":"album","action":"keep","id":short}))
+        .await
+        .unwrap();
+    let original = item.original.hash;
+    assert!(
+        wait_for(30, || async {
+            d.node().blobs().has(&original).await.unwrap()
+        })
+        .await,
+        "the original arrives once the album is kept in full"
+    );
+    let err = c
+        .call_raw(serde_json::json!({"cmd":"album","action":"keep","id":"zzzz"}))
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("no album"), "{err:#}");
+    let status = c.status().await.unwrap();
+    assert_eq!(status["shared_albums"][0]["keep_originals"], true);
+    d.shutdown().await.unwrap();
+}

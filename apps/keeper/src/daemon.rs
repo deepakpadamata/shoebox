@@ -78,6 +78,7 @@ pub(crate) struct Shared {
     pub opts: KeeperOptions,
     pub started: Instant,
     pub library: Mutex<Option<LibraryNode<Library>>>,
+    pub albums: Mutex<Option<shoebox_store::SharedAlbums>>,
     pub shutdown: watch::Sender<bool>,
 }
 
@@ -110,6 +111,9 @@ impl Shared {
         ln.start_maintenance(MaintenanceConfig::default());
         ln.start_presence(PresenceConfig::default()).await?;
         *self.library.lock().await = Some(ln);
+        let albums =
+            shoebox_store::SharedAlbums::open(self.node.clone(), &self.opts.storage, true).await?;
+        *self.albums.lock().await = Some(albums);
         // A rotation replaces the capability: remember the new one so a restart rejoins it.
         let mut events = self.node.events();
         let storage = self.opts.storage.clone();
@@ -176,6 +180,7 @@ impl Daemon {
             opts: opts.clone(),
             started: Instant::now(),
             library: Mutex::new(None),
+            albums: Mutex::new(None),
             shutdown,
         });
 
@@ -205,6 +210,11 @@ impl Daemon {
         })
     }
 
+    /// The node, for tests that look at what the keeper holds.
+    pub fn node(&self) -> &Node {
+        &self.shared.node
+    }
+
     pub fn control_path(&self) -> &Path {
         &self.control_path
     }
@@ -224,6 +234,7 @@ impl Daemon {
         self.server.abort();
         let _ = self.server.await;
         let _ = std::fs::remove_file(&self.control_path);
+        drop(self.shared.albums.lock().await.take());
         if let Some(ln) = self.shared.library.lock().await.take() {
             drop(ln);
         }

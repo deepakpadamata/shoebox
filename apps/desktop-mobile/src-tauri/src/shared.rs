@@ -465,7 +465,7 @@ impl AppCore {
         let sa = self.sa().await?;
         let id = album_id(album)?;
         if let Some(k) = keep_originals {
-            sa.set_keep_originals(&id, k)?;
+            sa.set_keep_originals(&id, k).await?;
         }
         if let Some(l) = location {
             sa.set_location_policy(&id, &l)?;

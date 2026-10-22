@@ -88,3 +88,16 @@ Implementation status per issue. Assumptions made along the way are logged in
 | M4-11 Gestures, memory | ◐ | swipe, pinch zoom, pull-down close, pinch grid, long-press drag select; no 100k-on-4-GB memory budget (about 7 KB per photo per replica today) |
 | M4-12 Packaging | ⬜ | release signing, Play and TestFlight not done |
 
+## M5 · Shared albums — built; checked with real nodes in tests and in two browser instances
+
+| Issue | Status | Notes |
+|---|---|---|
+| M5-01 AlbumStore backend | ✅ | iroh-docs albums (existing conformance suite) + reopen after restart, 50-member / 50k-photo limits |
+| M5-02 Invites, join, limits | ◐ | single-use 7-day invitations with their own secret, expiry/used errors, QR + text; no shared-albums-only mode; trust model in A-078 |
+| M5-03 Location prompt, stripped copies | ◐ | JPEG, PNG, MP4/MOV stripped byte-exactly; HEIC refused; Ask / Always keep / Always remove with "remember" |
+| M5-04 Fetch policy, keeper keep-originals | ✅ | per-album keep flag honoured by the fetcher, turning it off releases the originals, album references block GC, `shoebox-keeper album list|keep|drop|join` |
+| M5-05 Members and removal | ✅ | people list, leave, owner removes (album moves to a new space, others follow by themselves) |
+| M5-06 Feed, presence, profiles | ◐ | feed grouped within 10 minutes, shared display names, unread counts; no presence/gossip nudges, no avatars |
+| M5-07 Save to my library | ✅ | same blobs, idempotent |
+| M5-08 Shared album UI | ◐ | list, album, add, invite, accept, location sheet, people, activity, settings on desktop and phone; not every mockup detail |
+

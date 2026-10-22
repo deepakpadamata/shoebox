@@ -69,7 +69,7 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Shared albums (available after shared albums land).
+    /// Shared albums this keeper belongs to: list, keep every original, or join one.
     Album {
         #[command(subcommand)]
         action: AlbumCmd,
@@ -91,9 +91,17 @@ enum DevicesCmd {
 
 #[derive(Subcommand)]
 enum AlbumCmd {
-    List,
+    /// List the albums with their size and whether originals are kept.
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Keep every original of this album on the keeper (fetches them all).
     Keep { id: String },
+    /// Stop keeping originals (they are freed on the next cleanup unless the library needs them).
     Drop { id: String },
+    /// Join an album with the invitation text its owner shows.
+    Join { invitation: String },
 }
 
 #[derive(Subcommand)]
@@ -244,11 +252,38 @@ async fn main() -> Result<()> {
                 .await?;
             println!("Revoked {id}. It can no longer connect to this library.");
         }
-        Cmd::Album { .. } => {
-            client(&storage)
-                .await?
-                .call_raw(json!({"cmd":"album"}))
-                .await?;
+        Cmd::Album { action } => {
+            let mut c = client(&storage).await?;
+            match action {
+                AlbumCmd::List { json } => {
+                    let data = c.call_raw(json!({"cmd":"album","action":"list"})).await?;
+                    print(json, &data, render::albums);
+                }
+                AlbumCmd::Keep { id } => {
+                    let d = c
+                        .call_raw(json!({"cmd":"album","action":"keep","id":id}))
+                        .await?;
+                    println!(
+                        "Keeping every original of “{}”.",
+                        d["name"].as_str().unwrap_or(&id)
+                    );
+                }
+                AlbumCmd::Drop { id } => {
+                    let d = c
+                        .call_raw(json!({"cmd":"album","action":"drop","id":id}))
+                        .await?;
+                    println!(
+                        "No longer keeping originals of “{}”.",
+                        d["name"].as_str().unwrap_or(&id)
+                    );
+                }
+                AlbumCmd::Join { invitation } => {
+                    let d = c
+                        .call_raw(json!({"cmd":"album","action":"join","text":invitation}))
+                        .await?;
+                    println!("Joined “{}”.", d["name"].as_str().unwrap_or("the album"));
+                }
+            }
         }
         Cmd::Stop => {
             client(&storage)

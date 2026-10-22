@@ -163,6 +163,9 @@ pub struct AppCore {
     file: Mutex<AppFile>,
     events: broadcast::Sender<AppEvent>,
     pending_pairing: PendingAnswer,
+    pub(crate) photo_source: Mutex<Option<Arc<dyn crate::photos_source::PhotoSource>>>,
+    pub(crate) backup: tokio::sync::Mutex<crate::backup::BackupState>,
+    pub(crate) backup_running: tokio::sync::Mutex<()>,
 }
 
 impl AppCore {
@@ -200,6 +203,7 @@ impl AppCore {
             None => Node::open(config).await?,
         };
         let (events, _) = broadcast::channel(512);
+        let backup_state = crate::backup::BackupState::load(&dir);
         let core = Arc::new(AppCore {
             dir,
             opts,
@@ -208,6 +212,9 @@ impl AppCore {
             file: Mutex::new(file),
             events,
             pending_pairing: Mutex::new(PairingSlot::Idle),
+            photo_source: Mutex::new(None),
+            backup: tokio::sync::Mutex::new(backup_state),
+            backup_running: tokio::sync::Mutex::new(()),
         });
         core.forward_node_events();
         let ticket = core.file.lock().unwrap().ticket.clone();
@@ -233,7 +240,7 @@ impl AppCore {
         self.events.subscribe()
     }
 
-    fn emit(&self, e: AppEvent) {
+    pub(crate) fn emit(&self, e: AppEvent) {
         let _ = self.events.send(e);
     }
 
@@ -251,7 +258,7 @@ impl AppCore {
         self.node.shutdown().await
     }
 
-    async fn ln(&self) -> Result<LibraryNode<Library>> {
+    pub(crate) async fn ln(&self) -> Result<LibraryNode<Library>> {
         self.library
             .read()
             .await

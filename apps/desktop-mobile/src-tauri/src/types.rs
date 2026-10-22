@@ -178,6 +178,40 @@ ts_type! {
 }
 
 ts_type! {
+    /// Camera-roll backup rules (mockup 5e). Off until the user turns it on.
+    pub struct BackupPolicy {
+        pub enabled: bool,
+        pub wifi_only: bool,
+        pub charging_only: bool,
+        /// Pause below this battery level unless charging.
+        pub min_battery: u8,
+    }
+}
+
+ts_type! {
+    pub struct BackupStatus {
+        pub policy: BackupPolicy,
+        /// `granted`, `limited`, `denied` or `unavailable` (no camera roll on this device).
+        pub permission: String,
+        pub imported: u32,
+        pub pending: u32,
+        /// Why it is waiting right now, if it is.
+        pub paused: Option<String>,
+        pub last_scan_ms: f64,
+        pub last_error: Option<String>,
+    }
+}
+
+ts_type! {
+    pub struct BackupReport {
+        pub imported: u32,
+        pub duplicates: u32,
+        pub pending: u32,
+        pub failed: Vec<String>,
+    }
+}
+
+ts_type! {
     pub struct FreeUpReport {
         pub photos: u32,
         pub bytes: f64,
@@ -228,5 +262,7 @@ ts_type! {
         PairingFailed { reason: String },
         RemovedFromLibrary,
         LibraryRotated,
+        BackupProgress { done: u32, total: u32 },
+        BackupPaused { reason: Option<String> },
     }
 }

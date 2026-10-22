@@ -152,6 +152,7 @@
 
 <style>
   .page { padding: 18px; max-width: 760px; overflow: auto; height: 100%; }
+  @media (max-width: 720px) { .page { padding: 12px 14px; } }
   .head { margin-bottom: 14px; }
   .section { font-size: 12px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; margin: 20px 0 8px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-3); display: inline-block; }

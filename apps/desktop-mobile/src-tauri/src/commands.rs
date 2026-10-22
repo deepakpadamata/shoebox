@@ -63,6 +63,9 @@ pub const COMMANDS: &[&str] = &[
     "export_library",
     "rename_album",
     "set_poster",
+    "backup_status",
+    "backup_configure",
+    "backup_run",
 ];
 
 pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Value> {
@@ -197,6 +200,9 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
                 .await?;
             Ok(json!({}))
         }
+        "backup_status" => out(core.backup_status().await?),
+        "backup_configure" => out(core.backup_configure(arg(&args, "policy")?).await?),
+        "backup_run" => out(core.backup_run(true).await?),
         "export_library" => out(core.export_library(&arg::<String>(&args, "dest")?).await?),
         other => bail!("unknown command `{other}`"),
     }

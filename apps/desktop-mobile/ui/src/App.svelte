@@ -4,6 +4,8 @@
   import { section } from './lib/route.svelte';
   import Onboarding from './screens/Onboarding.svelte';
   import Shell from './screens/Shell.svelte';
+  import MobileShell from './screens/MobileShell.svelte';
+  import { viewport } from './lib/viewport.svelte';
   import Components from './dev/Components.svelte';
 
   onMount(start);
@@ -17,6 +19,8 @@
   <div class="splash"><b>Shoebox could not start</b><span class="muted">{app.error}</span></div>
 {:else if !app.state?.has_library}
   <Onboarding />
+{:else if viewport.mobile}
+  <MobileShell />
 {:else}
   <Shell />
 {/if}

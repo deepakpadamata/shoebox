@@ -985,6 +985,87 @@ impl AppCore {
         })
     }
 
+    // ---------- export ----------
+
+    /// Copy every original that is on this device into `dest/<year>/<month>/` as
+    /// `<date>_<time>_<id>.<ext>` (plus `library.json` with the metadata), checking each file
+    /// against its content hash. Nothing in the library changes.
+    pub async fn export_library(&self, dest: &str) -> Result<ExportReport> {
+        let ln = self.ln().await?;
+        let dest = PathBuf::from(dest);
+        ensure!(
+            !dest.as_os_str().is_empty(),
+            "choose a folder to export into"
+        );
+        std::fs::create_dir_all(&dest).with_context(|| format!("creating {}", dest.display()))?;
+        let photos = ln
+            .store()
+            .photos_by_time(TimeRange::ALL, Page::all())
+            .await?;
+        let albums = ln.store().albums().await?;
+        let mut membership: std::collections::HashMap<Blake3Hash, Vec<String>> = Default::default();
+        for a in &albums {
+            for id in ln.store().album_items(&a.id, Page::all()).await? {
+                membership.entry(id).or_default().push(a.name.clone());
+            }
+        }
+        let (mut written, mut missing, mut bytes) = (0u32, 0u32, 0u64);
+        let mut manifest = vec![];
+        for rec in &photos {
+            let Some(size) = self.node.blobs().size(&rec.original.hash).await? else {
+                missing += 1;
+                continue;
+            };
+            let when = crate::export::civil(rec.taken_at.0);
+            let ext = crate::export::extension(&rec.original.mime);
+            let dir = dest
+                .join(format!("{:04}", when.0))
+                .join(format!("{:02}", when.1));
+            std::fs::create_dir_all(&dir)?;
+            let name = format!(
+                "{:04}-{:02}-{:02}_{:02}{:02}{:02}_{}.{ext}",
+                when.0,
+                when.1,
+                when.2,
+                when.3,
+                when.4,
+                when.5,
+                &rec.id.to_string()[..8]
+            );
+            let path = dir.join(&name);
+            if path.metadata().map(|m| m.len() == size).unwrap_or(false) {
+                // An earlier export already wrote this file.
+            } else {
+                let data = self.node.blobs().get(&rec.original.hash).await?;
+                ensure!(
+                    Blake3Hash::of_bytes(&data) == rec.original.hash,
+                    "{name} does not match its content hash; not exported"
+                );
+                std::fs::write(&path, &data)?;
+            }
+            written += 1;
+            bytes += size;
+            manifest.push(serde_json::json!({
+                "id": rec.id.to_string(),
+                "file": path.strip_prefix(&dest).unwrap_or(&path).display().to_string(),
+                "taken_at": rec.taken_at.0,
+                "favorite": rec.favorite.value,
+                "deleted": rec.deleted_at.value.is_some(),
+                "albums": membership.get(&rec.id).cloned().unwrap_or_default(),
+            }));
+        }
+        std::fs::write(
+            dest.join("library.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({ "photos": manifest }))?,
+        )?;
+        Ok(ExportReport {
+            written,
+            missing,
+            bytes: bytes as f64,
+            folder: dest.display().to_string(),
+        })
+    }
+
     // ---------- settings ----------
 
     pub async fn settings(&self) -> Result<Settings> {

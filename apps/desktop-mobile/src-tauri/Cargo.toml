@@ -27,7 +27,7 @@ default = []
 # A plain HTTP bridge to the same commands (dev, UI review in a browser, end-to-end tests).
 http = ["dep:axum", "dep:tokio-stream", "dep:tower-http", "dep:clap"]
 # The Tauri 2 shell. Needs the platform webview; see README.md.
-tauri-app = ["dep:tauri", "dep:tauri-build"]
+tauri-app = ["dep:tauri", "dep:tauri-build", "keyring"]
 # Platform keystore (macOS Keychain, Windows Credential Manager, Secret Service).
 keyring = ["dep:keyring"]
 
@@ -48,7 +48,7 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 axum = { version = "0.8", optional = true }
 tokio-stream = { version = "0.1", optional = true }
 tower-http = { version = "0.6", features = ["fs"], optional = true }
-tauri = { version = "2", optional = true }
+tauri = { version = "2", optional = true, features = ["tray-icon"] }
 keyring = { version = "3", optional = true }
 getrandom = "0.3"
 clap = { version = "4", features = ["derive"], optional = true }

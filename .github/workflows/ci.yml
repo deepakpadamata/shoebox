@@ -57,3 +57,24 @@ jobs:
         run: |
           python3 -m unittest scripts/test_check_no_app_deps.py
           python3 scripts/check-no-app-deps.py
+
+  desktop-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+        working-directory: apps/desktop-mobile/ui
+      - run: npm run check
+        working-directory: apps/desktop-mobile/ui
+      - run: npm test
+        working-directory: apps/desktop-mobile/ui
+      - run: npm run build
+        working-directory: apps/desktop-mobile/ui
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: App core and HTTP bridge tests
+        run: cargo test -p desktop-mobile --features http
+      - name: TypeScript bindings are up to date
+        run: git diff --exit-code apps/desktop-mobile/ui/src/bindings

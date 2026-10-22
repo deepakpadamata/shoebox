@@ -15,6 +15,20 @@
   let folder = $state('');
   let target = $state('2');
   let theme = $state(localStorage.getItem('theme') ?? 'system');
+  let exportDir = $state('');
+  let exporting = $state(false);
+
+  async function doExport() {
+    exporting = true;
+    try {
+      const r = await api.exportLibrary(exportDir.trim());
+      toast(`Exported ${r.written} originals${r.missing ? `; ${r.missing} are on other devices and were skipped` : ''}`);
+    } catch (e) {
+      fail(e);
+    } finally {
+      exporting = false;
+    }
+  }
 
   async function load() {
     s = await api.settings();
@@ -83,6 +97,15 @@
     <div class="row-flex" style="margin-top:8px">
       <input class="input grow" placeholder="/Users/you/Pictures/Inbox" bind:value={folder} />
       <Button size="sm" disabled={!folder.trim()} onclick={() => save(async () => { await api.watchFolder(folder); folder = ''; }, 'Watching')}>Watch</Button>
+    </div>
+
+    <div class="section">Export</div>
+    <div class="card pad stack">
+      <p class="small muted" style="margin:0">Copies every original on this device into plain folders by year and month, with a <span class="mono">library.json</span> listing favorites and albums. Your library is never locked in.</p>
+      <div class="row-flex">
+        <input class="input grow" placeholder="/Users/you/Shoebox export" bind:value={exportDir} />
+        <Button size="sm" disabled={!exportDir.trim() || exporting} onclick={doExport}>{exporting ? 'Exporting…' : 'Export'}</Button>
+      </div>
     </div>
 
     <div class="section">Appearance</div>

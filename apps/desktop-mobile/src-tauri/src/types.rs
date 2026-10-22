@@ -166,6 +166,16 @@ ts_type! {
 }
 
 ts_type! {
+    pub struct ExportReport {
+        pub written: u32,
+        /// Photos whose original is not on this device (nothing was exported for them).
+        pub missing: u32,
+        pub bytes: f64,
+        pub folder: String,
+    }
+}
+
+ts_type! {
     pub struct FreeUpReport {
         pub photos: u32,
         pub bytes: f64,

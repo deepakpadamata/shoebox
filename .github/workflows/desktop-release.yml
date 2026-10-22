@@ -1,0 +1,53 @@
+name: Release desktop
+
+# Tagging `desktop-vX.Y.Z` builds installers for macOS (universal), Windows and Linux with
+# tauri-action and attaches them (and the updater manifest) to a GitHub release.
+#
+# One-time setup, not done yet:
+#   * `npx tauri signer generate` -> put the public key in tauri.conf.json (plugins.updater.pubkey,
+#     once the updater plugin is added) and the private key + password in the repository secrets
+#     TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+#   * Apple Developer ID certificate + notarisation secrets (APPLE_CERTIFICATE, APPLE_ID, ...) and a
+#     Windows code-signing certificate, or users get "unidentified developer" warnings.
+
+on:
+  push:
+    tags: ["desktop-v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, args: "--target universal-apple-darwin" }
+          - { os: windows-latest, args: "" }
+          - { os: ubuntu-22.04, args: "" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux build dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+        working-directory: apps/desktop-mobile/ui
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop-mobile
+          tauriScript: npx --prefix ui tauri
+          args: ${{ matrix.args }} -- --features tauri-app
+          tagName: ${{ github.ref_name }}
+          releaseName: "Shoebox desktop ${{ github.ref_name }}"
+          releaseDraft: true

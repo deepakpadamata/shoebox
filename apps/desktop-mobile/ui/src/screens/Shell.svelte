@@ -80,6 +80,10 @@
     <header class="toolbar">
       <h3>{title}</h3>
       <span class="grow"></span>
+      <span class="status small muted" title={app.syncError}>
+        <span class="sd" class:busy={app.syncing.length > 0} class:bad={!!app.syncError && app.syncing.length === 0}></span>
+        {app.syncing.length > 0 ? 'Syncing…' : app.syncError ? 'Some devices are not reachable' : 'Up to date'}
+      </span>
       {#if app.importProgress}<span class="small muted">Importing {app.importProgress.done} / {app.importProgress.total}…</span>{/if}
       <Button size="sm" onclick={() => (importOpen = true)}>＋ Import</Button>
     </header>
@@ -133,6 +137,10 @@
   .toolbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); }
   .toolbar h3 { margin: 0; font-size: 17px; }
   .banners { padding: 10px 18px 0; }
+  .status { display: inline-flex; align-items: center; gap: 6px; }
+  .sd { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .sd.busy { background: var(--info); }
+  .sd.bad { background: var(--warn); }
   .content { flex: 1; min-height: 0; overflow: hidden; }
   .input { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 0 12px; color: var(--ink); font: inherit; width: 100%; }
 </style>

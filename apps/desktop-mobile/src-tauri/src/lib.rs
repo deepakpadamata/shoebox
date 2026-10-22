@@ -6,6 +6,7 @@
 pub mod blob;
 pub mod commands;
 mod core;
+mod export;
 pub mod keystore;
 pub mod types;
 

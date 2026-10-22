@@ -344,3 +344,68 @@ async fn declining_the_code_leaves_the_joining_app_without_a_library() {
     a.shutdown().await.unwrap();
     b.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn exporting_writes_verified_originals_and_a_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    let ids: Vec<String> = core
+        .library_page(None, 10)
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    let album = core.create_album("Trip").await.unwrap();
+    core.album_add(&album.id, &ids[..1]).await.unwrap();
+    core.set_favorite(&ids[1..2], true).await.unwrap();
+
+    let out = tempfile::tempdir().unwrap();
+    let report = core
+        .export_library(&out.path().join("backup").display().to_string())
+        .await
+        .unwrap();
+    assert_eq!((report.written, report.missing), (3, 0));
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(out.path().join("backup/library.json")).unwrap())
+            .unwrap();
+    let entries = manifest["photos"].as_array().unwrap();
+    assert_eq!(entries.len(), 3);
+    let mut total = 0u64;
+    for e in entries {
+        let file = out.path().join("backup").join(e["file"].as_str().unwrap());
+        let data = std::fs::read(&file).unwrap();
+        total += data.len() as u64;
+        // Content-addressed: the file's hash is the photo id.
+        assert_eq!(
+            shoebox_core::Blake3Hash::of_bytes(&data).to_string(),
+            e["id"].as_str().unwrap()
+        );
+        assert!(
+            file.parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .len()
+                == 4,
+            "year folder"
+        );
+    }
+    assert_eq!(report.bytes as u64, total);
+    assert!(entries.iter().any(|e| e["favorite"] == true));
+    assert!(entries
+        .iter()
+        .any(|e| e["albums"] == serde_json::json!(["Trip"])));
+    // Running it again changes nothing and still succeeds.
+    assert_eq!(
+        core.export_library(&report.folder).await.unwrap().written,
+        3
+    );
+    assert!(core.export_library("").await.is_err());
+    core.shutdown().await.unwrap();
+}

@@ -15,6 +15,10 @@ export const app = $state({
   pairingError: '',
   importProgress: null as null | { done: number; total: number },
   removed: false,
+  /** What the sync manager is doing right now: peers mid-sync, and the last failure. */
+  syncing: [] as string[],
+  syncError: '',
+  online: 0,
   toast: '',
 });
 
@@ -60,6 +64,14 @@ function handle(e: AppEvent) {
       app.version++;
     } else if ('PeerConnected' in e || 'PeerDisconnected' in e) {
       app.devicesVersion++;
+    } else if ('Sync' in e) {
+      const { peer, phase } = e.Sync;
+      if (phase === 'Started') {
+        app.syncing = [...new Set([...app.syncing, peer])];
+      } else {
+        app.syncing = app.syncing.filter((p) => p !== peer);
+        app.syncError = phase.startsWith('Failed') ? phase : phase === 'Finished' ? '' : app.syncError;
+      }
     }
   }
 }

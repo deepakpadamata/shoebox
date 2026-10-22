@@ -5,6 +5,7 @@ import type { AppEvent } from '../bindings/AppEvent';
 import type { AppState } from '../bindings/AppState';
 import type { CreatedLibrary } from '../bindings/CreatedLibrary';
 import type { DeviceInfo } from '../bindings/DeviceInfo';
+import type { ExportReport } from '../bindings/ExportReport';
 import type { FreeUpReport } from '../bindings/FreeUpReport';
 import type { Health } from '../bindings/Health';
 import type { ImportSummary } from '../bindings/ImportSummary';
@@ -17,7 +18,7 @@ import type { PhotoSummary } from '../bindings/PhotoSummary';
 import type { Settings } from '../bindings/Settings';
 
 export type {
-  AlbumInfo, AppEvent, AppState, CreatedLibrary, DeviceInfo, FreeUpReport, Health, ImportSummary,
+  AlbumInfo, AppEvent, AppState, CreatedLibrary, DeviceInfo, ExportReport, FreeUpReport, Health, ImportSummary,
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Settings,
 };
 
@@ -110,5 +111,6 @@ export const api = {
   setRedundancyTarget: (copies: number) => call<{}>('set_redundancy_target', { copies }),
   setRelay: (relay: string) => call<{}>('set_relay', { relay }),
   renameDevice: (name: string) => call<{}>('rename_device', { name }),
+  exportLibrary: (dest: string) => call<ExportReport>('export_library', { dest }),
   watchFolder: (dir: string) => call<{}>('watch_folder', { dir }),
 };

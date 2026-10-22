@@ -78,3 +78,13 @@ jobs:
         run: cargo test -p desktop-mobile --features http
       - name: TypeScript bindings are up to date
         run: git diff --exit-code apps/desktop-mobile/ui/src/bindings
+
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The guides build and every local link in the site resolves
+        run: |
+          python3 site/build.py --check
+          git diff --exit-code site/guides
+

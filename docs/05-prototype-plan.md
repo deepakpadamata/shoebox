@@ -4,8 +4,11 @@ The technical plan for the MVP. The first milestones prove the core loop on real
 see copy counts → pair a keeper → share an album**. Later milestones turn it into a shippable MVP.
 The issue-level breakdown is in [`planning/`](../planning/README.md).
 
-> iroh API names below (`Endpoint`, `Router`, `ProtocolHandler`, `EndpointAddr`, iroh-blobs `FsStore`, iroh-docs)
-> are from memory of the 0.9x–1.0 line. Issue **M0-01** pins versions and corrects this document.
+> iroh API names below were checked in **M0-01** against the pinned 1.x line
+> (`iroh 1.4.1`, `iroh-blobs 0.103.1`, `iroh-gossip 0.101.0`, `iroh-docs 0.101.0`).
+> Versions, corrected names and gaps: [`docs/notes/iroh-versions.md`](notes/iroh-versions.md).
+> Notable renames: "discovery" is now *address lookup* (mDNS is the separate crate `iroh-mdns-address-lookup`),
+> and docs entries store blob hashes (content travels over iroh-blobs).
 
 ---
 

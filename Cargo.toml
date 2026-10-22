@@ -1,0 +1,56 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/shoebox-core",
+    "crates/shoebox-store-mem",
+    "crates/shoebox-store-docs",
+    "crates/shoebox-store-loro",
+    "crates/shoebox-media",
+    "crates/shoebox-node",
+    "crates/shoebox-testkit",
+    "apps/keeper",
+    "apps/desktop-mobile",
+    "tools/store-bench",
+    "xtask",
+    "examples/hello-sync",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.85"
+repository = "https://example.invalid/shoebox" # placeholder until a remote exists
+
+[workspace.dependencies]
+# --- iroh stack: pinned exactly; bump deliberately (see docs/notes/iroh-versions.md) ---
+iroh = "=1.4.1"
+iroh-blobs = "=0.103.1"
+iroh-gossip = "=0.101.0"
+iroh-docs = "=0.101.0"
+iroh-mdns-address-lookup = "=0.6.1" # LAN discovery (M1-09); a separate crate in iroh 1.x
+
+# --- shared libs ---
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }
+blake3 = "1"
+async-trait = "0.1"
+futures = "0.3"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+proptest = "1"
+hex = "0.4"
+
+# --- internal crates ---
+shoebox-core = { path = "crates/shoebox-core" }
+shoebox-store-mem = { path = "crates/shoebox-store-mem" }
+shoebox-store-docs = { path = "crates/shoebox-store-docs" }
+shoebox-store-loro = { path = "crates/shoebox-store-loro" }
+shoebox-media = { path = "crates/shoebox-media" }
+shoebox-node = { path = "crates/shoebox-node" }
+shoebox-testkit = { path = "crates/shoebox-testkit" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

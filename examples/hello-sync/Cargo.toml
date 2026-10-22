@@ -1,0 +1,17 @@
+[package]
+name = "hello-sync"
+description = "Throwaway spike (M0-01): two iroh endpoints, one blob transfer, one iroh-docs entry sync."
+version.workspace = true
+edition.workspace = true
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[dependencies]
+iroh.workspace = true
+iroh-blobs.workspace = true
+iroh-gossip.workspace = true
+iroh-docs.workspace = true
+tokio.workspace = true
+futures.workspace = true
+anyhow = "1"
+iroh-mdns-address-lookup.workspace = true

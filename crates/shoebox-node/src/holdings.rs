@@ -48,7 +48,8 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(())
     }
 
-    /// Photos (not deleted) with fewer originals than the redundancy target, in id order.
+    /// Photos (not deleted) with fewer originals than the redundancy target and no keeper holding
+    /// the original, in id order.
     pub async fn at_risk(&self, page: Page) -> Result<Vec<PhotoId>> {
         let target = self.redundancy_target().await?;
         Ok(self.store().at_risk(target, page).await?)

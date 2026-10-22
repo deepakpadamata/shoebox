@@ -111,8 +111,8 @@ async fn the_timeline_pages_newest_first_and_details_say_where_a_photo_is_stored
     let counts = core.counts().await.unwrap();
     assert_eq!(
         (counts.photos, counts.at_risk, counts.deleted),
-        (3, 3, 0),
-        "one copy < target 2"
+        (3, 0, 0),
+        "one copy is below the target of 2, but this device is a keeper and keepers count as backed up"
     );
     core.shutdown().await.unwrap();
 }

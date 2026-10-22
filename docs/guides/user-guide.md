@@ -18,8 +18,9 @@ device, you remove it from another one.
 | Viewer | previews only, never originals | a family tablet |
 
 **Copy count is the number to watch.** Every photo shows how many devices hold its original. The goal is
-two or more (you can change it in Settings). A photo with one copy is one lost phone away from gone; the
-app tells you how many photos are in that state and when they will be safe.
+two or more (you can change it in Settings), **or one copy on a keeper**: a keeper is the backstop, so a photo
+it holds counts as backed up. A photo only on a phone is one lost phone away from gone; the app tells you
+how many photos are in that state and when they will be safe.
 
 **Photos are only ever deleted by you.** *Delete* moves a photo to Recently Deleted for 30 days on every
 device. Freeing space on a phone removes only originals that at least two other devices confirmed holding.

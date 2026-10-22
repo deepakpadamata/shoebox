@@ -92,7 +92,7 @@
 
     <div class="section">Copies to keep</div>
     <div class="card pad stack">
-      <p class="small muted" style="margin:0">Photos with fewer copies than this are marked at risk and copied to other devices as soon as one is reachable.</p>
+      <p class="small muted" style="margin:0">Photos with fewer copies than this are marked at risk and copied to other devices as soon as one is reachable. A photo held by a keeper counts as backed up whatever this number is.</p>
       <Segmented bind:value={target} options={['1', '2', '3', '4'].map((v) => ({ value: v, label: `${v} ${v === '1' ? 'copy' : 'copies'}` }))}
         onchange={(v) => save(() => api.setRedundancyTarget(Number(v)), 'Saved')} />
     </div>

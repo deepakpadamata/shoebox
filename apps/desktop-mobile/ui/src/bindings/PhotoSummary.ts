@@ -7,7 +7,11 @@ export type PhotoSummary = { id: string, taken_at: number, favorite: boolean, is
 /**
  * Devices holding the original (this one included).
  */
-copies: number, has_thumb: boolean, 
+copies: number, 
+/**
+ * Enough devices hold the original, or a keeper does.
+ */
+backed_up: boolean, has_thumb: boolean, 
 /**
  * A poster frame exists on this device (videos only; see `set_poster`).
  */

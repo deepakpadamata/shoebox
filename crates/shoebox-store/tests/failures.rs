@@ -356,3 +356,45 @@ async fn a_clock_a_day_off_changes_who_wins_but_never_loses_anything() {
     .expect("edits made after the clocks agree again win");
     c.shutdown().await;
 }
+
+/// One keeper holding an original is enough to call a photo backed up, however high the target.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_photo_on_one_keeper_is_backed_up_even_below_the_copy_target() {
+    let c = Cluster::with_roles(&[Role::Phone, Role::Keeper, Role::Phone])
+        .await
+        .unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    nodes[0].set_redundancy_target(3).await.unwrap();
+    let report = nodes[0]
+        .import_paths(&samples(), ImportOptions::default())
+        .await
+        .unwrap();
+    let ids = report.imported.clone();
+    wait_until(Duration::from_secs(30), || async {
+        photos_of(nodes[2].store().as_ref()).await.len() == 3
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        nodes[2].at_risk(Page::all()).await.unwrap().len(),
+        3,
+        "one device holds them: at risk"
+    );
+    nodes[1].start_fetcher(fast_fetch());
+    wait_until(Duration::from_secs(60), || async {
+        originals_on(&nodes[1], &ids).await == 3
+    })
+    .await
+    .unwrap();
+    wait_until(Duration::from_secs(60), || async {
+        nodes[2].at_risk(Page::all()).await.unwrap().is_empty()
+    })
+    .await
+    .expect("with a keeper holding them, nothing is at risk");
+    assert_eq!(
+        nodes[2].copy_count(&ids[0]).await.unwrap(),
+        2,
+        "still two real copies, below the target of 3"
+    );
+    c.shutdown().await;
+}

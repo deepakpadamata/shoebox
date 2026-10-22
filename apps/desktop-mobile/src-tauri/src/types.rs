@@ -59,6 +59,8 @@ ts_type! {
         pub is_video: bool,
         /// Devices holding the original (this one included).
         pub copies: u32,
+        /// Enough devices hold the original, or a keeper does.
+        pub backed_up: bool,
         pub has_thumb: bool,
         /// A poster frame exists on this device (videos only; see `set_poster`).
         pub has_poster: bool,

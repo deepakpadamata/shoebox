@@ -30,7 +30,10 @@ async fn settle_to(nodes: &[LibraryNode<Library>], id: &Blake3Hash, want: usize,
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn copy_counts_follow_adds_removals_and_an_offline_node() {
-    let c = Cluster::new(3).await.unwrap();
+    // Phones: a keeper holding a photo would count as backed up on its own.
+    let c = Cluster::with_roles(&[shoebox_core::model::Role::Phone; 3])
+        .await
+        .unwrap();
     let nodes = library_nodes_auto(&c).await;
     let samples: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/samples");
     let files = [

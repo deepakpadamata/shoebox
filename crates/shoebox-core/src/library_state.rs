@@ -845,6 +845,23 @@ impl LibraryState {
         })
     }
 
+    /// Whether a keeper (a certified, not revoked device with the Keeper role) holds the original.
+    /// One keeper is enough to call a photo backed up: that is what a keeper is for.
+    pub fn held_by_keeper(&self, original: &Blake3Hash) -> bool {
+        self.holders_by_blob.get(original).is_some_and(|devices| {
+            devices.iter().any(|d| {
+                self.holdings
+                    .get(&(*d, *original))
+                    .is_some_and(|l| l.value == Some(BlobKind::Original))
+                    && self
+                        .devices
+                        .get(d)
+                        .is_some_and(|c| c.role == Role::Keeper && !c.revoked)
+            })
+        })
+    }
+
+    /// Photos (not deleted) that are neither on `min_copies` devices nor on a keeper.
     pub fn at_risk(&self, min_copies: u8, page: Page) -> Vec<PhotoId> {
         let after = page.after.map(|c| c.id);
         let start = match after {
@@ -854,7 +871,9 @@ impl LibraryState {
         self.photos
             .range((start, Bound::Unbounded))
             .filter(|(_, p)| {
-                !p.is_deleted() && self.copy_count(&p.original.hash) < min_copies as usize
+                !p.is_deleted()
+                    && self.copy_count(&p.original.hash) < min_copies as usize
+                    && !self.held_by_keeper(&p.original.hash)
             })
             .map(|(id, _)| *id)
             .take(page.limit)

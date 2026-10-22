@@ -5,10 +5,10 @@
   interface Props {
     id: string; size: number; favorite?: boolean; video?: boolean; copies?: number; target?: number;
     transferring?: boolean; selected?: boolean; selecting?: boolean; hasThumb?: boolean;
-    hasPoster?: boolean; hasOriginal?: boolean; index?: number; takenAt?: number;
+    hasPoster?: boolean; hasOriginal?: boolean; backedUp?: boolean; index?: number; takenAt?: number;
     onclick?: (e: MouseEvent) => void;
   }
-  let { id, size, favorite = false, video = false, copies, target = 2, transferring = false, selected = false, selecting = false, hasThumb = true, hasPoster = false, hasOriginal = false, index, takenAt, onclick }: Props = $props();
+  let { id, size, favorite = false, video = false, copies, target = 2, transferring = false, selected = false, selecting = false, hasThumb = true, hasPoster = false, hasOriginal = false, backedUp = true, index, takenAt, onclick }: Props = $props();
   // A video's poster is made on this device once the original is here; until then a neutral tile.
   let madePoster = $state(false);
   $effect(() => {
@@ -16,8 +16,8 @@
   });
   const poster = $derived(video && (hasPoster || madePoster));
   // Badges only where it matters (design README): red = not backed up enough, blue = in transit.
-  const label = $derived(`${video ? 'Video' : 'Photo'}${takenAt ? ` from ${dateTime(takenAt)}` : ''}${favorite ? ', favorite' : ''}${copies !== undefined && copies < target ? `, only ${copies} ${copies === 1 ? 'copy' : 'copies'}` : ''}`);
-  const risk = $derived(copies !== undefined && copies < target);
+  const label = $derived(`${video ? 'Video' : 'Photo'}${takenAt ? ` from ${dateTime(takenAt)}` : ''}${favorite ? ', favorite' : ''}${copies !== undefined && copies < target && !backedUp ? `, only ${copies} ${copies === 1 ? 'copy' : 'copies'}` : ''}`);
+  const risk = $derived(copies !== undefined && copies < target && !backedUp);
 </script>
 
 <button class="tile" class:selected data-index={index} style="width:{size}px;height:{size}px" {onclick} aria-label={label} aria-pressed={selecting ? selected : undefined}>

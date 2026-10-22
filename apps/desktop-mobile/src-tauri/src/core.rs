@@ -617,19 +617,29 @@ impl AppCore {
     // ---------- timeline ----------
 
     async fn summary(&self, ln: &LibraryNode<Library>, rec: &PhotoRecord) -> Result<PhotoSummary> {
-        let copies = ln
-            .store()
-            .holders(&rec.original.hash)
-            .await?
+        let holders = ln.store().holders(&rec.original.hash).await?;
+        let copies = holders
             .iter()
             .filter(|h| h.kind == BlobKind::Original)
             .count() as u32;
+        // Safe once enough devices hold it, or once any keeper does.
+        let backed_up = copies >= ln.redundancy_target().await? as u32 || {
+            let list = ln.store().device_list().await?;
+            holders.iter().any(|h| {
+                h.kind == BlobKind::Original
+                    && list
+                        .devices
+                        .iter()
+                        .any(|d| d.device == h.device && d.role == Role::Keeper && !d.revoked)
+            })
+        };
         Ok(PhotoSummary {
             id: rec.id.to_string(),
             taken_at: rec.taken_at.0 as f64,
             favorite: rec.favorite.value,
             is_video: rec.original.mime.starts_with("video/"),
             copies,
+            backed_up,
             has_thumb: self.node.blobs().has(&rec.thumb.hash).await?,
             has_poster: self.poster_path(&rec.id).exists(),
             has_original: self.node.blobs().has(&rec.original.hash).await?,

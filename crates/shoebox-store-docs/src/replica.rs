@@ -61,7 +61,7 @@ impl Replica {
     /// Entries (any author) that are new or changed since the last scan *and* whose content is
     /// already stored locally. Entries whose content has not arrived yet are returned by a later
     /// scan once it has.
-    pub async fn scan(&mut self) -> Result<Vec<(String, Vec<u8>)>> {
+    pub async fn scan(&mut self) -> Result<Scan> {
         let stream = self
             .doc
             .get_many(Query::all().build())
@@ -80,10 +80,12 @@ impl Replica {
         drop(stream);
         let blobs = self.node.blobs();
         let mut out = vec![];
+        let mut pending = 0;
         for ((author, key), hash) in candidates {
             let core_hash = shoebox_core::Blake3Hash(*hash.as_bytes());
             if !blobs.has(&core_hash).await? {
-                continue; // content still downloading
+                pending += 1; // content still downloading
+                continue;
             }
             let bytes = blobs.get(&core_hash).await?;
             self.known.insert((author, key.clone()), hash);
@@ -92,8 +94,19 @@ impl Replica {
                 Err(_) => warn!("ignoring entry with a non-UTF-8 key"),
             }
         }
-        Ok(out)
+        Ok(Scan {
+            entries: out,
+            pending,
+        })
     }
+}
+
+/// Result of [`Replica::scan`].
+pub struct Scan {
+    /// New or changed entries whose content is local.
+    pub entries: Vec<(String, Vec<u8>)>,
+    /// Entries that are listed but whose content has not arrived yet.
+    pub pending: usize,
 }
 
 /// Wait for a finished sync with `peer`, then for the content it queued to arrive.

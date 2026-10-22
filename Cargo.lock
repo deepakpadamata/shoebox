@@ -3787,6 +3787,7 @@ name = "shoebox-node"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "blake3",
  "bytes",
  "futures",
  "hex",
@@ -3794,7 +3795,9 @@ dependencies = [
  "iroh-blobs",
  "iroh-docs",
  "iroh-gossip",
+ "iroh-mdns-address-lookup",
  "notify",
+ "postcard",
  "serde",
  "serde_json",
  "shoebox-core",

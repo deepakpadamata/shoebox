@@ -1,12 +1,11 @@
 //! `AlbumStore` on an iroh-docs namespace (one per shared album).
 
-use crate::addr::to_endpoint_addr;
 use crate::codec::*;
 use crate::replica::Replica;
 use async_trait::async_trait;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::stream::BoxStream;
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use iroh_docs::engine::LiveEvent;
 use shoebox_core::album_state::AlbumState;
 use shoebox_core::clock::Clock;
@@ -14,6 +13,7 @@ use shoebox_core::hlc::Hlc;
 use shoebox_core::ids::EndpointId;
 use shoebox_core::model::*;
 use shoebox_core::store::*;
+use shoebox_node::to_endpoint_addr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::Mutex as AsyncMutex;
@@ -45,9 +45,11 @@ impl Inner {
             .retain(|tx| tx.unbounded_send(Change::AlbumChanged(self.id)).is_ok());
     }
 
-    async fn refresh(&self, announce: bool) -> Result<()> {
+    /// Returns how many entries are still waiting for their content.
+    async fn refresh(&self, announce: bool) -> Result<usize> {
         let mut core = self.core.lock().await;
-        let entries = core.replica.scan().await.map_err(backend_err)?;
+        let scan = core.replica.scan().await.map_err(backend_err)?;
+        let (entries, pending) = (scan.entries, scan.pending);
         let mut changed = false;
         for (key, bytes) in entries {
             match decode_album_entry(&key, &bytes) {
@@ -58,6 +60,15 @@ impl Inner {
         drop(core);
         if announce && changed {
             self.emit();
+        }
+        Ok(pending)
+    }
+
+    /// Rescan until nothing is waiting on content (bounded).
+    async fn settle(&self) -> Result<()> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while self.refresh(true).await? > 0 && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
         Ok(())
     }
@@ -106,7 +117,7 @@ impl DocsAlbum {
         inviter: EndpointId,
     ) -> Result<Self> {
         let events = replica.doc.subscribe().await.map_err(backend_err)?;
-        let scanned = replica.scan().await.map_err(backend_err)?;
+        let scanned = replica.scan().await.map_err(backend_err)?.entries;
         let meta = scanned
             .iter()
             .find(|(k, _)| k == "meta")
@@ -169,21 +180,31 @@ fn spawn_watcher<S>(inner: &Arc<Inner>, mut events: S)
 where
     S: futures::Stream<Item = anyhow::Result<LiveEvent>> + Unpin + Send + 'static,
 {
-    let weak = Arc::downgrade(inner);
+    // iroh-docs delivers events through bounded channels and stalls the *whole engine* if any
+    // subscriber stops draining. Rescans need the engine, so draining and rescanning must be
+    // separate tasks: this one only notes that something changed.
+    let dirty = Arc::new(tokio::sync::Notify::new());
+    let signal = dirty.clone();
     tokio::spawn(async move {
         while let Some(event) = events.next().await {
-            let relevant = matches!(
+            if matches!(
                 event,
                 Ok(LiveEvent::InsertRemote { .. }
                     | LiveEvent::ContentReady { .. }
                     | LiveEvent::PendingContentReady
                     | LiveEvent::SyncFinished(_))
-            );
-            if !relevant {
-                continue;
+            ) {
+                signal.notify_one();
             }
+        }
+    });
+
+    // Coalesce bursts (a big sync emits one event per entry) into few rescans.
+    let weak = Arc::downgrade(inner);
+    tokio::spawn(async move {
+        loop {
+            dirty.notified().await;
             tokio::time::sleep(Duration::from_millis(50)).await;
-            while events.next().now_or_never().flatten().is_some() {}
             let Some(inner) = weak.upgrade() else { break };
             if let Err(e) = inner.refresh(true).await {
                 warn!("album rescan failed: {e}");
@@ -254,7 +275,7 @@ impl AlbumStore for DocsAlbum {
             album: self.inner.id,
             role,
             expires: expiry,
-            inviter: crate::addr::from_endpoint_addr(&self.inner.node.addr()),
+            inviter: shoebox_node::from_endpoint_addr(&self.inner.node.addr()),
             secret,
             backend: doc_ticket.to_string().into_bytes(),
         })
@@ -276,7 +297,7 @@ impl AlbumStore for DocsAlbum {
         crate::replica::wait_synced(&mut events, target.id)
             .await
             .map_err(|_| StoreError::Unreachable(peer.id))?;
-        self.inner.refresh(true).await
+        self.inner.settle().await
     }
 }
 

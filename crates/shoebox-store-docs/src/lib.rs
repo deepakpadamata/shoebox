@@ -1,6 +1,5 @@
 //! `StoreBackend` on iroh-docs (M1-05): one docs namespace per library and per shared album.
 
-mod addr;
 mod album;
 pub mod codec;
 mod library;
@@ -9,9 +8,9 @@ mod replica;
 #[cfg(feature = "testing")]
 pub mod harness;
 
-pub use addr::{from_endpoint_addr, from_iroh_id, to_endpoint_addr, to_iroh_id};
 pub use album::DocsAlbum;
 pub use library::DocsLibrary;
+pub use shoebox_node::{from_endpoint_addr, from_iroh_id, to_endpoint_addr, to_iroh_id};
 
 use async_trait::async_trait;
 use iroh_docs::api::protocol::{AddrInfoOptions, ShareMode};

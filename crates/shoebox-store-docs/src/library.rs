@@ -4,19 +4,19 @@
 //! merged in-memory [`LibraryState`] that is rebuilt from the entries at open and kept current by
 //! applying local writes and (debounced) rescans after remote inserts.
 
-use crate::addr::to_endpoint_addr;
 use crate::codec::*;
 use crate::replica::Replica;
 use async_trait::async_trait;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::stream::BoxStream;
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use iroh_docs::engine::LiveEvent;
 use shoebox_core::clock::Clock;
 use shoebox_core::ids::{Blake3Hash, EndpointId, Timestamp};
 use shoebox_core::library_state::{Effect, LibraryState};
 use shoebox_core::model::*;
 use shoebox_core::store::*;
+use shoebox_node::to_endpoint_addr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::Mutex as AsyncMutex;
@@ -48,9 +48,13 @@ impl Inner {
 
     /// Fold new or changed docs entries into the state. `announce` controls change events
     /// (off for the initial load).
-    async fn refresh(&self, announce: bool) -> Result<()> {
+    /// Returns how many entries are still waiting for their content.
+    async fn refresh(&self, announce: bool) -> Result<usize> {
+        let started = std::time::Instant::now();
         let mut core = self.core.lock().await;
-        let entries = core.replica.scan().await.map_err(backend_err)?;
+        let scan = core.replica.scan().await.map_err(backend_err)?;
+        tracing::debug!(entries = scan.entries.len(), pending = scan.pending, took = ?started.elapsed(), "library scan");
+        let (entries, pending) = (scan.entries, scan.pending);
         let mut changes = vec![];
         for (key, bytes) in entries {
             match decode_library_entry(&key, &bytes) {
@@ -61,6 +65,16 @@ impl Inner {
         drop(core);
         if announce {
             self.emit(changes);
+        }
+        Ok(pending)
+    }
+
+    /// Rescan until nothing is waiting on content (bounded: content a peer cannot supply must
+    /// not block forever).
+    async fn settle(&self) -> Result<()> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while self.refresh(true).await? > 0 && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
         Ok(())
     }
@@ -138,22 +152,31 @@ fn spawn_watcher<S>(inner: &Arc<Inner>, mut events: S)
 where
     S: futures::Stream<Item = anyhow::Result<LiveEvent>> + Unpin + Send + 'static,
 {
-    let weak = Arc::downgrade(inner);
+    // iroh-docs delivers events through bounded channels and stalls the *whole engine* if any
+    // subscriber stops draining. Rescans need the engine, so draining and rescanning must be
+    // separate tasks: this one only notes that something changed.
+    let dirty = Arc::new(tokio::sync::Notify::new());
+    let signal = dirty.clone();
     tokio::spawn(async move {
         while let Some(event) = events.next().await {
-            let relevant = matches!(
+            if matches!(
                 event,
                 Ok(LiveEvent::InsertRemote { .. }
                     | LiveEvent::ContentReady { .. }
                     | LiveEvent::PendingContentReady
                     | LiveEvent::SyncFinished(_))
-            );
-            if !relevant {
-                continue;
+            ) {
+                signal.notify_one();
             }
-            // Coalesce bursts (a big sync emits one event per entry) into one rescan.
+        }
+    });
+
+    // Coalesce bursts (a big sync emits one event per entry) into few rescans.
+    let weak = Arc::downgrade(inner);
+    tokio::spawn(async move {
+        loop {
+            dirty.notified().await;
             tokio::time::sleep(Duration::from_millis(50)).await;
-            while events.next().now_or_never().flatten().is_some() {}
             let Some(inner) = weak.upgrade() else { break };
             if let Err(e) = inner.refresh(true).await {
                 warn!("library rescan failed: {e}");
@@ -266,7 +289,7 @@ impl LibraryStore for DocsLibrary {
                 warn!("sync with {} failed: {e:#}", peer.id);
                 StoreError::Unreachable(peer.id)
             })?;
-        self.inner.refresh(true).await
+        self.inner.settle().await
     }
 
     fn capability(&self) -> Capability {

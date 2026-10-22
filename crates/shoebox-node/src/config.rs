@@ -10,6 +10,8 @@ pub enum RelaySetting {
     Disabled,
     /// The public n0 relays and address lookup.
     Default,
+    /// Your own relay server (see `docs/` for self-hosting); direct and LAN paths still work.
+    Custom(String),
 }
 
 /// Everything a node needs to start. Persisted to `<data_dir>/config.toml` on open.
@@ -21,12 +23,19 @@ pub struct NodeConfig {
     pub name: String,
     pub role: Role,
     pub relay: RelaySetting,
+    /// Discover devices on the local network with mDNS (works without internet).
+    #[serde(default = "default_true")]
+    pub mdns: bool,
     /// How often unprotected blobs are garbage-collected; `None` disables GC.
     #[serde(default = "default_gc_interval_ms")]
     pub gc_interval_ms: Option<u64>,
     /// Folders imported automatically whenever files appear in them.
     #[serde(default)]
     pub watched_folders: Vec<PathBuf>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_gc_interval_ms() -> Option<u64> {
@@ -41,6 +50,8 @@ impl NodeConfig {
             name: name.into(),
             role: Role::Keeper,
             relay: RelaySetting::Disabled,
+            // Off for tests and explicit local-only use: no multicast traffic, no cross-talk.
+            mdns: false,
             gc_interval_ms: default_gc_interval_ms(),
             watched_folders: vec![],
         }

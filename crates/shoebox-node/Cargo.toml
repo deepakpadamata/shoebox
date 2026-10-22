@@ -13,6 +13,7 @@ iroh.workspace = true
 iroh-blobs.workspace = true
 iroh-gossip.workspace = true
 iroh-docs.workspace = true
+iroh-mdns-address-lookup.workspace = true
 tokio.workspace = true
 futures.workspace = true
 serde.workspace = true
@@ -22,6 +23,8 @@ tracing.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
 hex.workspace = true
+blake3.workspace = true
+postcard.workspace = true
 shoebox-media.workspace = true
 notify = "8"
 

@@ -136,3 +136,18 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   re-imports; a hash-only fast path is a possible optimisation. Hidden files and symlinks are skipped during folder walks.
 - **A-041 · M1-06** · Watched folders are debounced 400 ms after the last event, persisted in `config.toml` (kept across restarts even
   when the caller passes a fresh `NodeConfig`), and rescanned on start so files that arrived while closed are imported.
+- **A-042 · M1-08** · `LibraryNode` runs a sync manager: it syncs a known peer when it connects, when added, and when due
+  (healthy peers every 5 min as a safety net behind iroh-docs' live gossip sync; failures back off 1 s → 60 s, doubling),
+  and emits `SyncProgress {Started | Finished | Failed(reason) | Retrying{in_ms}}` per peer. `LibraryTicket` is a dev-only
+  string (`shoebox-library1…`: capability + peer addresses + a checksum) that M2 pairing replaces.
+  **Not verified here:** "two desktops on different networks, one via relay". Measured locally instead: 10,000 records written on
+  one node converge on a second within 1.4 s of the last write (loopback; the writes themselves took 12.5 s).
+- **A-043 · M1-05/08** · Lesson recorded: iroh-docs delivers events through bounded channels and a subscriber that stops draining
+  stalls the whole engine (including the queries a rescan needs). The docs backend therefore drains events in a dedicated task
+  that only signals "dirty" and rescans in another. `sync_with` also keeps rescanning (max 10 s) until no entry is waiting on its
+  content, because `PendingContentReady` does not guarantee all content is local (this caused a rare flake in the 3-node test).
+- **A-044 · M1-09** · mDNS is on by default and off in `NodeConfig::local_only` (tests/explicit LAN-less use). `RelaySetting::Custom(url)`
+  is parsed at open (a bad URL fails fast) but not contacted until used. `peer_info` classifies the in-use addresses
+  (private/link-local/loopback → LAN, other IPs → Direct, else Relay) and reports the last ping RTT and last connection time.
+  mDNS between two nodes on this machine is tested; **not verified:** with the internet physically unplugged, and the manual
+  "relay → direct after hole punching" check (needs two real networks).

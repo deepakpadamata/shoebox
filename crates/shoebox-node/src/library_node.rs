@@ -4,16 +4,19 @@
 //! interchangeable.
 
 use crate::node::Node;
+use crate::sync::{PeerState, SyncConfig};
+use crate::ticket::LibraryTicket;
 use anyhow::Result;
 use notify::RecommendedWatcher;
 use shoebox_core::clock::Clock;
 use shoebox_core::hlc::{Hlc, HlcClock};
 use shoebox_core::ids::{Blake3Hash, EndpointId};
 use shoebox_core::model::BlobKind;
-use shoebox_core::store::{HoldingsDelta, LibraryStore};
+use shoebox_core::store::{HoldingsDelta, LibraryCapability, LibraryStore};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
 
 pub(crate) struct Inner<L: LibraryStore> {
     pub node: Node,
@@ -23,6 +26,10 @@ pub(crate) struct Inner<L: LibraryStore> {
     /// Orders this device's own holdings writes (it is their only writer).
     holdings_clock: Mutex<HlcClock>,
     pub watchers: Mutex<HashMap<PathBuf, RecommendedWatcher>>,
+    pub peers: Mutex<HashMap<EndpointId, PeerState>>,
+    pub nudge: mpsc::UnboundedSender<EndpointId>,
+    pub sync_config: SyncConfig,
+    cap: Mutex<Option<LibraryCapability>>,
 }
 
 pub struct LibraryNode<L: LibraryStore> {
@@ -42,7 +49,17 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// being watched when the node last ran are watched again (and scanned for files that arrived
     /// while it was closed).
     pub fn new(node: Node, store: Arc<L>, clock: impl Clock) -> Self {
+        Self::with_sync_config(node, store, clock, SyncConfig::default())
+    }
+
+    pub fn with_sync_config(
+        node: Node,
+        store: Arc<L>,
+        clock: impl Clock,
+        sync: SyncConfig,
+    ) -> Self {
         let device = EndpointId(*node.id().as_bytes());
+        let (nudge, nudge_rx) = mpsc::unbounded_channel();
         let ln = Self {
             inner: Arc::new(Inner {
                 node,
@@ -51,10 +68,32 @@ impl<L: LibraryStore> LibraryNode<L> {
                 clock: Arc::new(clock),
                 holdings_clock: Mutex::new(HlcClock::new(device)),
                 watchers: Mutex::new(HashMap::new()),
+                peers: Mutex::new(HashMap::new()),
+                nudge,
+                sync_config: sync,
+                cap: Mutex::new(None),
             }),
         };
+        ln.start_sync_manager(nudge_rx);
         ln.restore_watches();
         ln
+    }
+
+    /// Remember the capability this library was opened with, so [`LibraryNode::ticket`] can share it.
+    pub fn with_capability(self, cap: LibraryCapability) -> Self {
+        *self.inner.cap.lock().unwrap() = Some(cap);
+        self
+    }
+
+    /// A dev-only ticket another device can join with (needs [`LibraryNode::with_capability`]).
+    pub fn ticket(&self) -> Result<LibraryTicket> {
+        let cap = self.inner.cap.lock().unwrap().clone().ok_or_else(|| {
+            anyhow::anyhow!("this library node was not given a capability to share")
+        })?;
+        Ok(LibraryTicket {
+            cap,
+            peers: vec![crate::addr::from_endpoint_addr(&self.node().addr())],
+        })
     }
 
     pub fn node(&self) -> &Node {

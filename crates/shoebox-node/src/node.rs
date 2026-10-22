@@ -20,6 +20,7 @@ use iroh_docs::protocol::Docs;
 use iroh_docs::ALPN as DOCS_ALPN;
 use iroh_gossip::net::Gossip;
 use iroh_gossip::ALPN as GOSSIP_ALPN;
+use iroh_mdns_address_lookup::MdnsAddressLookup;
 use shoebox_core::ids::Blake3Hash;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -57,6 +58,11 @@ pub enum NodeEvent {
         hash: Blake3Hash,
         from: EndpointId,
     },
+    /// State of the library sync with one peer.
+    SyncProgress {
+        peer: EndpointId,
+        phase: crate::sync::SyncPhase,
+    },
     /// Progress of an import run (counts of files processed so far, by outcome).
     ImportProgress {
         done: usize,
@@ -66,6 +72,59 @@ pub enum NodeEvent {
         skipped: usize,
         failed: usize,
     },
+}
+
+/// The kind of network path currently used to reach a peer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PathKind {
+    /// Same local network (private, link-local or loopback address).
+    Lan,
+    /// Direct over the internet (hole-punched or publicly reachable).
+    Direct,
+    /// Through a relay server.
+    Relay { url: String },
+    /// No path in use (not connected, or not known yet).
+    Unknown,
+}
+
+#[derive(Clone, Debug)]
+pub struct PeerInfo {
+    pub id: EndpointId,
+    pub path: PathKind,
+    pub latency: Option<Duration>,
+    pub last_seen: Option<Instant>,
+}
+
+fn is_local_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => {
+            let first = v6.segments()[0];
+            v6.is_loopback() || (first & 0xffc0) == 0xfe80 || (first & 0xfe00) == 0xfc00
+        }
+    }
+}
+
+/// Summarise the addresses in use for a peer: a local-network path beats a direct one, which
+/// beats a relay.
+pub fn classify_addrs(addrs: &[iroh::TransportAddr]) -> PathKind {
+    let mut direct = false;
+    let mut relay = None;
+    for addr in addrs {
+        match addr {
+            iroh::TransportAddr::Ip(sock) if is_local_ip(sock.ip()) => return PathKind::Lan,
+            iroh::TransportAddr::Ip(_) => direct = true,
+            iroh::TransportAddr::Relay(url) => relay = Some(url.to_string()),
+            _ => {}
+        }
+    }
+    if direct {
+        PathKind::Direct
+    } else if let Some(url) = relay {
+        PathKind::Relay { url }
+    } else {
+        PathKind::Unknown
+    }
 }
 
 /// A subscription to node events. A new subscriber always sees [`NodeEvent::Started`] first.
@@ -92,6 +151,8 @@ struct PeerTracker {
     /// Peers we refuse to talk to (used to simulate partitions and, later, revoked devices).
     blocked: Arc<Mutex<HashSet<EndpointId>>>,
     conns: Arc<Mutex<HashMap<EndpointId, Vec<WeakConnectionHandle>>>>,
+    /// Last time a connection with the peer was established or closed.
+    last_seen: Arc<Mutex<HashMap<EndpointId, Instant>>>,
 }
 
 impl PeerTracker {
@@ -101,6 +162,7 @@ impl PeerTracker {
             open: Default::default(),
             blocked: Default::default(),
             conns: Default::default(),
+            last_seen: Default::default(),
         }
     }
 
@@ -148,6 +210,7 @@ impl EndpointHooks for PeerTracker {
             .entry(id)
             .or_default()
             .push(conn.weak_handle());
+        self.last_seen.lock().unwrap().insert(id, Instant::now());
         let first = {
             let mut open = self.open.lock().unwrap();
             let n = open.entry(id).or_default();
@@ -161,6 +224,7 @@ impl EndpointHooks for PeerTracker {
         let this = self.clone();
         tokio::spawn(async move {
             closed.await;
+            this.last_seen.lock().unwrap().insert(id, Instant::now());
             let last = {
                 let mut open = this.open.lock().unwrap();
                 let n = open.get_mut(&id).expect("counted on handshake");
@@ -205,6 +269,8 @@ struct Inner {
     lookup: MemoryLookup,
     events: broadcast::Sender<NodeEvent>,
     tracker: PeerTracker,
+    /// Most recent measured round-trip time per peer.
+    rtts: Mutex<HashMap<EndpointId, Duration>>,
 }
 
 /// A running Shoebox node. Cheap to clone; all clones share one runtime.
@@ -232,10 +298,21 @@ impl Node {
             let (events, _) = broadcast::channel(256);
             let lookup = MemoryLookup::new();
             let tracker = PeerTracker::new(events.clone());
-            let builder = match config.relay {
+            let mut builder = match &config.relay {
                 RelaySetting::Disabled => Endpoint::builder(presets::Minimal),
                 RelaySetting::Default => Endpoint::builder(presets::N0),
+                RelaySetting::Custom(url) => {
+                    let url: iroh::RelayUrl = url
+                        .parse()
+                        .with_context(|| format!("invalid relay URL `{url}`"))?;
+                    Endpoint::builder(presets::Minimal)
+                        .relay_mode(iroh::RelayMode::Custom(iroh::RelayMap::from(url)))
+                }
             };
+            if config.mdns {
+                // Find devices on the same network without any server (works offline).
+                builder = builder.address_lookup(MdnsAddressLookup::builder());
+            }
             let endpoint = builder
                 .secret_key(secret)
                 .address_lookup(lookup.clone())
@@ -284,6 +361,7 @@ impl Node {
                     lookup,
                     events,
                     tracker,
+                    rtts: Mutex::new(HashMap::new()),
                 }),
             })
         }
@@ -354,6 +432,38 @@ impl Node {
         }
     }
 
+    /// What this node knows about the connection to `id`: the kind of path in use, the last
+    /// measured latency and when the peer was last seen. `None` if the peer is unknown.
+    pub async fn peer_info(&self, id: EndpointId) -> Option<PeerInfo> {
+        let remote = self.inner.endpoint.remote_info(id).await;
+        let last_seen = self
+            .inner
+            .tracker
+            .last_seen
+            .lock()
+            .unwrap()
+            .get(&id)
+            .copied();
+        let latency = self.inner.rtts.lock().unwrap().get(&id).copied();
+        if remote.is_none() && last_seen.is_none() {
+            return None;
+        }
+        let active: Vec<iroh::TransportAddr> = remote
+            .map(|r| {
+                r.into_addrs()
+                    .filter(|a| matches!(a.usage(), iroh::endpoint::TransportAddrUsage::Active))
+                    .map(|a| a.into_addr())
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(PeerInfo {
+            id,
+            path: classify_addrs(&active),
+            latency,
+            last_seen,
+        })
+    }
+
     /// Round-trip time to `id` over the ping protocol (also proves reachability).
     pub async fn ping(&self, id: EndpointId) -> Result<Duration> {
         let conn = self
@@ -370,6 +480,7 @@ impl Node {
         anyhow::ensure!(echo == b"ping", "unexpected ping reply");
         let rtt = start.elapsed();
         conn.close(0u32.into(), b"done");
+        self.inner.rtts.lock().unwrap().insert(id, rtt);
         Ok(rtt)
     }
 

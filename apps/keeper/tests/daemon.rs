@@ -278,3 +278,68 @@ async fn a_keeper_follows_a_rotation_and_rejoins_the_new_library_after_a_restart
     );
     d.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_unpaired_keeper_recovers_with_the_phrase_through_a_surviving_device() {
+    let dir = tempfile::tempdir().unwrap();
+    let node = Node::open(NodeConfig::local_only(
+        dir.path().join("survivor"),
+        "laptop",
+    ))
+    .await
+    .unwrap();
+    let backend = HybridBackend::for_node(node.clone(), SystemClock);
+    let root = KeyPair::generate();
+    let (lib, cap) = backend.create_library(&root.root_public()).await.unwrap();
+    let ln = LibraryNode::new(node.clone(), Arc::new(lib), SystemClock).with_capability(cap);
+    let kit = ln
+        .create_identity(&root, Role::Phone, "laptop")
+        .await
+        .unwrap();
+    let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/samples");
+    ln.import_paths(&[samples.join("photo-gps.jpg")], ImportOptions::default())
+        .await
+        .unwrap();
+
+    let d = Daemon::start(opts(dir.path())).await.unwrap();
+    let mut c = Client::connect(d.control_path()).await.unwrap();
+    let link = ln.peer_link().to_string();
+    let err = c
+        .call_raw(
+            serde_json::json!({"cmd":"recover","from":link,"phrase":"wrong words","name":"pi"}),
+        )
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("24-word"), "{err:#}");
+    let done = c
+        .call_raw(
+            serde_json::json!({"cmd":"recover","from":link,"phrase":kit.phrase(),"name":"pi"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(done["library"].as_str().unwrap().len(), 32);
+    assert!(
+        wait_for(30, || async {
+            let s = Client::connect(d.control_path())
+                .await
+                .unwrap()
+                .status()
+                .await
+                .unwrap();
+            s["paired"] == true
+                && s["library"]["photos"] == 1
+                && s["library"]["held_originals"] == 1
+        })
+        .await,
+        "the recovered keeper syncs the library and fetches the original"
+    );
+    // It can print its own link for the next recovery.
+    let a = Client::connect(d.control_path())
+        .await
+        .unwrap()
+        .call_raw(serde_json::json!({"cmd":"address"}))
+        .await
+        .unwrap();
+    assert!(a["link"].as_str().unwrap().starts_with("shoebox-peer1"));
+    d.shutdown().await.unwrap();
+}

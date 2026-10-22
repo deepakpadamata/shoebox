@@ -286,3 +286,9 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   Limits: a device two rotations behind cannot chain notices (it rejects a notice whose `old` is not its epoch); holdings of other devices disappear until republished (the fetcher republishes on fetch only —
   a periodic republish is not implemented); apps must persist the new capability (`NodeEvent::LibraryRotated`: done for the keeper and `shoebox-dev run`); iroh-docs albums have a real bearer capability and are
   **not** rotated here (M5). Presence topics derive from the identity id so presence survives rotation. Measured: a 100k-record rotation takes 1.2 s in a release build and loses nothing (ignored test).
+- **A-068 · A-060 closed** · Recovery without any capability: `Node::recover(link, phrase, role, name, now)` dials a surviving member on `shoebox/recover/0` (open to unlisted devices, like pairing). The member
+  sends a challenge (nonce + the library's identity id), the device answers with a root-key signature over nonce/its id/identity plus an admin cert and a device cert for itself signed with the root key; the
+  member checks the key is the library's root key and both certs chain to it, lists the device (as admin) and returns the current library capability. A wrong phrase changes nothing; failures are rate limited
+  (10/min, then refusal). The device is found through a `PeerLink` (`shoebox-peer1…`, no secret) that a surviving device shows (`LibraryNode::peer_link`, `shoebox-keeper address`). Not covered: finding a
+  surviving device automatically (mDNS/relay lookup by library) and recovery when *no* device survives (the data is gone by design; the kit only restores identity). Recovering onto a rotated library works (the
+  member answers with its current epoch). `shoebox-keeper recover` is the CLI entry.

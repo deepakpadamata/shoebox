@@ -73,6 +73,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         let responder: Arc<dyn crate::ext::ConnHandler> =
             Arc::new(Responder(Arc::downgrade(&self.inner)));
         *self.node().rotate_slot().lock().unwrap() = Some(responder);
+        self.start_recovery_responder();
         // Hand the latest notice to every device that connects.
         let weak = Arc::downgrade(&self.inner);
         let mut events = self.node().events();

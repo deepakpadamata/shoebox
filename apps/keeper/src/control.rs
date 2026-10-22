@@ -100,6 +100,38 @@ async fn dispatch(shared: &Arc<Shared>, cmd: &str, req: &Value) -> Result<Value>
             ln.revoke_device(&EndpointId(bytes)).await?;
             Ok(json!({}))
         }
+        "address" => Ok(json!({
+            "link": shoebox_node::PeerLink(shoebox_node::from_endpoint_addr(&shared.node.addr())).to_string(),
+        })),
+        "recover" => {
+            if shared.library.lock().await.is_some() {
+                bail!("this keeper is already paired with a library");
+            }
+            let link: shoebox_node::PeerLink = req["from"]
+                .as_str()
+                .ok_or_else(|| anyhow!("missing `from`"))?
+                .parse()
+                .map_err(|e| anyhow!("{e}"))?;
+            let phrase = req["phrase"]
+                .as_str()
+                .ok_or_else(|| anyhow!("missing `phrase`"))?;
+            let name = req["name"].as_str().unwrap_or(&shared.opts.name);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let grant = shared
+                .node
+                .recover(&link, phrase, shoebox_core::model::Role::Keeper, name, now)
+                .await?;
+            let ticket = LibraryTicket {
+                cap: grant.cap.clone(),
+                peers: grant.peers.clone(),
+            };
+            shared.attach(ticket.clone()).await?;
+            shared.save(&ticket)?;
+            Ok(json!({ "library": hex::encode(grant.cap.library.0) }))
+        }
         "album" => bail!("available after shared albums (planned for M5-04)"),
         "shutdown" => {
             let _ = shared.shutdown.send(true);

@@ -77,7 +77,6 @@ async fn world() -> (World, [shoebox_store_loro::LoroLibrary; 3]) {
             mode: Capability::Write,
             backend: vec![],
         },
-        root: root.clone(),
     };
     let (a, cap) = w0
         .backend(1)

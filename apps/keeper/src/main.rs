@@ -44,6 +44,19 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Rejoin a library with its 24-word recovery phrase, through a surviving device.
+    Recover {
+        /// The surviving device's link (`shoebox-keeper address` on another keeper).
+        #[arg(long)]
+        from: String,
+        /// The recovery phrase; read from the terminal when omitted (keeps it out of shell history).
+        #[arg(long)]
+        phrase: Option<String>,
+        #[arg(long, default_value = "keeper")]
+        name: String,
+    },
+    /// Print this keeper's link, which a recovering device can use to reach it.
+    Address,
     /// Show what the keeper is doing.
     Status {
         #[arg(long)]
@@ -178,6 +191,37 @@ async fn main() -> Result<()> {
                     .get(..8)
                     .unwrap_or("?")
             );
+        }
+        Cmd::Recover { from, phrase, name } => {
+            let phrase = match phrase {
+                Some(p) => p,
+                None => {
+                    print!("Recovery phrase (24 words): ");
+                    let _ = std::io::stdout().flush();
+                    let mut line = String::new();
+                    std::io::stdin().read_line(&mut line)?;
+                    line
+                }
+            };
+            let done = client(&storage)
+                .await?
+                .call_raw(json!({"cmd":"recover","from":from,"phrase":phrase,"name":name}))
+                .await?;
+            println!(
+                "Recovered. Joined library {}.",
+                done["library"]
+                    .as_str()
+                    .unwrap_or("?")
+                    .get(..8)
+                    .unwrap_or("?")
+            );
+        }
+        Cmd::Address => {
+            let data = client(&storage)
+                .await?
+                .call_raw(json!({"cmd":"address"}))
+                .await?;
+            println!("{}", data["link"].as_str().unwrap_or(""));
         }
         Cmd::Status { json } => {
             let data = client(&storage).await?.status().await?;

@@ -52,6 +52,16 @@ impl RecoveryKit {
         phrase: &str,
         expected: &RootPublicKey,
     ) -> Result<KeyPair, RecoveryError> {
+        let key = Self::root_from_phrase(phrase)?;
+        if key.root_public() != *expected {
+            return Err(RecoveryError::WrongLibrary);
+        }
+        Ok(key)
+    }
+
+    /// The root key a phrase encodes, without knowing which library it belongs to (used when
+    /// recovering onto a device that has nothing yet).
+    pub fn root_from_phrase(phrase: &str) -> Result<KeyPair, RecoveryError> {
         let normalised = phrase
             .split_whitespace()
             .collect::<Vec<_>>()
@@ -65,11 +75,7 @@ impl RecoveryKit {
             .to_entropy()
             .try_into()
             .map_err(|_| RecoveryError::BadPhrase)?;
-        let key = KeyPair::from_seed(seed);
-        if key.root_public() != *expected {
-            return Err(RecoveryError::WrongLibrary);
-        }
-        Ok(key)
+        Ok(KeyPair::from_seed(seed))
     }
 
     /// A printable text file: what it is, which library, when, and the numbered words.

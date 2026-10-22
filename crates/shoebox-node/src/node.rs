@@ -37,6 +37,8 @@ const PROGRESS_STEP: u64 = 256 * 1024;
 pub const PING_ALPN: &[u8] = b"shoebox/ping/0";
 /// ALPN of the pairing protocol (M2-04). Open to devices that are not in the device list yet.
 pub const PAIR_ALPN: &[u8] = b"shoebox/pair/0";
+/// ALPN of the root-key recovery handshake (M2-02/A-060). Open to devices that are not listed.
+pub const RECOVER_ALPN: &[u8] = b"shoebox/recover/0";
 /// ALPN of the rotation notice push (M2-03b).
 pub const ROTATE_ALPN: &[u8] = b"shoebox/rotate/0";
 /// ALPN of the Loro library-store sync protocol (handler plugged in by `shoebox-store-loro`).
@@ -212,7 +214,7 @@ impl PeerTracker {
             return true;
         }
         match &*self.allowed.lock().unwrap() {
-            Some(allowed) => !allowed.contains(id) && alpn != PAIR_ALPN,
+            Some(allowed) => !allowed.contains(id) && alpn != PAIR_ALPN && alpn != RECOVER_ALPN,
             None => false,
         }
     }
@@ -227,7 +229,7 @@ impl PeerTracker {
             }
             for conn in list.iter().filter_map(WeakConnectionHandle::upgrade) {
                 // Pairing connections of not-yet-listed devices are left alone.
-                if conn.alpn() != PAIR_ALPN {
+                if conn.alpn() != PAIR_ALPN && conn.alpn() != RECOVER_ALPN {
                     conn.close(1u32.into(), b"not in the device list");
                 }
             }
@@ -340,6 +342,7 @@ struct Inner {
     pub(crate) pair_slot: crate::pairing::PairSlot,
     loro_slot: crate::ext::ExtSlot,
     rotate_slot: crate::ext::ExtSlot,
+    recover_slot: crate::ext::ExtSlot,
     /// Most recent measured round-trip time per peer.
     rtts: Mutex<HashMap<EndpointId, Duration>>,
 }
@@ -367,6 +370,7 @@ impl Node {
         let pair_slot = crate::pairing::PairSlot::default();
         let loro_slot = crate::ext::ExtSlot::default();
         let rotate_slot = crate::ext::ExtSlot::default();
+        let recover_slot = crate::ext::ExtSlot::default();
         let id = secret.public();
         let span = info_span!("node", id = %id.fmt_short(), name = %config.name);
         async move {
@@ -436,6 +440,7 @@ impl Node {
                 .accept(GOSSIP_ALPN, gossip.clone())
                 .accept(DOCS_ALPN, docs.clone())
                 .accept(PING_ALPN, Ping)
+                .accept(RECOVER_ALPN, crate::ext::ExtProtocol(recover_slot.clone()))
                 .accept(ROTATE_ALPN, crate::ext::ExtProtocol(rotate_slot.clone()))
                 .accept(LORO_ALPN, crate::ext::ExtProtocol(loro_slot.clone()))
                 .accept(
@@ -469,6 +474,7 @@ impl Node {
                     pair_slot,
                     loro_slot,
                     rotate_slot,
+                    recover_slot,
                     rtts: Mutex::new(HashMap::new()),
                 }),
             })
@@ -484,6 +490,10 @@ impl Node {
     /// This device's signing key (the endpoint key), for certificates it issues as an admin.
     pub fn device_key(&self) -> shoebox_core::identity::KeyPair {
         shoebox_core::identity::KeyPair::from_seed(self.inner.secret_seed)
+    }
+
+    pub(crate) fn recover_slot(&self) -> &crate::ext::ExtSlot {
+        &self.inner.recover_slot
     }
 
     /// Where a library node registers its rotation-notice handler.

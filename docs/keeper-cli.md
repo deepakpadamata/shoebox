@@ -10,6 +10,8 @@ be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held w
 |---|---|
 | `run [--name N] [--relay default\|off\|URL] [--no-mdns]` | run the daemon in the foreground (logs to stderr, journald friendly) |
 | `pair <ticket> [--name N] [--yes]` | join a library; shows a 6-digit code to compare with the other device |
+| `recover --from <link> [--phrase P] [--name N]` | rejoin a library with the 24-word recovery phrase through a surviving device (prompts for the phrase if omitted) |
+| `address` | print this keeper's link (`shoebox-peer1…`), which a recovering device uses to reach it |
 | `status [--json]` | library counts, at-risk, devices and paths |
 | `devices [--json]` / `devices revoke <id>` | list devices / revoke one (this keeper must be an admin) |
 | `album list\|keep\|drop` | stubs: "available after shared albums" until M5-04 |

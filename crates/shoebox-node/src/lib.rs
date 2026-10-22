@@ -17,6 +17,7 @@ mod maintenance;
 mod node;
 mod pairing;
 mod presence;
+mod recover;
 mod rotation;
 mod sync;
 mod ticket;
@@ -37,9 +38,10 @@ pub use library_node::LibraryNode;
 pub use maintenance::MaintenanceConfig;
 pub use node::{
     classify_addrs, Node, NodeEvent, NodeEvents, PathKind, PeerAddr, PeerInfo, HAS_ALPN, LORO_ALPN,
-    PAIR_ALPN, PING_ALPN, ROTATE_ALPN,
+    PAIR_ALPN, PING_ALPN, RECOVER_ALPN, ROTATE_ALPN,
 };
 pub use pairing::{DecideFn, PairGrant, PairTicket, PairingCode};
 pub use presence::{DeviceStatus, PresenceConfig};
+pub use recover::{PeerLink, RecoverGrant};
 pub use sync::{SyncConfig, SyncPhase};
 pub use ticket::{LibraryTicket, TicketError};

@@ -192,10 +192,14 @@ pub struct LibraryCapability {
     pub library: LibraryId,
     pub root: RootPublicKey,
     pub mode: Capability,
+    /// Opaque, backend-specific access material (e.g. the iroh-docs namespace capability).
+    /// Empty for backends that do not need any.
+    pub backend: Vec<u8>,
 }
 
 impl LibraryCapability {
-    /// The same library, read-only.
+    /// The same library with `mode` set to read-only. **Does not strip `backend` material**; use
+    /// [`StoreBackend::downgrade`] before handing a capability to someone who must not write.
     pub fn read_only(&self) -> Self {
         Self {
             mode: Capability::Read,
@@ -226,6 +230,8 @@ pub struct InviteTicket {
     pub expires: Expiry,
     pub inviter: PeerAddr,
     pub secret: [u8; 16],
+    /// Opaque, backend-specific join material (e.g. an iroh-docs ticket). Empty if unused.
+    pub backend: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -379,6 +385,12 @@ pub trait StoreBackend: Send + Sync + 'static {
         &self,
         root: &RootPublicKey,
     ) -> Result<(Self::Library, LibraryCapability)>;
+
+    /// A read-only version of `cap` that carries no write material. The default only flips the
+    /// mode, which is enough for backends whose capability has no secrets.
+    fn downgrade(&self, cap: &LibraryCapability) -> LibraryCapability {
+        cap.read_only()
+    }
 
     /// Open (or join as an empty replica) the library `cap` refers to. A `Read` capability yields a
     /// read-only store.

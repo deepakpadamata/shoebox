@@ -153,6 +153,7 @@ impl AlbumStore for MemAlbum {
             expires: expiry,
             inviter: PeerAddr::id_only(self.device),
             secret,
+            backend: vec![],
         })
     }
 

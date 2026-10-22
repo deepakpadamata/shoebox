@@ -3729,6 +3729,27 @@ dependencies = [
 [[package]]
 name = "shoebox-store-docs"
 version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "futures",
+ "hex",
+ "iroh",
+ "iroh-blobs",
+ "iroh-docs",
+ "postcard",
+ "serde",
+ "shoebox-core",
+ "shoebox-node",
+ "shoebox-store-docs",
+ "shoebox-testkit",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "shoebox-store-loro"

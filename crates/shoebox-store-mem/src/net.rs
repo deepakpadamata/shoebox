@@ -87,6 +87,7 @@ impl StoreBackend for MemBackend {
             library: id,
             root: *root,
             mode: Capability::Write,
+            backend: vec![],
         };
         Ok((self.library(id, Capability::Write), cap))
     }

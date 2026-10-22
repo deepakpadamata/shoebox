@@ -104,3 +104,24 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
 - **A-031 · M1-04** · The `heic` feature (libheif-rs) is written but **not compiled or tested**: this machine has libheif
   but no `pkg-config`. Without the feature HEIC is reported as `Unsupported`. 1146 photos/s on the 10k `medium` corpus
   is for its tiny (48–80 px) images; real 12 MP photos will be far slower, so re-measure with real images.
+- **A-032 · M1-05** · The docs backend keeps the *replicated records* as iroh-docs entries (layout in
+  `shoebox-store-docs::codec`, values `[v1] ++ postcard`) and answers queries from a merged in-memory `LibraryState`
+  rebuilt at open and refreshed by (debounced) rescans. This deviates from the issue's "secondary key by taken_at":
+  the timeline index is in memory, not in docs. Cost: RAM proportional to library size and an O(n) metadata scan per
+  refresh. **M1-15 must measure both**; incremental refresh from `InsertRemote` events is the obvious optimisation.
+- **A-033 · M1-05** · Each device writes its merged view of a record under its *own author*; readers merge every author's
+  entry with `core::merge`. Purging deletes only this author's entry; other authors' stale entries stay in docs
+  (ignored thanks to the purge marker) until those devices purge/merge too. Entries whose key does not name their own
+  record are rejected.
+- **A-034 · M1-05** · `StoreBackend` got `downgrade(cap)`; `LibraryCapability` and `InviteTicket` got an opaque `backend`
+  payload (docs: the postcard `iroh_docs::Capability` / a `DocTicket` string). A read-only library is a real read-only
+  namespace key. A viewer who joins a shared album holds a read-only capability and therefore cannot publish its own
+  membership entry: it is *not listed* in `members()` on other replicas (the mem backend lists it).
+- **A-035 · M1-05** · The device identity written into records ("logical device") is decoupled from the iroh node id so the
+  conformance suite can use small ids; in production `DocsBackend::for_node` uses the node's endpoint id.
+- **A-036 · M1-05** · iroh-docs 0.101 on iroh 1.4 reports `Failed to close connection` from the *closing* phase of an
+  otherwise successful sync; `sync_with` treats exactly that error as success (any other `SyncFinished` error fails).
+  Also required: `start_sync(vec![])` on every opened namespace, otherwise incoming syncs abort with `NotFound`.
+- **A-037 · infra** · The dev profile uses `debug = "line-tables-only"` (none for dependencies). Full debuginfo for the iroh stack
+  grew `target/` to 13 GB and filled this machine's disk mid-session; the lean profile keeps it ≈2 GB. Reverse in the root `Cargo.toml`
+  if you need full debuginfo for a dependency.

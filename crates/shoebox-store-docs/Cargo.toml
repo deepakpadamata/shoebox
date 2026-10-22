@@ -1,10 +1,40 @@
 [package]
 name = "shoebox-store-docs"
+description = "LibraryStore/AlbumStore on iroh-docs (the prototype's default metadata backend)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "Apache-2.0 OR MIT"
 publish = false
+
+[features]
+# `DocsHarness`: plugs this backend into the shoebox-core conformance suite.
+testing = ["shoebox-core/testing", "dep:tempfile"]
+
+[dependencies]
+shoebox-core.workspace = true
+shoebox-node.workspace = true
+iroh.workspace = true
+iroh-docs.workspace = true
+iroh-blobs.workspace = true
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+postcard.workspace = true
+serde.workspace = true
+hex.workspace = true
+bytes.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tempfile = { workspace = true, optional = true }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+shoebox-core = { workspace = true, features = ["testing"] }
+shoebox-store-docs = { path = ".", features = ["testing"] }
+shoebox-testkit.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

@@ -1,0 +1,286 @@
+//! `AlbumStore` on an iroh-docs namespace (one per shared album).
+
+use crate::addr::to_endpoint_addr;
+use crate::codec::*;
+use crate::replica::Replica;
+use async_trait::async_trait;
+use futures::channel::mpsc::{unbounded, UnboundedSender};
+use futures::stream::BoxStream;
+use futures::{FutureExt, StreamExt};
+use iroh_docs::engine::LiveEvent;
+use shoebox_core::album_state::AlbumState;
+use shoebox_core::clock::Clock;
+use shoebox_core::hlc::Hlc;
+use shoebox_core::ids::EndpointId;
+use shoebox_core::model::*;
+use shoebox_core::store::*;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::Mutex as AsyncMutex;
+use tracing::warn;
+
+fn backend_err(e: impl std::fmt::Display) -> StoreError {
+    StoreError::Backend(e.to_string())
+}
+
+struct Core {
+    state: AlbumState,
+    replica: Replica,
+}
+
+struct Inner {
+    core: AsyncMutex<Core>,
+    subs: Mutex<Vec<UnboundedSender<Change>>>,
+    id: AlbumId,
+    device: EndpointId,
+    clock: Arc<dyn Clock>,
+    node: shoebox_node::Node,
+}
+
+impl Inner {
+    fn emit(&self) {
+        self.subs
+            .lock()
+            .unwrap()
+            .retain(|tx| tx.unbounded_send(Change::AlbumChanged(self.id)).is_ok());
+    }
+
+    async fn refresh(&self, announce: bool) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let entries = core.replica.scan().await.map_err(backend_err)?;
+        let mut changed = false;
+        for (key, bytes) in entries {
+            match decode_album_entry(&key, &bytes) {
+                Ok(entry) => changed |= core.state.apply_entry(&entry).changed(),
+                Err(e) => warn!("ignoring invalid album entry `{key}`: {e}"),
+            }
+        }
+        drop(core);
+        if announce && changed {
+            self.emit();
+        }
+        Ok(())
+    }
+}
+
+/// A shared album replica on iroh-docs.
+pub struct DocsAlbum {
+    inner: Arc<Inner>,
+}
+
+impl DocsAlbum {
+    /// Start a brand-new album owned by `device` (writes its meta and owner membership).
+    pub(crate) async fn create(
+        replica: Replica,
+        meta: SharedAlbumMeta,
+        device: EndpointId,
+        clock: Arc<dyn Clock>,
+        node: shoebox_node::Node,
+    ) -> Result<Self> {
+        let events = replica.doc.subscribe().await.map_err(backend_err)?;
+        let id = meta.id;
+        let mut state = AlbumState::new(meta, device);
+        state.install_member(MemberRole::Owner, clock.now_ms());
+        let album = Self::assemble(replica, state, id, device, clock, node, events);
+        {
+            let mut core = album.inner.core.lock().await;
+            for entry in core.state.all_entries() {
+                let bytes = encode_album_entry(&entry);
+                core.replica
+                    .put(&album_key(&entry), bytes)
+                    .await
+                    .map_err(backend_err)?;
+            }
+        }
+        Ok(album)
+    }
+
+    /// Join an album whose namespace has just been imported and synced: read its meta, load
+    /// everything, then record this device as a member (unless the capability is read-only).
+    pub(crate) async fn join(
+        mut replica: Replica,
+        role: MemberRole,
+        device: EndpointId,
+        clock: Arc<dyn Clock>,
+        node: shoebox_node::Node,
+        inviter: EndpointId,
+    ) -> Result<Self> {
+        let events = replica.doc.subscribe().await.map_err(backend_err)?;
+        let scanned = replica.scan().await.map_err(backend_err)?;
+        let meta = scanned
+            .iter()
+            .find(|(k, _)| k == "meta")
+            .and_then(|(k, b)| match decode_album_entry(k, b) {
+                Ok(shoebox_core::album_state::AlbumEntry::Meta(m)) => Some(m),
+                _ => None,
+            })
+            .ok_or(StoreError::Unreachable(inviter))?;
+        let id = meta.id;
+        let mut state = AlbumState::new(meta, device);
+        for (key, bytes) in &scanned {
+            if let Ok(entry) = decode_album_entry(key, bytes) {
+                state.apply_entry(&entry);
+            }
+        }
+        let album = Self::assemble(replica, state, id, device, clock.clone(), node, events);
+        if role != MemberRole::Viewer {
+            // A viewer holds a read-only capability and cannot publish its membership.
+            let mut core = album.inner.core.lock().await;
+            let effect = core.state.install_member(role, clock.now_ms());
+            for t in &effect.touched {
+                if let Some(entry) = core.state.entry(t) {
+                    let bytes = encode_album_entry(&entry);
+                    core.replica
+                        .put(&album_key(&entry), bytes)
+                        .await
+                        .map_err(backend_err)?;
+                }
+            }
+        }
+        Ok(album)
+    }
+
+    fn assemble<S>(
+        replica: Replica,
+        state: AlbumState,
+        id: AlbumId,
+        device: EndpointId,
+        clock: Arc<dyn Clock>,
+        node: shoebox_node::Node,
+        events: S,
+    ) -> Self
+    where
+        S: futures::Stream<Item = anyhow::Result<LiveEvent>> + Unpin + Send + 'static,
+    {
+        let inner = Arc::new(Inner {
+            core: AsyncMutex::new(Core { state, replica }),
+            subs: Mutex::new(vec![]),
+            id,
+            device,
+            clock,
+            node,
+        });
+        spawn_watcher(&inner, events);
+        Self { inner }
+    }
+}
+
+fn spawn_watcher<S>(inner: &Arc<Inner>, mut events: S)
+where
+    S: futures::Stream<Item = anyhow::Result<LiveEvent>> + Unpin + Send + 'static,
+{
+    let weak = Arc::downgrade(inner);
+    tokio::spawn(async move {
+        while let Some(event) = events.next().await {
+            let relevant = matches!(
+                event,
+                Ok(LiveEvent::InsertRemote { .. }
+                    | LiveEvent::ContentReady { .. }
+                    | LiveEvent::PendingContentReady
+                    | LiveEvent::SyncFinished(_))
+            );
+            if !relevant {
+                continue;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            while events.next().now_or_never().flatten().is_some() {}
+            let Some(inner) = weak.upgrade() else { break };
+            if let Err(e) = inner.refresh(true).await {
+                warn!("album rescan failed: {e}");
+            }
+        }
+    });
+}
+
+#[async_trait]
+impl AlbumStore for DocsAlbum {
+    async fn meta(&self) -> Result<SharedAlbumMeta> {
+        Ok(self.inner.core.lock().await.state.meta())
+    }
+
+    async fn add_items(&self, items: Vec<SharedItem>) -> Result<()> {
+        let now = self.inner.clock.now_ms();
+        let mut core = self.inner.core.lock().await;
+        let effect = core.state.add_items(&items, now)?;
+        for t in &effect.touched {
+            if let Some(entry) = core.state.entry(t) {
+                let bytes = encode_album_entry(&entry);
+                core.replica
+                    .put(&album_key(&entry), bytes)
+                    .await
+                    .map_err(backend_err)?;
+            }
+        }
+        drop(core);
+        if effect.changed() {
+            self.inner.emit();
+        }
+        Ok(())
+    }
+
+    async fn items(&self, page: Page) -> Result<Vec<SharedItem>> {
+        Ok(self.inner.core.lock().await.state.items(page))
+    }
+
+    async fn members(&self) -> Result<Vec<Member>> {
+        Ok(self.inner.core.lock().await.state.members())
+    }
+
+    async fn events(&self, since: Option<Hlc>) -> Result<Vec<AlbumEvent>> {
+        Ok(self.inner.core.lock().await.state.events(since))
+    }
+
+    async fn invite(&self, role: MemberRole, expiry: Expiry) -> Result<InviteTicket> {
+        use iroh_docs::api::protocol::{AddrInfoOptions, ShareMode};
+        let core = self.inner.core.lock().await;
+        if core.state.my_role() != Some(MemberRole::Owner) {
+            return Err(StoreError::ReadOnly);
+        }
+        // The capability *is* the bearer secret: viewers get a read-only namespace key.
+        let mode = if role == MemberRole::Viewer {
+            ShareMode::Read
+        } else {
+            ShareMode::Write
+        };
+        let doc_ticket = core
+            .replica
+            .doc
+            .share(mode, AddrInfoOptions::Addresses)
+            .await
+            .map_err(backend_err)?;
+        let mut secret = [0u8; 16];
+        secret.copy_from_slice(&doc_ticket.capability.id().to_bytes()[..16]);
+        Ok(InviteTicket {
+            album: self.inner.id,
+            role,
+            expires: expiry,
+            inviter: crate::addr::from_endpoint_addr(&self.inner.node.addr()),
+            secret,
+            backend: doc_ticket.to_string().into_bytes(),
+        })
+    }
+
+    fn subscribe(&self) -> BoxStream<'static, Change> {
+        let (tx, rx) = unbounded();
+        self.inner.subs.lock().unwrap().push(tx);
+        Box::pin(rx)
+    }
+
+    async fn sync_with(&self, peer: &PeerAddr) -> Result<()> {
+        let target = to_endpoint_addr(peer)?;
+        let doc = { self.inner.core.lock().await.replica.doc.clone() };
+        let mut events = doc.subscribe().await.map_err(backend_err)?;
+        doc.start_sync(vec![target.clone()])
+            .await
+            .map_err(backend_err)?;
+        crate::replica::wait_synced(&mut events, target.id)
+            .await
+            .map_err(|_| StoreError::Unreachable(peer.id))?;
+        self.inner.refresh(true).await
+    }
+}
+
+#[allow(dead_code)]
+fn _device(inner: &Inner) -> EndpointId {
+    inner.device
+}

@@ -54,6 +54,13 @@ shoebox-media = { path = "crates/shoebox-media" }
 shoebox-node = { path = "crates/shoebox-node" }
 shoebox-testkit = { path = "crates/shoebox-testkit" }
 
+# Keep build artifacts small: full debuginfo for the iroh dependency tree made `target/` 13 GB.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

@@ -535,11 +535,20 @@ async fn change_stream_events<H: Harness>(h: &H) {
     a.store.upsert_photo(photo(2, 2, 1)).await.unwrap();
     assert_eq!(next(&mut late).await, Change::PhotoUpserted(hash(2)));
     sync_both(h, &a, &b).await;
+    // The order in which a sync reports what changed is up to the backend: look through the
+    // first few events (the library holds a handful of records) for the one we caused.
     let mut got = vec![];
-    for _ in 0..2 {
-        got.push(next(&mut remote).await);
+    for _ in 0..8 {
+        let change = next(&mut remote).await;
+        got.push(change.clone());
+        if change == Change::PhotoUpserted(hash(2)) {
+            return;
+        }
     }
-    assert!(got.contains(&Change::PhotoUpserted(hash(2))), "got {got:?}");
+    panic!(
+        "no PhotoUpserted({}) among the first events after sync: {got:?}",
+        hash(2)
+    );
 }
 
 async fn concurrent_edits_converge<H: Harness>(h: &H) {
@@ -732,7 +741,10 @@ async fn read_only_capability<H: Harness>(h: &H) {
 
     let clock = ManualClock::new(300);
     let viewer = h.backend(dev(5), clock).await;
-    let ro = viewer.open_library(&cap.read_only()).await.unwrap();
+    let ro = viewer
+        .open_library(&a.backend.downgrade(&cap))
+        .await
+        .unwrap();
     assert_eq!(ro.capability(), Capability::Read);
     assert_eq!(
         ro.upsert_photo(photo(2, 2, 5)).await,

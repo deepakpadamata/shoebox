@@ -200,3 +200,7 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   state lives in `<dir>/dev.json` (name, role, the library ticket, known peers) and the node under `<dir>/node/`. `--local-only` = no relay, no mDNS.
   `LibraryNode::sync_now` now waits for a sync that is already in flight and returns its outcome (the CLI's `join` returned an empty library because
   it exited while the background manager's sync was still running). The root key in `init` is a placeholder derived from the device id (M2 adds real identity).
+- **A-054 · M1-14** · The Loro spike keeps the *same* merge/query engine (`LibraryState`) and the same per-author key/value layout as the docs backend (the
+  codec moved to `core::entry_codec` and is shared), so the benchmark compares the replication layers rather than two query engines. Its sync is
+  simulated in-process with real Loro export/import (no network), shared albums are not implemented, and the conformance suite gained `run_only` /
+  `SCENARIOS` to run a subset. The `loro` cargo feature is on by default for the crate; depend with `default-features = false` to leave it out.

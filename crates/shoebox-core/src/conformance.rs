@@ -37,28 +37,42 @@ pub trait Harness: Send + Sync + 'static {
 
 /// Run every scenario, panicking (with the scenario name logged) on the first failure.
 pub async fn run<H: Harness>(h: &H) {
-    macro_rules! scenarios {
-        ($($name:ident),* $(,)?) => {$(
-            eprintln!("conformance: {}", stringify!($name));
-            $name(&h.fresh()).await;
-        )*};
-    }
-    scenarios!(
-        upsert_is_idempotent_and_merges,
-        paging_by_time,
-        favorite_is_last_writer_wins,
-        delete_restore_purge,
-        album_add_wins,
-        holdings_single_writer_and_at_risk,
-        change_stream_events,
-        concurrent_edits_converge,
-        delete_races_favorite,
-        device_list_is_signed_and_order_independent,
-        library_settings_are_last_writer_wins,
-        read_only_capability,
-        shared_album_flow,
-    );
+    run_only(h, |_| true).await
 }
+
+macro_rules! scenario_table {
+    ($($name:ident),* $(,)?) => {
+        /// Names of all scenarios, in run order.
+        pub const SCENARIOS: &[&str] = &[$(stringify!($name)),*];
+
+        /// Run the scenarios whose name satisfies `include` (for backends that implement only
+        /// part of the API, e.g. no shared albums yet). Names are listed in [`SCENARIOS`].
+        pub async fn run_only<H: Harness>(h: &H, include: impl Fn(&str) -> bool) {
+            $(
+                if include(stringify!($name)) {
+                    eprintln!("conformance: {}", stringify!($name));
+                    $name(&h.fresh()).await;
+                }
+            )*
+        }
+    };
+}
+
+scenario_table!(
+    upsert_is_idempotent_and_merges,
+    paging_by_time,
+    favorite_is_last_writer_wins,
+    delete_restore_purge,
+    album_add_wins,
+    holdings_single_writer_and_at_risk,
+    change_stream_events,
+    concurrent_edits_converge,
+    delete_races_favorite,
+    device_list_is_signed_and_order_independent,
+    library_settings_are_last_writer_wins,
+    read_only_capability,
+    shared_album_flow,
+);
 
 // ---------- helpers ----------
 

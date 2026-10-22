@@ -1,10 +1,29 @@
 [package]
 name = "shoebox-store-loro"
+description = "SPIKE (M1-14): LibraryStore on a Loro CRDT document, for the metadata backend decision (#7)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "Apache-2.0 OR MIT"
 publish = false
+
+[features]
+default = ["loro"]
+# Pulls in the Loro CRDT library. Other crates can depend on this crate with
+# `default-features = false` to leave it out of their build.
+loro = ["dep:loro"]
+# `LoroHarness` for the shoebox-core conformance suite.
+testing = ["shoebox-core/testing"]
+
+[dependencies]
+shoebox-core.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+loro = { version = "1", optional = true }
+
+[dev-dependencies]
+shoebox-core = { workspace = true, features = ["testing"] }
+shoebox-store-loro = { path = ".", features = ["testing"] }
 
 [lints]
 workspace = true

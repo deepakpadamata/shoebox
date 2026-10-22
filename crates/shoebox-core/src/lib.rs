@@ -8,6 +8,7 @@ pub mod clock;
 pub mod codec;
 #[cfg(feature = "testing")]
 pub mod conformance;
+pub mod entry_codec;
 pub mod hlc;
 pub mod ids;
 pub mod library_state;

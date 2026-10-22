@@ -84,3 +84,23 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   real mDNS behaviour are *not* verified yet (M1-09 / M6-01).
 - **A-026 · M0-08** · `jpeg-encoder` (xtask only) is `(MIT OR Apache-2.0) AND IJG`; IJG is permissive but needs
   attribution in shipped binaries, so `deny.toml` carries a per-crate exception instead of allowing IJG globally.
+
+## M1
+
+- **A-027 · M1-03** · Blob protection is modelled as iroh-blobs tags (`lib/`, `pin/`, `album/<id>/`). iroh-blobs only
+  deletes through periodic GC (its manual delete is crate-private), so `remove()` drops the library+pin tags and the
+  GC reclaims the bytes later (default every 5 min, configurable via `gc_interval_ms`). A shared-album tag blocks GC
+  after the library purges a photo: that is the "hook for M5". In-flight downloads hold a temp tag (a race here
+  deleted fresh downloads before it was added). `BlobProgress` events are throttled to one per 256 KiB.
+- **A-028 · M1-03** · The 2 GB by-reference acceptance check is an opt-in test (`--ignored two_gigabyte`, 31 s in
+  release) rather than part of the default suite; the default suite uses a 48 MB file with the same assertion.
+- **A-029 · M1-04** · Thumbnails/previews are always JPEG (q80 / q85); `image`'s WebP encoder is lossless-only. `taken_at`
+  from `DateTimeOriginal` is treated as UTC unless `OffsetTimeOriginal` is present (EXIF has no zone otherwise).
+  Reported width/height are as displayed (orientation applied); for RAW they are the embedded preview's, not the sensor's.
+- **A-030 · M1-04** · RAW: the largest decodable embedded JPEG found by scanning for JPEG start markers (first 32).
+  Videos: MP4/MOV `moov` parsed for `mvhd` creation time and `tkhd` size; no poster frame (M3-10), no GPS. A JPEG
+  without an end-of-image marker is rejected as truncated (decoders otherwise return a partly grey image).
+  Decoding is wrapped in `catch_unwind` so a decoder panic surfaces as an error.
+- **A-031 · M1-04** · The `heic` feature (libheif-rs) is written but **not compiled or tested**: this machine has libheif
+  but no `pkg-config`. Without the feature HEIC is reported as `Unsupported`. 1146 photos/s on the 10k `medium` corpus
+  is for its tiny (48–80 px) images; real 12 MP photos will be far slower, so re-measure with real images.

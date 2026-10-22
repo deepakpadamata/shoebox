@@ -138,7 +138,7 @@ pub fn build_exif_tiff(spec: &ExifSpec) -> Vec<u8> {
             },
             Entry {
                 tag: 0x0112,
-                val: Val::Short(1),
+                val: Val::Short(spec.orientation),
             },
             Entry {
                 tag: 0x8769,

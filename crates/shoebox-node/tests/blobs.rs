@@ -342,7 +342,9 @@ async fn two_gigabyte_file_imports_by_reference_without_copying() {
     let file = dir.path().join("big.bin");
     {
         let mut f = std::io::BufWriter::new(std::fs::File::create(&file).unwrap());
-        let chunk: Vec<u8> = (0..1024 * 1024u32).map(|i| (i.wrapping_mul(2654435761) >> 24) as u8).collect();
+        let chunk: Vec<u8> = (0..1024 * 1024u32)
+            .map(|i| (i.wrapping_mul(2654435761) >> 24) as u8)
+            .collect();
         for i in 0..2048u32 {
             let mut c = chunk.clone();
             c[0] = i as u8;
@@ -350,9 +352,19 @@ async fn two_gigabyte_file_imports_by_reference_without_copying() {
             f.write_all(&c).unwrap();
         }
     }
-    let hash = node.blobs().add_path(&file, ImportMode::Reference, Protection::Library).await.unwrap();
-    assert_eq!(node.blobs().size(&hash).await.unwrap(), Some(2048 * 1024 * 1024));
+    let hash = node
+        .blobs()
+        .add_path(&file, ImportMode::Reference, Protection::Library)
+        .await
+        .unwrap();
+    assert_eq!(
+        node.blobs().size(&hash).await.unwrap(),
+        Some(2048 * 1024 * 1024)
+    );
     let stored = dir_size(&dir.path().join("a/blobs"));
-    assert!(stored < 64 * 1024 * 1024, "2 GB file must not be copied: {stored} bytes stored");
+    assert!(
+        stored < 64 * 1024 * 1024,
+        "2 GB file must not be copied: {stored} bytes stored"
+    );
     node.shutdown().await.unwrap();
 }

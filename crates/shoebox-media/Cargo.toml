@@ -1,10 +1,29 @@
 [package]
 name = "shoebox-media"
+description = "Import pipeline: hash, EXIF, thumbnails and previews. Pure functions, no node dependency."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "Apache-2.0 OR MIT"
 publish = false
+
+[features]
+default = []
+# HEIC decoding through the system libheif (needs libheif + pkg-config at build time).
+heic = ["dep:libheif-rs"]
+
+[dependencies]
+shoebox-core.workspace = true
+blake3.workspace = true
+thiserror.workspace = true
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+kamadak-exif = "0.6"
+libheif-rs = { version = "3", optional = true }
+
+[dev-dependencies]
+xtask = { path = "../../xtask" }
+tempfile.workspace = true
+serde_json = "1"
 
 [lints]
 workspace = true

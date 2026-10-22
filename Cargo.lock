@@ -2516,7 +2516,7 @@ dependencies = [
  "serde_json",
  "shoebox-core",
  "shoebox-node",
- "shoebox-store-docs",
+ "shoebox-store",
  "tempfile",
  "tokio",
  "tracing",
@@ -4548,7 +4548,7 @@ dependencies = [
  "serde_json",
  "shoebox-core",
  "shoebox-node",
- "shoebox-store-docs",
+ "shoebox-store",
  "tempfile",
  "tokio",
 ]

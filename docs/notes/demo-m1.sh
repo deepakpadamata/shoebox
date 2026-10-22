@@ -41,6 +41,7 @@ DAEMON_PID=$!
 for _ in $(seq 1 120); do grep -q '^ticket: ' "$DEMO_DIR/laptop.log" 2>/dev/null && break; sleep 0.5; done
 TICKET="$(grep '^ticket: ' "$DEMO_DIR/laptop.log" | head -1 | cut -d' ' -f2)"
 [ -n "$TICKET" ] || { echo "the laptop did not come online"; cat "$DEMO_DIR/laptop.log"; exit 1; }
+VIEWER_TICKET="$(grep '^ticket-viewer: ' "$DEMO_DIR/laptop.log" | head -1 | cut -d' ' -f2)"
 echo "ticket: ${TICKET:0:40}..."
 
 step "3. The Pi (a keeper) joins: it gets the library's metadata immediately"
@@ -54,7 +55,7 @@ dev pi holdings "${ID:0:12}"
 dev pi peers
 
 step "5. A phone-like viewer joins and sees the same library; it only fetches on demand"
-dev phone join "$TICKET" --name phone --role viewer
+dev phone join "$VIEWER_TICKET" --name phone --role viewer
 dev phone ls
 dev phone fetch "${ID:0:12}" --kind preview
 dev phone ls

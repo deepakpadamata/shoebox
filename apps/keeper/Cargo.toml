@@ -18,7 +18,7 @@ path = "src/main.rs"
 [dependencies]
 shoebox-core.workspace = true
 shoebox-node.workspace = true
-shoebox-store-docs.workspace = true
+shoebox-store.workspace = true
 tokio = { workspace = true, features = ["signal", "net", "io-util", "fs"] }
 anyhow.workspace = true
 serde.workspace = true

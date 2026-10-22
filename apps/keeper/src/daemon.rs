@@ -14,7 +14,7 @@ use shoebox_node::{
     FetcherConfig, LibraryNode, LibraryTicket, MaintenanceConfig, Node, NodeConfig, PresenceConfig,
     RelaySetting,
 };
-use shoebox_store_docs::{DocsBackend, DocsLibrary};
+use shoebox_store::{HybridBackend, Library};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -77,7 +77,7 @@ pub(crate) struct Shared {
     pub node: Node,
     pub opts: KeeperOptions,
     pub started: Instant,
-    pub library: Mutex<Option<LibraryNode<DocsLibrary>>>,
+    pub library: Mutex<Option<LibraryNode<Library>>>,
     pub shutdown: watch::Sender<bool>,
 }
 
@@ -98,7 +98,7 @@ impl Shared {
     /// Open the library from a pairing grant or from `keeper.json`, start the background work
     /// and remember it.
     pub(crate) async fn attach(&self, ticket: LibraryTicket) -> Result<()> {
-        let backend = DocsBackend::for_node(self.node.clone(), SystemClock);
+        let backend = HybridBackend::for_node(self.node.clone(), SystemClock);
         let library = backend.open_library(&ticket.cap).await?;
         let ln = LibraryNode::new(self.node.clone(), Arc::new(library), SystemClock)
             .with_capability(ticket.cap.clone());

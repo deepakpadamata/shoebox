@@ -15,10 +15,11 @@ use shoebox_core::ids::EndpointId;
 use shoebox_core::model::{BlobKind, PhotoRecord, Role};
 use shoebox_core::store::{LibraryStore, Page, PeerAddr, StoreBackend, TimeRange};
 use shoebox_node::{
-    FetcherConfig, ImportMode, ImportOptions, LibraryNode, LibraryTicket, MaintenanceConfig, Node,
-    NodeConfig, NodeEvent, PathKind, PresenceConfig, RelaySetting,
+    DecideFn, FetcherConfig, ImportMode, ImportOptions, LibraryNode, LibraryTicket,
+    MaintenanceConfig, Node, NodeConfig, NodeEvent, PairTicket, PathKind, PresenceConfig,
+    RelaySetting,
 };
-use shoebox_store_docs::{DocsBackend, DocsLibrary};
+use shoebox_store::{HybridBackend, Library};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -103,7 +104,7 @@ struct DevState {
 }
 
 struct Session {
-    ln: LibraryNode<DocsLibrary>,
+    ln: LibraryNode<Library>,
     state: DevState,
     dir: PathBuf,
 }
@@ -169,7 +170,7 @@ async fn open(cli: &Cli) -> Result<Session> {
         .parse()
         .map_err(|e| anyhow!("corrupt ticket in dev.json: {e}"))?;
     let node = Node::open(node_config(cli, &dir, &state.name, state.role)).await?;
-    let backend = DocsBackend::for_node(node.clone(), SystemClock);
+    let backend = HybridBackend::for_node(node.clone(), SystemClock);
     let library = backend.open_library(&ticket.cap).await?;
     let ln = LibraryNode::new(node, Arc::new(library), SystemClock).with_capability(ticket.cap);
     for peer in &state.peers {
@@ -243,7 +244,7 @@ fn print(cli: &Cli, value: Value, text: impl FnOnce() -> String) {
     }
 }
 
-async fn local(ln: &LibraryNode<DocsLibrary>, rec: &PhotoRecord) -> Result<Value> {
+async fn local(ln: &LibraryNode<Library>, rec: &PhotoRecord) -> Result<Value> {
     let blobs = ln.node().blobs();
     Ok(json!({
         "thumb": blobs.has(&rec.thumb.hash).await?,
@@ -287,7 +288,7 @@ async fn cmd_init(cli: &Cli, name: &str, role: &str) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     let node = Node::open(node_config(cli, &dir, name, role)).await?;
     let device = EndpointId(*node.id().as_bytes());
-    let backend = DocsBackend::for_node(node.clone(), SystemClock);
+    let backend = HybridBackend::for_node(node.clone(), SystemClock);
     // A real root key (M2-01). The dev tool keeps its seed in dev.json for convenience; real
     // devices never store it (it lives only in the recovery kit, M2-02).
     let root = KeyPair::generate();
@@ -327,24 +328,49 @@ async fn cmd_join(cli: &Cli, ticket_text: &str, name: &str, role: &str) -> Resul
     if state_path(&dir).exists() {
         bail!("{} already holds a library", dir.display());
     }
-    let ticket: LibraryTicket = ticket_text
-        .parse()
-        .map_err(|e| anyhow!("bad ticket: {e}"))?;
-    if ticket.peers.is_empty() {
-        bail!("this ticket lists no device to sync with");
-    }
+    let ticket: PairTicket = ticket_text.parse().map_err(|e| {
+        anyhow!("bad ticket: {e} (use a `ticket:` line printed by `shoebox-dev run`)")
+    })?;
     let role = parse_role(role)?;
+    if ticket.role != role {
+        bail!(
+            "this ticket offers the {:?} role, not {role:?}; use the matching ticket line",
+            ticket.role
+        );
+    }
     std::fs::create_dir_all(&dir)?;
     let node = Node::open(node_config(cli, &dir, name, role)).await?;
-    let backend = DocsBackend::for_node(node.clone(), SystemClock);
-    let library = backend.open_library(&ticket.cap).await?;
+    // Pairing: the dev tool accepts the code automatically (both sides print it).
+    let decide: DecideFn = Arc::new(|code| {
+        Box::pin(async move {
+            eprintln!(
+                "pairing code {} (accepted automatically by the dev tool)",
+                code.sas
+            );
+            true
+        })
+    });
+    let grant = match node.pair_join(&ticket, name, decide).await {
+        Ok(g) => g,
+        Err(e) => {
+            node.shutdown().await?;
+            let _ = std::fs::remove_dir_all(&dir);
+            bail!("pairing failed: {e:#} (is `shoebox-dev run` up on the other side?)");
+        }
+    };
+    let library_ticket = LibraryTicket {
+        cap: grant.cap.clone(),
+        peers: grant.peers.clone(),
+    };
+    let backend = HybridBackend::for_node(node.clone(), SystemClock);
+    let library = backend.open_library(&grant.cap).await?;
     let ln = LibraryNode::new(node.clone(), Arc::new(library), SystemClock)
-        .with_capability(ticket.cap.clone());
-    for peer in &ticket.peers {
+        .with_capability(grant.cap.clone());
+    for peer in &grant.peers {
         ln.add_peer(peer.clone())?;
     }
     let mut synced = false;
-    for peer in &ticket.peers {
+    for peer in &grant.peers {
         match ln.sync_now(peer.id).await {
             Ok(()) => {
                 synced = true;
@@ -356,9 +382,7 @@ async fn cmd_join(cli: &Cli, ticket_text: &str, name: &str, role: &str) -> Resul
     if !synced {
         node.shutdown().await?;
         let _ = std::fs::remove_dir_all(&dir);
-        bail!(
-            "could not reach any device in the ticket (is `shoebox-dev run` up on the other side?)"
-        );
+        bail!("paired, but could not sync with the inviting device");
     }
     let photos = ln
         .store()
@@ -368,8 +392,8 @@ async fn cmd_join(cli: &Cli, ticket_text: &str, name: &str, role: &str) -> Resul
     let state = DevState {
         name: name.into(),
         role,
-        ticket: ticket_text.trim().to_string(),
-        peers: ticket.peers.clone(),
+        ticket: library_ticket.to_string(),
+        peers: grant.peers.clone(),
         root_seed: None,
     };
     std::fs::write(state_path(&dir), serde_json::to_string_pretty(&state)?)?;
@@ -385,13 +409,21 @@ async fn cmd_run(cli: &Cli) -> Result<()> {
     s.ln.start_fetcher(FetcherConfig::default());
     s.ln.start_maintenance(MaintenanceConfig::default());
     s.ln.start_presence(PresenceConfig::default()).await?;
-    let ticket = s.ln.ticket()?.to_string();
     let me = EndpointId(*s.ln.node().id().as_bytes());
-    // The line the other side (and the tests) look for. Flushed so pipes see it immediately.
+    // The lines the other side (and the tests) look for. Flushed so pipes see them immediately.
     println!("device: {}", hex::encode(me.0));
     println!("role: {:?}", s.state.role);
-    println!("ticket: {ticket}");
     use std::io::Write;
+    // Admin devices offer one single-use pairing ticket per role and a fresh one after each use.
+    for role in [Role::Keeper, Role::Viewer, Role::Phone] {
+        match offer(&s.ln, role).await {
+            Ok(ticket) => println!("{}", ticket_line(role, &ticket)),
+            Err(e) => {
+                println!("no pairing tickets: {e:#}");
+                break;
+            }
+        }
+    }
     std::io::stdout().flush().ok();
 
     let mut events = s.ln.node().events();
@@ -400,6 +432,15 @@ async fn cmd_run(cli: &Cli) -> Result<()> {
             _ = tokio::signal::ctrl_c() => break,
             ev = events.recv() => {
                 let Ok(ev) = ev else { continue };
+                if let NodeEvent::PairingDone { .. } = ev {
+                    // Every ticket is single use: hand out fresh ones.
+                    for role in [Role::Keeper, Role::Viewer, Role::Phone] {
+                        if let Ok(ticket) = offer(&s.ln, role).await {
+                            println!("{}", ticket_line(role, &ticket));
+                        }
+                    }
+                    std::io::stdout().flush().ok();
+                }
                 if let Some(line) = describe(&ev) {
                     println!("{line}");
                     std::io::stdout().flush().ok();
@@ -409,6 +450,29 @@ async fn cmd_run(cli: &Cli) -> Result<()> {
     }
     println!("shutting down");
     s.close().await
+}
+
+fn ticket_line(role: Role, ticket: &PairTicket) -> String {
+    match role {
+        Role::Keeper => format!("ticket: {ticket}"),
+        Role::Viewer => format!("ticket-viewer: {ticket}"),
+        Role::Phone => format!("ticket-phone: {ticket}"),
+    }
+}
+
+/// A one-day pairing ticket for `role`; the dev tool confirms the code automatically.
+async fn offer(ln: &LibraryNode<Library>, role: Role) -> Result<PairTicket> {
+    let decide: DecideFn = Arc::new(|code| {
+        Box::pin(async move {
+            println!(
+                "pairing code {} for {} (accepted automatically)",
+                code.sas, code.peer_name
+            );
+            true
+        })
+    });
+    ln.start_pairing(role, Duration::from_secs(24 * 3600), decide)
+        .await
 }
 
 fn describe(ev: &NodeEvent) -> Option<String> {
@@ -421,6 +485,7 @@ fn describe(ev: &NodeEvent) -> Option<String> {
             &hash.to_string()[..8],
             from.fmt_short()
         ),
+        NodeEvent::PairingDone { peer } => format!("paired a device (via {})", short(peer)),
         NodeEvent::PresenceChanged { device, online } => {
             format!(
                 "device {} is {}",

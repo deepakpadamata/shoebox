@@ -9,7 +9,7 @@ use shoebox_core::identity::KeyPair;
 use shoebox_core::model::Role;
 use shoebox_core::store::StoreBackend;
 use shoebox_node::{ImportOptions, LibraryNode, Node, NodeConfig};
-use shoebox_store_docs::{DocsBackend, DocsLibrary};
+use shoebox_store::{HybridBackend, Library};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,11 +33,11 @@ async fn wait_for<F: FnMut() -> Fut, Fut: std::future::Future<Output = bool>>(
 }
 
 /// A phone-like admin device with a library holding `files`.
-async fn inviter(dir: &Path, files: &[&str]) -> (Node, LibraryNode<DocsLibrary>) {
+async fn inviter(dir: &Path, files: &[&str]) -> (Node, LibraryNode<Library>) {
     let node = Node::open(NodeConfig::local_only(dir.join("inviter"), "laptop"))
         .await
         .unwrap();
-    let backend = DocsBackend::for_node(node.clone(), SystemClock);
+    let backend = HybridBackend::for_node(node.clone(), SystemClock);
     let root = KeyPair::generate();
     let (lib, cap) = backend.create_library(&root.root_public()).await.unwrap();
     let ln = LibraryNode::new(node.clone(), Arc::new(lib), SystemClock).with_capability(cap);

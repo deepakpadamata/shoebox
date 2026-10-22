@@ -141,11 +141,7 @@ fn desktop_secret_store(data_dir: &std::path::Path) -> Arc<dyn SecretStore> {
 /// Start the app (desktop `main` and the mobile entry point both come here).
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    crate::diagnostics::init_logging();
 
     let builder = tauri::Builder::default();
     #[cfg(target_os = "android")]

@@ -175,6 +175,8 @@ impl AppCore {
     pub async fn open(dir: impl Into<PathBuf>, opts: AppOptions) -> Result<Arc<AppCore>> {
         let dir = dir.into();
         std::fs::create_dir_all(&dir)?;
+        // Older data is upgraded (after a copy), newer data is refused: see `shoebox_node::format`.
+        shoebox_node::format::ensure_format(&dir)?;
         let file: AppFile = match std::fs::read(dir.join("app.json")) {
             Ok(b) => serde_json::from_slice(&b).context("reading app.json")?,
             Err(_) => adopt_dev_library(&dir)?.unwrap_or_default(),

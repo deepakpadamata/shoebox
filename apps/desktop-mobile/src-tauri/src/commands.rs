@@ -82,6 +82,7 @@ pub const COMMANDS: &[&str] = &[
     "shared_seen",
     "shared_fetch",
     "shared_remove_member",
+    "diagnostics",
 ];
 
 pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Value> {
@@ -297,6 +298,7 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             .await?;
             Ok(json!({}))
         }
+        "diagnostics" => out(core.diagnostics().await?),
         "export_library" => out(core.export_library(&arg::<String>(&args, "dest")?).await?),
         other => bail!("unknown command `{other}`"),
     }

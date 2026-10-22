@@ -1,5 +1,6 @@
 // The UI's only door to the app core. Inside Tauri it uses `invoke` and the `shoebox://` URI
 // scheme; in a browser (development, review) it talks to `desktop-dev-server` over HTTP.
+import type { DiagnosticsBundle } from '../bindings/DiagnosticsBundle';
 import type { AddCheck } from '../bindings/AddCheck';
 import type { AddResult } from '../bindings/AddResult';
 import type { FeedEntry } from '../bindings/FeedEntry';
@@ -29,7 +30,7 @@ import type { PhotoSummary } from '../bindings/PhotoSummary';
 import type { Settings } from '../bindings/Settings';
 
 export type {
-  AddCheck, AddResult, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
+  AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
   AlbumInfo, AppEvent, BackupPolicy, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, ExportReport, FreeUpReport, Health, ImportSummary,
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Settings,
 };
@@ -145,6 +146,7 @@ export const api = {
   sharedSeen: (album: string) => call<{}>('shared_seen', { album }),
   sharedFetch: (album: string, id: string, kind: BlobKind) => call<{}>('shared_fetch', { album, id, kind }),
   sharedRemoveMember: (album: string, member: string) => call<{}>('shared_remove_member', { album, member }),
+  diagnostics: () => call<DiagnosticsBundle>('diagnostics'),
   exportLibrary: (dest: string) => call<ExportReport>('export_library', { dest }),
   watchFolder: (dir: string) => call<{}>('watch_folder', { dir }),
 };

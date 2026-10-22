@@ -8,6 +8,7 @@ pub mod blob;
 mod burst;
 pub mod commands;
 mod core;
+pub mod diagnostics;
 mod export;
 pub mod keystore;
 pub mod notify;

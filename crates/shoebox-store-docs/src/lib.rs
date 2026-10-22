@@ -216,9 +216,17 @@ impl DocsBackend {
             .import_and_subscribe(doc_ticket)
             .await
             .map_err(|_| StoreError::Unreachable(ticket.inviter.id))?;
-        sync_and_wait(&doc, &self.node, &mut events, inviter)
-            .await
-            .map_err(|_| StoreError::Unreachable(ticket.inviter.id))?;
+        // Only the album's own record is needed to open it: the photos stream in afterwards.
+        replica::sync_until_key(
+            &doc,
+            &self.node,
+            &mut events,
+            inviter,
+            b"meta",
+            replica::SYNC_TIMEOUT,
+        )
+        .await
+        .map_err(|_| StoreError::Unreachable(ticket.inviter.id))?;
         DocsAlbum::join(
             self.replica(doc).await?,
             ticket.role,

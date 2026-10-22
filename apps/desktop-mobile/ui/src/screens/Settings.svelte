@@ -8,6 +8,7 @@
   import Row from '../components/Row.svelte';
   import Segmented from '../components/Segmented.svelte';
   import BackupCard from '../components/BackupCard.svelte';
+  import Sheet from '../components/Sheet.svelte';
 
   let s = $state<Settings | null>(null);
   let name = $state('');
@@ -18,6 +19,15 @@
   let theme = $state(localStorage.getItem('theme') ?? 'system');
   let exportDir = $state('');
   let exporting = $state(false);
+  let diag = $state<{ file_name: string; text: string } | null>(null);
+
+  async function showDiagnostics() {
+    try { diag = await api.diagnostics(); } catch (e) { fail(e); }
+  }
+  async function copyDiagnostics() {
+    try { await navigator.clipboard.writeText(diag!.text); toast('Copied. Paste it into your message.'); } catch { toast('Select the text and copy it'); }
+  }
+  const diagUrl = $derived(diag ? URL.createObjectURL(new Blob([diag.text], { type: 'text/plain' })) : '');
 
   async function doExport() {
     exporting = true;
@@ -111,6 +121,12 @@
       </div>
     </div>
 
+    <div class="section">Help</div>
+    <div class="card pad stack">
+      <p class="small muted" style="margin:0">If something is wrong, you can send a report to whoever is helping you. It has counts, versions and recent errors, and nothing about what is in your library: no photos, names, places or file names. Nothing is sent automatically.</p>
+      <div><Button size="sm" onclick={showDiagnostics}>Create a diagnostics report</Button></div>
+    </div>
+
     <div class="section">Appearance</div>
     <div class="card pad">
       <Segmented value={theme} options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} onchange={applyTheme} />
@@ -125,7 +141,22 @@
   {/if}
 </div>
 
+<Sheet open={diag !== null} title="Diagnostics report" onclose={() => (diag = null)} width={640}>
+  {#if diag}
+    <div class="stack">
+      <p class="small muted" style="margin:0">Read it first: this is everything that would be shared.</p>
+      <textarea class="report mono" readonly rows="14" value={diag.text}></textarea>
+      <div class="row-flex">
+        <Button kind="primary" onclick={copyDiagnostics}>Copy</Button>
+        <a class="dl" href={diagUrl} download={diag.file_name}>Save as a file</a>
+      </div>
+    </div>
+  {/if}
+</Sheet>
+
 <style>
+  .report { width: 100%; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font-size: 11px; padding: 10px; }
+  .dl { font-size: 13px; color: var(--accent); }
   .page { padding: 18px; max-width: 640px; overflow: auto; height: 100%; }
   .section { font-size: 12px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; margin: 20px 0 8px; }
   .section:first-child { margin-top: 0; }

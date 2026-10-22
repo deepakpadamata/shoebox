@@ -287,6 +287,14 @@ ts_type! {
 }
 
 ts_type! {
+    /// The report a person can send to get help (see `diagnostics.rs`).
+    pub struct DiagnosticsBundle {
+        pub file_name: String,
+        pub text: String,
+    }
+}
+
+ts_type! {
     /// A shared album this device belongs to.
     pub struct SharedAlbumInfo {
         pub id: String,

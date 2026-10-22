@@ -7,6 +7,7 @@ mod config;
 mod doc_digest;
 mod ext;
 mod fetcher;
+pub mod format;
 mod freeup;
 mod holdings;
 mod identity;

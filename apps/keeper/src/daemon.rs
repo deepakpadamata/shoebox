@@ -169,6 +169,7 @@ impl Daemon {
             Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
         }
 
+        shoebox_node::format::ensure_format(&opts.storage)?;
         let mut config = NodeConfig::local_only(&opts.storage, &opts.name);
         config.role = Role::Keeper;
         config.relay = opts.relay.clone();

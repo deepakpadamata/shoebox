@@ -278,6 +278,51 @@ where
         .map_err(|_| anyhow!("sync with {} timed out", peer.id.fmt_short()))?
 }
 
+/// Start syncing with `peer` and return as soon as the entry `key` is here with its content,
+/// leaving the rest of the sync running in the background. Joining a big album must not wait for
+/// all of its entries (tens of thousands take minutes), only for what is needed to open it.
+pub async fn sync_until_key<S>(
+    doc: &Doc,
+    node: &Node,
+    events: &mut S,
+    peer: iroh::EndpointAddr,
+    key: &[u8],
+    timeout: Duration,
+) -> Result<()>
+where
+    S: futures::Stream<Item = Result<LiveEvent, anyhow::Error>> + Unpin,
+{
+    doc.start_sync(vec![peer.clone()])
+        .await
+        .map_err(|e| anyhow!("starting sync: {e}"))?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        node.note_activity();
+        let stream = doc
+            .get_many(Query::key_exact(key).build())
+            .await
+            .map_err(|e| anyhow!("looking for an entry: {e}"))?;
+        let mut stream = Box::pin(stream);
+        if let Some(entry) = stream.next().await {
+            let entry = entry.map_err(|e| anyhow!("reading entry: {e}"))?;
+            let hash = shoebox_core::Blake3Hash(*entry.content_hash().as_bytes());
+            if node.blobs().has(&hash).await? {
+                return Ok(());
+            }
+        }
+        drop(stream);
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            bail!("no answer from {}", peer.id.fmt_short());
+        }
+        // Keep draining events (the engine stalls if a subscriber stops), and look again soon.
+        tokio::select! {
+            ev = events.next() => if ev.is_none() { bail!("event stream ended") },
+            _ = tokio::time::sleep(Duration::from_millis(100).min(left)) => {}
+        }
+    }
+}
+
 /// One request for a sync with `peer`: wait until a sync that *started after the request* has
 /// finished and the content it queued has arrived.
 ///

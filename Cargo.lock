@@ -3588,7 +3588,9 @@ name = "shoebox-node"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "bytes",
  "futures",
+ "hex",
  "iroh",
  "iroh-blobs",
  "iroh-docs",

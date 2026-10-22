@@ -1,5 +1,6 @@
 //! `Node`: owns the iroh endpoint and router, the blob store and the docs/gossip protocols.
 
+use crate::blobs::{iroh_hash, BlobStore, Protection};
 use crate::config::{NodeConfig, RelaySetting};
 use crate::keys::load_or_create_secret;
 use anyhow::{anyhow, Context, Result};
@@ -10,12 +11,16 @@ use iroh::endpoint::{
 };
 use iroh::protocol::{AcceptError, ProtocolHandler, Router};
 use iroh::{Endpoint, EndpointId};
-use iroh_blobs::store::fs::FsStore;
+use iroh_blobs::api::downloader::DownloadProgressItem;
+use iroh_blobs::store::fs::{options::Options as BlobOptions, FsStore};
+use iroh_blobs::store::GcConfig;
 use iroh_blobs::{BlobsProtocol, ALPN as BLOBS_ALPN};
+use iroh_docs::engine::ProtectCallbackHandler;
 use iroh_docs::protocol::Docs;
 use iroh_docs::ALPN as DOCS_ALPN;
 use iroh_gossip::net::Gossip;
 use iroh_gossip::ALPN as GOSSIP_ALPN;
+use shoebox_core::ids::Blake3Hash;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -24,14 +29,34 @@ use tracing::{info, info_span, Instrument};
 
 pub use iroh::EndpointAddr as PeerAddr;
 
+/// Minimum bytes between `BlobProgress` events for one download.
+const PROGRESS_STEP: u64 = 256 * 1024;
+
 /// ALPN of the liveness/latency protocol.
 pub const PING_ALPN: &[u8] = b"shoebox/ping/0";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NodeEvent {
-    Started { id: EndpointId },
-    PeerConnected { id: EndpointId },
-    PeerDisconnected { id: EndpointId },
+    Started {
+        id: EndpointId,
+    },
+    PeerConnected {
+        id: EndpointId,
+    },
+    PeerDisconnected {
+        id: EndpointId,
+    },
+    /// Bytes received so far for a blob being fetched from `from`.
+    BlobProgress {
+        hash: Blake3Hash,
+        from: EndpointId,
+        bytes: u64,
+    },
+    /// A blob finished downloading, was verified and is now stored and protected.
+    BlobFetched {
+        hash: Blake3Hash,
+        from: EndpointId,
+    },
 }
 
 /// A subscription to node events. A new subscriber always sees [`NodeEvent::Started`] first.
@@ -165,7 +190,7 @@ struct Inner {
     id: EndpointId,
     endpoint: Endpoint,
     router: Router,
-    blobs: FsStore,
+    blobs: BlobStore,
     docs: Docs,
     gossip: Gossip,
     lookup: MemoryLookup,
@@ -203,18 +228,28 @@ impl Node {
                 .await
                 .context("binding endpoint")?;
 
-            let blobs = FsStore::load(config.blobs_dir())
+            // GC reclaims every untagged blob; docs content hashes are protected through the
+            // protect handler so metadata entries are never collected from under the library.
+            let mut blob_opts = BlobOptions::new(&config.blobs_dir());
+            let (protect_handler, protect_cb) = ProtectCallbackHandler::new();
+            blob_opts.gc = config.gc_interval_ms.map(|ms| GcConfig {
+                interval: Duration::from_millis(ms),
+                add_protected: Some(protect_cb),
+            });
+            let raw_blobs = FsStore::load_with_opts(config.blobs_dir().join("blobs.db"), blob_opts)
                 .await
                 .map_err(|e| anyhow!("opening blob store: {e}"))?;
+            let blobs = BlobStore::new(raw_blobs);
             let gossip = Gossip::builder().spawn(endpoint.clone());
             let docs_dir = config.store_dir().join("docs");
             std::fs::create_dir_all(&docs_dir)?;
             let docs = Docs::persistent(docs_dir)
-                .spawn(endpoint.clone(), (*blobs).clone(), gossip.clone())
+                .protect_handler(protect_handler)
+                .spawn(endpoint.clone(), (**blobs.raw()).clone(), gossip.clone())
                 .await
                 .map_err(|e| anyhow!("starting docs: {e}"))?;
             let router = Router::builder(endpoint.clone())
-                .accept(BLOBS_ALPN, BlobsProtocol::new(&blobs, None))
+                .accept(BLOBS_ALPN, BlobsProtocol::new(blobs.raw(), None))
                 .accept(GOSSIP_ALPN, gossip.clone())
                 .accept(DOCS_ALPN, docs.clone())
                 .accept(PING_ALPN, Ping)
@@ -261,7 +296,7 @@ impl Node {
     pub fn endpoint(&self) -> &Endpoint {
         &self.inner.endpoint
     }
-    pub fn blobs(&self) -> &FsStore {
+    pub fn blobs(&self) -> &BlobStore {
         &self.inner.blobs
     }
     pub fn docs(&self) -> &Docs {
@@ -310,6 +345,81 @@ impl Node {
         Ok(rtt)
     }
 
+    /// Download `hash` from `from`, verifying it as it streams in, then protect it with `why`.
+    /// Emits [`NodeEvent::BlobProgress`] while receiving and [`NodeEvent::BlobFetched`] at the end.
+    pub async fn fetch_blob(
+        &self,
+        from: EndpointId,
+        hash: &Blake3Hash,
+        why: Protection,
+    ) -> Result<()> {
+        if self.inner.blobs.has(hash).await? {
+            self.inner.blobs.protect(hash, why).await?;
+            return Ok(());
+        }
+        // An in-flight download has no tag yet; hold a temp tag so GC cannot reap the partial or
+        // freshly completed blob before the permanent protection below exists.
+        let _in_flight = self
+            .inner
+            .blobs
+            .raw()
+            .tags()
+            .temp_tag(iroh_blobs::HashAndFormat {
+                hash: iroh_hash(hash),
+                format: iroh_blobs::BlobFormat::Raw,
+            })
+            .await
+            .map_err(|e| anyhow!("protecting in-flight download: {e}"))?;
+        let downloader = self.inner.blobs.raw().downloader(&self.inner.endpoint);
+        let mut progress = downloader
+            .download(iroh_hash(hash), Some(from))
+            .stream()
+            .await
+            .map_err(|e| anyhow!("starting download of {hash}: {e}"))?;
+        let mut failure: Option<String> = None;
+        let mut last_reported = 0u64;
+        while let Some(item) = futures::StreamExt::next(&mut progress).await {
+            match item {
+                DownloadProgressItem::Progress(bytes) => {
+                    // Throttle: a large blob reports thousands of chunks; a UI wants a few updates.
+                    if bytes >= last_reported + PROGRESS_STEP {
+                        last_reported = bytes;
+                        let _ = self.inner.events.send(NodeEvent::BlobProgress {
+                            hash: *hash,
+                            from,
+                            bytes,
+                        });
+                    }
+                }
+                DownloadProgressItem::Error(e) => failure = Some(e.to_string()),
+                DownloadProgressItem::DownloadError => {
+                    failure.get_or_insert_with(|| "download failed".into());
+                }
+                DownloadProgressItem::ProviderFailed { .. } => {
+                    failure.get_or_insert_with(|| {
+                        format!("{} could not provide the blob", from.fmt_short())
+                    });
+                }
+                _ => {}
+            }
+        }
+        if let Some(reason) = failure {
+            anyhow::bail!("fetching {hash} from {}: {reason}", from.fmt_short());
+        }
+        if !self.inner.blobs.has(hash).await? {
+            anyhow::bail!(
+                "fetching {hash} from {}: download did not complete",
+                from.fmt_short()
+            );
+        }
+        self.inner.blobs.protect(hash, why).await?;
+        let _ = self
+            .inner
+            .events
+            .send(NodeEvent::BlobFetched { hash: *hash, from });
+        Ok(())
+    }
+
     /// Stop all protocols, close the endpoint and release the on-disk stores.
     pub async fn shutdown(&self) -> Result<()> {
         self.inner
@@ -319,7 +429,7 @@ impl Node {
             .map_err(|e| anyhow!("router shutdown: {e}"))?;
         // The blobs protocol shuts its store down with the router; a second call finds the actor
         // already gone, which is fine (the restart test proves the store is released).
-        let _ = self.inner.blobs.shutdown().await;
+        let _ = self.inner.blobs.raw().shutdown().await;
         Ok(())
     }
 }

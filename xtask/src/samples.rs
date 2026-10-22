@@ -18,6 +18,7 @@ fn sample_exif(width: u32, height: u32) -> ExifSpec {
         gps: Some((48.8584, 2.2945)),
         width,
         height,
+        orientation: 1,
     }
 }
 

@@ -43,6 +43,7 @@ anyhow = "1"
 tracing = "0.1"
 toml = "0.8"
 tempfile = "3"
+bytes = "1"
 
 # --- internal crates ---
 shoebox-core = { path = "crates/shoebox-core" }

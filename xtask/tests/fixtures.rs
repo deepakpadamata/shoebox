@@ -14,6 +14,7 @@ fn spec(gps: Option<(f64, f64)>) -> ExifSpec {
         gps,
         width: 64,
         height: 48,
+        orientation: 1,
     }
 }
 

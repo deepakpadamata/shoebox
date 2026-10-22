@@ -21,6 +21,13 @@ pub struct NodeConfig {
     pub name: String,
     pub role: Role,
     pub relay: RelaySetting,
+    /// How often unprotected blobs are garbage-collected; `None` disables GC.
+    #[serde(default = "default_gc_interval_ms")]
+    pub gc_interval_ms: Option<u64>,
+}
+
+fn default_gc_interval_ms() -> Option<u64> {
+    Some(5 * 60 * 1000)
 }
 
 impl NodeConfig {
@@ -31,7 +38,13 @@ impl NodeConfig {
             name: name.into(),
             role: Role::Keeper,
             relay: RelaySetting::Disabled,
+            gc_interval_ms: default_gc_interval_ms(),
         }
+    }
+
+    pub fn with_gc_interval(mut self, interval: std::time::Duration) -> Self {
+        self.gc_interval_ms = Some(interval.as_millis() as u64);
+        self
     }
 
     pub fn blobs_dir(&self) -> PathBuf {

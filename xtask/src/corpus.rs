@@ -132,6 +132,7 @@ pub fn plan(count: usize, seed: u64, duplicate_percent: u32) -> Vec<PhotoSpec> {
             gps,
             width,
             height,
+            orientation: 1,
         };
         // Unique per photo: mixing the index in guarantees no accidental collisions.
         let content_seed = rng.next() ^ ((index as u64) << 40);

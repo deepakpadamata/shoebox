@@ -12,6 +12,8 @@ pub struct ExifSpec {
     pub gps: Option<(f64, f64)>,
     pub width: u32,
     pub height: u32,
+    /// EXIF orientation tag (1 = upright, 6 = rotate 90° CW, ...).
+    pub orientation: u16,
 }
 
 /// `(year, month, day, hour, minute, second)` of a unix timestamp, UTC.

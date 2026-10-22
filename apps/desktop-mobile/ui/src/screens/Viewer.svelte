@@ -15,8 +15,11 @@
   const photo = $derived(items[index]);
   let detail = $state<PhotoDetail | null>(null);
   import { viewport } from '../lib/viewport.svelte';
+  import { pinch, swipe } from '../lib/gestures';
   let info = $state(!viewport.mobile);
   let fetching = $state(false);
+  let zoom = $state(1);
+  let pullY = $state(0);
   let originalReady = $state(false);
 
   $effect(() => {
@@ -24,6 +27,8 @@
     detail = null;
     originalReady = false;
     fetching = false;
+    zoom = 1;
+    pullY = 0;
     api.photoDetail(id).then((d) => {
       if (photo.id === id) {
         detail = d;
@@ -77,7 +82,7 @@
 <svelte:window onkeydown={key} />
 
 <div class="viewer" role="dialog" aria-modal="true" aria-label="Photo viewer">
-  <div class="stage">
+  <div class="stage" use:swipe={{ enabled: () => zoom === 1, onSwipe: (d) => (d === 'left' ? onmove(1) : d === 'right' ? onmove(-1) : d === 'down' ? onclose() : null), onDrag: (_, dy) => (pullY = Math.max(0, dy)), onEnd: () => (pullY = 0) }} use:pinch={{ onScale: (s) => (zoom = Math.min(5, Math.max(1, s))), onEnd: (s) => (zoom = Math.min(5, Math.max(1, s))) }}>
     <div class="bar top">
       <button class="icon" aria-label="Close" onclick={onclose}>✕</button>
       <span class="grow"></span>
@@ -91,7 +96,7 @@
         <!-- svelte-ignore a11y_media_has_caption -->
         <video src={blobUrl(photo.id, 'original')} controls autoplay></video>
       {:else}
-        {#key photo.id}<img {src} alt="" />{/key}
+        {#key photo.id}<img {src} alt="" style="transform: translateY({pullY}px) scale({zoom}); opacity: {1 - Math.min(0.5, pullY / 400)}" ondblclick={() => (zoom = zoom > 1 ? 1 : 2.5)} />{/key}
       {/if}
       {#if detail && !originalReady}
         <div class="overlay">
@@ -144,6 +149,8 @@
 <style>
   .viewer { position: fixed; inset: 0; z-index: 30; background: #0b0a09; color: #fff; display: flex; }
   .stage { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; }
+  .stage { touch-action: pan-y pinch-zoom; }
+  img { transition: transform .08s; touch-action: none; }
   .media { width: 100%; height: 100%; min-height: 0; display: grid; place-items: center; padding: 56px 56px; position: relative; }
   img, video { max-width: 100%; max-height: calc(100vh - 112px); object-fit: contain; border-radius: 4px; }
   .bar { position: absolute; left: 0; right: 0; top: 0; display: flex; gap: 6px; padding: 10px 14px; z-index: 2; }

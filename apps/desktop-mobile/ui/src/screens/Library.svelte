@@ -5,6 +5,8 @@
   import { api, type PageCursor, type PhotoPage, type PhotoSummary } from '../lib/api';
   import { dayLabel, plural } from '../lib/format';
   import { buildLayout, visibleRows } from '../lib/timeline';
+  import { longPressDrag, pinch, stepDensity } from '../lib/gestures';
+  import { viewport as media } from '../lib/viewport.svelte';
   import { app, fail, toast } from '../lib/store.svelte';
   import Tile from '../components/Tile.svelte';
   import Button from '../components/Button.svelte';
@@ -32,7 +34,27 @@
   const selectedSet = $derived(new Set(selected));
   const target = $derived(app.counts?.redundancy_target ?? 2);
 
-  const layout = $derived(buildLayout(items, { width, minTile: width < 700 ? 96 : 140, gap: GAP, headHeight: HEAD }));
+  const DENSITIES = [72, 96, 130, 180];
+  let density = $state(Number(localStorage.getItem('density')) || 0);
+  const minTile = $derived(density || (media.mobile ? 96 : 140));
+  // Pinch to change the grid density; the choice is remembered.
+  function setDensity(scale: number) {
+    density = stepDensity(minTile, scale, DENSITIES);
+    localStorage.setItem('density', String(density));
+  }
+  // Long-press a tile, then drag across others to select them (mockup 2b).
+  function indexOf(el: Element | null): number {
+    const t = el?.closest('[data-index]');
+    return t ? Number(t.getAttribute('data-index')) : -1;
+  }
+  function selectAt(el: Element | null) {
+    const i = indexOf(el);
+    if (i < 0) return;
+    const id = items[i]?.id;
+    if (id && !selectedSet.has(id)) selected = [...selected, id];
+    lastClicked = i;
+  }
+  const layout = $derived(buildLayout(items, { width, minTile, gap: GAP, headHeight: HEAD }));
   const range = $derived(visibleRows(layout, scrollTop, viewport));
   const shown = $derived(layout.rows.slice(range[0], range[1]));
 
@@ -154,7 +176,9 @@
   {/if}
 
   <div class="scroller" bind:this={scroller} bind:clientWidth={width} bind:clientHeight={viewport}
-    onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}>
+    onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}
+    use:pinch={{ onEnd: setDensity }}
+    use:longPressDrag={{ onStart: selectAt, onOver: selectAt, onEnd: () => {} }}>
     {#if !loaded}
       <div class="empty">Loading…</div>
     {:else if items.length === 0}
@@ -172,7 +196,7 @@
           {:else}
             <div class="tiles" style="top:{row.top}px;height:{row.height}px;gap:{GAP}px">
               {#each items.slice(row.from, row.to) as p, k (p.id)}
-                <Tile id={p.id} size={layout.tile} favorite={p.favorite} video={p.is_video} copies={p.copies} {target}
+                <Tile index={row.from + k} id={p.id} size={layout.tile} favorite={p.favorite} video={p.is_video} copies={p.copies} {target}
                   hasThumb={p.has_thumb} hasPoster={p.has_poster} hasOriginal={p.has_original} selected={selectedSet.has(p.id)} {selecting} onclick={(e) => click(row.from + k, e)} />
               {/each}
             </div>
@@ -202,7 +226,7 @@
 <style>
   .wrap { height: 100%; display: flex; flex-direction: column; min-height: 0; }
   .selbar { display: flex; gap: 8px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--accent-soft); flex-wrap: wrap; }
-  .scroller { flex: 1; overflow-y: auto; position: relative; min-height: 0; }
+  .scroller { flex: 1; overflow-y: auto; position: relative; min-height: 0; touch-action: pan-y; }
   .canvas { position: relative; }
   .head { position: absolute; left: 0; right: 0; display: flex; justify-content: space-between; align-items: baseline; padding: 20px 18px 6px; }
   .head b { font-size: 15px; }

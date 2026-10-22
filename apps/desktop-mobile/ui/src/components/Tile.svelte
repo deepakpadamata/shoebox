@@ -4,10 +4,10 @@
   interface Props {
     id: string; size: number; favorite?: boolean; video?: boolean; copies?: number; target?: number;
     transferring?: boolean; selected?: boolean; selecting?: boolean; hasThumb?: boolean;
-    hasPoster?: boolean; hasOriginal?: boolean;
+    hasPoster?: boolean; hasOriginal?: boolean; index?: number;
     onclick?: (e: MouseEvent) => void;
   }
-  let { id, size, favorite = false, video = false, copies, target = 2, transferring = false, selected = false, selecting = false, hasThumb = true, hasPoster = false, hasOriginal = false, onclick }: Props = $props();
+  let { id, size, favorite = false, video = false, copies, target = 2, transferring = false, selected = false, selecting = false, hasThumb = true, hasPoster = false, hasOriginal = false, index, onclick }: Props = $props();
   // A video's poster is made on this device once the original is here; until then a neutral tile.
   let madePoster = $state(false);
   $effect(() => {
@@ -18,7 +18,7 @@
   const risk = $derived(copies !== undefined && copies < target);
 </script>
 
-<button class="tile" class:selected style="width:{size}px;height:{size}px" {onclick} aria-label="Photo" aria-pressed={selecting ? selected : undefined}>
+<button class="tile" class:selected data-index={index} style="width:{size}px;height:{size}px" {onclick} aria-label="Photo" aria-pressed={selecting ? selected : undefined}>
   {#if poster}
     <img src={blobUrl(id, 'poster')} alt="" loading="lazy" decoding="async" draggable="false" />
   {:else if hasThumb && !video}

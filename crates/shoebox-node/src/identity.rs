@@ -5,8 +5,7 @@ use anyhow::Result;
 use shoebox_core::identity::{issue_admin_cert, issue_device_cert, KeyPair};
 use shoebox_core::model::Role;
 use shoebox_core::recovery::RecoveryKit;
-use shoebox_core::store::Change;
-use shoebox_core::store::{LibraryStore, SignedDeviceChange};
+use shoebox_core::store::{Change, LibraryStore, SignedDeviceChange};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -121,6 +120,36 @@ impl<L: LibraryStore> LibraryNode<L> {
         if state == Membership::Removed && previous != Membership::Removed {
             self.node().emit(NodeEvent::RemovedFromLibrary);
         }
+        Ok(())
+    }
+
+    /// Revoke `device` (signed by this device, which must be an admin). The revocation
+    /// replicates; peers then refuse the device (see [`LibraryNode::enforce_membership`]).
+    pub async fn revoke_device(&self, device: &shoebox_core::ids::EndpointId) -> Result<()> {
+        let cap = self.capability()?;
+        let list = self.store().device_list().await?;
+        anyhow::ensure!(
+            list.admins.iter().any(|a| a.admin == self.device()),
+            "only an admin device can revoke devices"
+        );
+        let current = list
+            .devices
+            .iter()
+            .find(|d| d.device == *device)
+            .ok_or_else(|| anyhow::anyhow!("no such device in this library"))?;
+        anyhow::ensure!(!current.revoked, "that device is already revoked");
+        let cert = shoebox_core::identity::issue_device_cert(
+            &self.node().device_key(),
+            cap.library,
+            *device,
+            current.role,
+            &current.name,
+            self.holdings_hlc(),
+            true,
+        );
+        self.store()
+            .apply_device_change(SignedDeviceChange::Device(cert))
+            .await?;
         Ok(())
     }
 

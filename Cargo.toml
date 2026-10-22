@@ -19,7 +19,7 @@ members = [
 [workspace.package]
 version = "0.0.1"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.89"
 repository = "https://example.invalid/shoebox" # placeholder until a remote exists
 
 [workspace.dependencies]

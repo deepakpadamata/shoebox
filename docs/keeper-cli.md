@@ -1,0 +1,39 @@
+# `shoebox-keeper` CLI and control socket
+
+The keeper is a daemon (`shoebox-keeper run`) plus subcommands that talk to it over a Unix socket
+(`<storage>/control.sock`, mode `0600`, newline-delimited JSON). Storage defaults to
+`$XDG_DATA_HOME/shoebox` (`~/.local/share/shoebox`, `~/Library/Application Support/shoebox` on macOS) and can
+be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held while a daemon runs; a second
+`run` on the same storage refuses to start.
+
+| Command | What it does |
+|---|---|
+| `run [--name N] [--relay default\|off\|URL] [--no-mdns]` | run the daemon in the foreground (logs to stderr, journald friendly) |
+| `pair <ticket> [--name N] [--yes]` | join a library; shows a 6-digit code to compare with the other device |
+| `status [--json]` | library counts, at-risk, devices and paths |
+| `devices [--json]` / `devices revoke <id>` | list devices / revoke one (this keeper must be an admin) |
+| `album list\|keep\|drop` | stubs: "available after shared albums" until M5-04 |
+| `service install [--system] [--user U] [--print]` / `service uninstall` | systemd unit (Linux) / launchd plist (macOS) |
+| `stop` | ask the daemon to shut down |
+
+## `status --json` (schema 1)
+
+```json
+{
+  "schema": 1, "version": "0.0.1", "name": "pi", "device_id": "<64 hex>", "uptime_secs": 123,
+  "paired": true, "membership": "member | unknown | removed",
+  "library": { "id": "<32 hex>", "photos": 0, "held_originals": 0, "at_risk": 0,
+               "redundancy_target": 2, "recovery_kit_saved": false },
+  "devices": 3,
+  "peers": [ { "id": "<64 hex>", "name": "Asha's phone", "path": "lan | direct | relay | none", "latency_ms": 12 } ],
+  "shared_albums": []
+}
+```
+Unpaired keepers return only the top-level fields with `"paired": false`.
+
+## Control protocol
+
+Request: one JSON object per line, `{"cmd": "status" | "devices" | "revoke" | "pair" | "album" | "shutdown", ...}`.
+Reply: `{"type":"ok","data":…}` or `{"type":"error","message":…}`. `pair` is a conversation: the daemon sends
+`{"type":"code","sas":"123456","peer_name":…,"peer_role":…}`, the client answers `{"confirm":true|false}`, then the
+final reply follows.

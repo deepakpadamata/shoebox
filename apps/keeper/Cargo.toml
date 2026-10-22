@@ -1,10 +1,37 @@
 [package]
 name = "keeper"
+description = "shoebox-keeper: the always-on backstop device (daemon, control socket, CLI)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "AGPL-3.0-only"
 publish = false
+
+[lib]
+name = "keeper"
+path = "src/lib.rs"
+
+[[bin]]
+name = "shoebox-keeper"
+path = "src/main.rs"
+
+[dependencies]
+shoebox-core.workspace = true
+shoebox-node.workspace = true
+shoebox-store-docs.workspace = true
+tokio = { workspace = true, features = ["signal", "net", "io-util", "fs"] }
+anyhow.workspace = true
+serde.workspace = true
+serde_json = "1"
+hex.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+futures.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+shoebox-node = { workspace = true }
 
 [lints]
 workspace = true

@@ -172,7 +172,7 @@ impl<L: LibraryStore> LibraryNode<L> {
             if held.len() >= HOLDINGS_BATCH {
                 self.publish_holdings(std::mem::take(&mut held)).await?;
             }
-            if done % PROGRESS_EVERY == 0 || done == total {
+            if done.is_multiple_of(PROGRESS_EVERY) || done == total {
                 self.node().emit(NodeEvent::ImportProgress {
                     done,
                     total,

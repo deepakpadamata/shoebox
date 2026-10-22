@@ -112,3 +112,52 @@ async fn the_recovery_kit_saved_flag_is_a_library_setting() {
     assert!(a.ln.recovery_kit_saved().await.unwrap());
     let _ = cap;
 }
+
+#[tokio::test]
+async fn admins_can_revoke_devices_and_others_cannot() {
+    let net = MemNetwork::new();
+    let root = KeyPair::generate();
+    let (a, cap) = device(&net, None, Some(&root.root_public())).await;
+    a.ln.create_identity(&root, Role::Keeper, "home")
+        .await
+        .unwrap();
+    // A second, non-admin device certified by the root (as pairing would do through an admin).
+    let other = KeyPair::generate();
+    let cert = shoebox_core::identity::issue_device_cert(
+        &root,
+        cap.library,
+        other.endpoint_id(),
+        Role::Phone,
+        "phone",
+        shoebox_core::Hlc {
+            physical_ms: 1_699_999_999_000,
+            counter: 0,
+            device: a.id,
+        },
+        false,
+    );
+    a.ln.store()
+        .apply_device_change(SignedDeviceChange::Device(cert))
+        .await
+        .unwrap();
+
+    a.ln.revoke_device(&other.endpoint_id()).await.unwrap();
+    let list = a.ln.store().device_list().await.unwrap();
+    assert!(list
+        .devices
+        .iter()
+        .any(|d| d.device == other.endpoint_id() && d.revoked));
+    assert!(
+        a.ln.revoke_device(&other.endpoint_id()).await.is_err(),
+        "already revoked"
+    );
+    assert!(
+        a.ln.revoke_device(&EndpointId([9; 32])).await.is_err(),
+        "unknown device"
+    );
+
+    // A device without an admin cert cannot revoke.
+    let (b, _) = device(&net, Some(&cap), None).await;
+    let err = b.ln.revoke_device(&a.id).await.unwrap_err();
+    assert!(format!("{err:#}").contains("admin"), "{err:#}");
+}

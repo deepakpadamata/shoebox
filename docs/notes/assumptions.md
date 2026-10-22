@@ -246,3 +246,12 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   capability; the joiner verifies the chain to the capability's root key before trusting it. The role is fixed by the ticket (a camera device scanning a QR gets what the QR offers).
   Admin rights are not granted by pairing. **Verified: loopback only.** "Through a relay" is unverified (no relay available here; the protocol is plain QUIC streams so nothing
   relay-specific is expected). The `shoebox-dev` CLI does not use pairing yet — the keeper CLI (M2-06) will. Recovery-with-root-key still lacks its capability handoff (A-060).
+- **A-063 · M2-05..07** · Keeper: one daemon per storage dir (`keeper.lock` via `File::try_lock`, so the **workspace MSRV is now 1.89**; clippy msrv follows). Node data lives directly under
+  `--storage` (`keys/endpoint.key` 0600, `blobs/`, `store/`, `keeper.json`, `control.sock` 0600, `keeper.lock`). `keeper.json` stores the library ticket string (capability + peers
+  from the pairing grant), so a restart rejoins and the fetcher resumes (tested: stop right after pairing, restart, all originals arrive). `pair` runs *inside* the daemon over the
+  socket (the same node must hold the endpoint key that the cert is issued to) — pairing an offline keeper is not supported; start `run` first. A paired keeper gets role Keeper and
+  no admin rights, so `devices revoke` on it fails with "only an admin device…" until an admin-granting flow exists (not in M2). The 5g/5i mockups are not in the repo; terminal output
+  is my reading of the content list in the issue (library counts, at risk, devices with path/latency, shared-album count), documented with its JSON schema in `docs/keeper-cli.md`.
+  `status` computes `held_originals` by probing the blob store per photo (fine for tens of thousands; should become an index if status is polled on very large libraries). Service files:
+  systemd user unit (default) or system unit (+ optional dedicated `User=`), launchd plist in `~/Library/LaunchAgents`; `service install` writes the file and prints the
+  enable command rather than invoking `systemctl`/`launchctl` itself (not verifiable here). **Unverified:** the acceptance test "fresh Raspberry Pi OS: install → reboot → syncing" (no Pi, no systemd on this Mac).

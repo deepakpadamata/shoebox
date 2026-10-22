@@ -25,7 +25,10 @@ fn gps_of(bytes: &[u8], name: &str) -> Option<shoebox_core::model::Gps> {
 }
 
 fn pixels(bytes: &[u8]) -> Vec<u8> {
-    image::load_from_memory(bytes).unwrap().to_rgba8().into_raw()
+    image::load_from_memory(bytes)
+        .unwrap()
+        .to_rgba8()
+        .into_raw()
 }
 
 #[test]
@@ -65,7 +68,11 @@ fn crc32(data: &[u8]) -> u32 {
     for b in data {
         crc ^= *b as u32;
         for _ in 0..8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
         }
     }
     !crc
@@ -115,10 +122,16 @@ fn an_mp4_loses_its_location_atom_and_keeps_the_media() {
     let s = strip_location(&file).unwrap();
     assert!(s.changed);
     assert_eq!(s.bytes.len(), file.len());
-    assert!(!s.bytes.windows(7).any(|w| w == b"+38.722"), "the coordinates are gone");
+    assert!(
+        !s.bytes.windows(7).any(|w| w == b"+38.722"),
+        "the coordinates are gone"
+    );
     assert!(s.bytes.windows(4).any(|w| w == b"free"));
     assert!(s.bytes.ends_with(&mdat), "media data untouched");
-    assert!(s.bytes.windows(4).any(|w| w == b"clip"), "other metadata kept");
+    assert!(
+        s.bytes.windows(4).any(|w| w == b"clip"),
+        "other metadata kept"
+    );
 }
 
 #[test]
@@ -138,8 +151,14 @@ fn xmp_gps_properties_are_blanked() {
 #[test]
 fn heic_and_unknown_files_are_refused_not_passed_through() {
     let heic = bx(b"ftyp", b"heic\0\0\0\0mif1heic");
-    assert!(matches!(strip_location(&heic), Err(StripError::Unsupported(_))));
-    assert!(matches!(strip_location(b"GIF89a....."), Err(StripError::Unsupported(_))));
+    assert!(matches!(
+        strip_location(&heic),
+        Err(StripError::Unsupported(_))
+    ));
+    assert!(matches!(
+        strip_location(b"GIF89a....."),
+        Err(StripError::Unsupported(_))
+    ));
     assert!(matches!(
         strip_location(&[0xFF, 0xD8, 0xFF, 0xE1, 0xFF, 0xFF]),
         Err(StripError::Malformed(_))

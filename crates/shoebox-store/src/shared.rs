@@ -26,7 +26,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Notify, Semaphore};
 use tracing::{debug, warn};
 
-const INVITE_PREFIX: &str = "shoebox-album1";
+/// Uppercase letters, digits and `-` only, so a QR code can use its denser alphanumeric mode.
+const INVITE_PREFIX: &str = "SHOEBOX-ALBUM1-";
 const TICK: Duration = Duration::from_secs(5);
 const RESYNC: Duration = Duration::from_secs(30);
 const SYNC_TIMEOUT: Duration = Duration::from_secs(25);
@@ -49,12 +50,33 @@ struct Reg {
     location: String,
     /// Events up to this time have been looked at.
     seen_ms: u64,
+    /// Devices that joined as viewers (they cannot write their own membership entry).
+    #[serde(default)]
+    viewers: Vec<EndpointId>,
+    /// After the album moved to a new space (a member was removed): who has not yet been told
+    /// where it went, and whether they may write.
+    #[serde(default)]
+    pending_moves: Vec<(EndpointId, bool)>,
+}
+
+/// "The album moved": sent by the owner to each remaining member over [`ALBUM_ALPN`].
+#[derive(Serialize, Deserialize)]
+struct Moved {
+    album: AlbumId,
+    capability: Vec<u8>,
+    owner: PeerAddr,
+}
+
+fn contributor() -> MemberRole {
+    MemberRole::Contributor
 }
 
 /// An invitation this device issued: valid once, until it expires.
 #[derive(Serialize, Deserialize, Clone)]
 struct Invite {
     secret: [u8; 16],
+    #[serde(default = "contributor")]
+    role: MemberRole,
     album: AlbumId,
     expires_ms: Option<i64>,
     used: bool,
@@ -69,6 +91,8 @@ struct RegFile {
 
 /// How long a joiner that presented a valid invitation may fetch what the album needs while it
 /// is still becoming a member.
+const TAG_INVITE: u8 = 0;
+const TAG_MOVED: u8 = 1;
 const GUEST_WINDOW: Duration = Duration::from_secs(30 * 60);
 
 struct Entry {
@@ -122,15 +146,23 @@ pub fn encode_invite(t: &InviteTicket) -> String {
     let mut body = postcard::to_stdvec(t).expect("invite encodes");
     let sum = blake3::hash(&[INVITE_PREFIX.as_bytes(), &body].concat());
     body.extend(&sum.as_bytes()[..4]);
-    format!("{INVITE_PREFIX}{}", hex::encode(body))
+    format!(
+        "{INVITE_PREFIX}{}",
+        data_encoding::BASE32_NOPAD.encode(&body)
+    )
 }
 
 pub fn decode_invite(text: &str) -> Result<InviteTicket> {
+    let text: String = text
+        .split_whitespace()
+        .collect::<String>()
+        .to_ascii_uppercase();
     let rest = text
-        .trim()
         .strip_prefix(INVITE_PREFIX)
         .ok_or_else(|| anyhow!("this is not an album invitation"))?;
-    let mut bytes = hex::decode(rest).map_err(|_| anyhow!("the invitation is garbled"))?;
+    let mut bytes = data_encoding::BASE32_NOPAD
+        .decode(rest.as_bytes())
+        .map_err(|_| anyhow!("the invitation is garbled"))?;
     ensure!(bytes.len() > 4, "the invitation is cut short");
     let sum = bytes.split_off(bytes.len() - 4);
     let want = blake3::hash(&[INVITE_PREFIX.as_bytes(), &bytes].concat());
@@ -275,6 +307,8 @@ impl SharedAlbums {
             keep_originals: false,
             location: "ask".into(),
             seen_ms: self.inner.clock.now_ms(),
+            viewers: vec![],
+            pending_moves: vec![],
         };
         self.install(Arc::new(album), reg);
         self.save()?;
@@ -299,6 +333,7 @@ impl SharedAlbums {
             invites.retain(|i| !i.used && i.expires_ms.is_none_or(|t| t > now));
             invites.push(Invite {
                 secret: ticket.secret,
+                role,
                 album: *id,
                 expires_ms: match expiry {
                     Expiry::At(t) => Some(t.0),
@@ -358,11 +393,52 @@ impl SharedAlbums {
             keep_originals: false,
             location: "ask".into(),
             seen_ms: self.inner.clock.now_ms(),
+            viewers: vec![],
+            pending_moves: vec![],
         };
         self.install(Arc::new(album), reg);
         self.save()?;
         self.inner.wake.notify_one();
         Ok(id)
+    }
+
+    /// Remove a member (owner only): the album moves to a new space without them and everyone who
+    /// stays is told where it went. The removed member keeps what they already downloaded.
+    pub async fn remove_member(&self, id: &AlbumId, member: &EndpointId) -> Result<()> {
+        let e = self.entry(id)?;
+        let me = self.inner.backend.device();
+        ensure!(
+            e.album.my_role().await == Some(MemberRole::Owner),
+            "only the owner can remove people"
+        );
+        ensure!(
+            *member != me,
+            "you cannot remove yourself: leave the album instead"
+        );
+        let members = self.members(id).await?;
+        ensure!(
+            members.iter().any(|m| m.member.key == *member),
+            "that person is not in this album"
+        );
+        let moved = Arc::new(self.inner.backend.move_album(&e.album, &[*member]).await?);
+        let mut reg = e.reg.lock().unwrap().clone();
+        reg.capability = moved.capability().await?;
+        reg.viewers.retain(|v| v != member);
+        reg.pending_moves = members
+            .iter()
+            .filter(|m| m.member.key != me && m.member.key != *member)
+            .map(|m| (m.member.key, m.member.role != MemberRole::Viewer))
+            .collect();
+        self.install(moved, reg);
+        self.save()?;
+        if let Ok(gone) = to_iroh_id(member) {
+            // Their invitation window (if still open) must not outlive their membership.
+            self.inner.guests.lock().unwrap().remove(&gone);
+        }
+        self.inner.refresh_gate();
+        self.inner.wake.notify_one();
+        let _ = self.inner.notices.send(AlbumNotice(*id));
+        Ok(())
     }
 
     /// Stop being part of an album on this device (what was downloaded may be freed later).
@@ -437,8 +513,9 @@ impl SharedAlbums {
 
     pub async fn members(&self, id: &AlbumId) -> Result<Vec<MemberInfo>> {
         let me = self.inner.backend.device();
-        Ok(self
-            .album(id)?
+        let e = self.entry(id)?;
+        let mut out: Vec<MemberInfo> = e
+            .album
             .members()
             .await?
             .into_iter()
@@ -446,7 +523,21 @@ impl SharedAlbums {
                 me: m.key == me,
                 member: m,
             })
-            .collect())
+            .collect();
+        let viewers = e.reg.lock().unwrap().viewers.clone();
+        for v in viewers {
+            if !out.iter().any(|m| m.member.key == v) {
+                out.push(MemberInfo {
+                    me: false,
+                    member: Member {
+                        key: v,
+                        display_name: format!("Viewer {}", hex::encode(&v.0[..4])),
+                        role: MemberRole::Viewer,
+                    },
+                });
+            }
+        }
+        Ok(out)
     }
 
     pub async fn events(&self, id: &AlbumId, since: Option<Hlc>) -> Result<Vec<AlbumEvent>> {
@@ -536,12 +627,19 @@ impl SharedAlbums {
 }
 
 impl Inner {
+    /// Everyone this album knows: members that wrote their own entry, and viewers.
+    fn member_ids(e: &Entry) -> Vec<EndpointId> {
+        let mut ids = e.album.known_member_ids();
+        ids.extend(e.reg.lock().unwrap().viewers.iter().copied());
+        ids
+    }
+
     /// Members of every album plus the inviters: the peers allowed to fetch blobs from us.
     fn gate_ids(&self) -> HashSet<iroh::EndpointId> {
         let entries: Vec<Arc<Entry>> = self.entries.lock().unwrap().values().cloned().collect();
         let mut ids = HashSet::new();
         for e in entries {
-            for id in e.album.known_member_ids() {
+            for id in Self::member_ids(&e) {
                 if let Ok(i) = to_iroh_id(&id) {
                     ids.insert(i);
                 }
@@ -568,7 +666,8 @@ impl Inner {
         let go = async {
             let conn = self.node.endpoint().connect(addr, ALBUM_ALPN).await?;
             let (mut send, mut recv) = conn.open_bi().await?;
-            send.write_all(&t.secret).await?;
+            send.write_all(&[&[TAG_INVITE][..], &t.secret].concat())
+                .await?;
             send.finish()?;
             let reply = recv.read_to_end(256).await?;
             conn.close(0u32.into(), b"done");
@@ -594,7 +693,7 @@ impl Inner {
         secret: [u8; 16],
     ) -> Result<(), &'static str> {
         let now = self.clock.now_ms() as i64;
-        {
+        let (album, role) = {
             let mut invites = self.invites.lock().unwrap();
             let Some(inv) = invites.iter_mut().find(|i| i.secret == secret) else {
                 return Err(
@@ -611,6 +710,17 @@ impl Inner {
                 return Err("this album no longer exists here");
             }
             inv.used = true;
+            (inv.album, inv.role)
+        };
+        if role == MemberRole::Viewer {
+            // A viewer cannot write its own membership entry: remember who it is.
+            if let Some(e) = self.entries.lock().unwrap().get(&album) {
+                let who = shoebox_node::from_iroh_id(&from);
+                let mut reg = e.reg.lock().unwrap();
+                if !reg.viewers.contains(&who) {
+                    reg.viewers.push(who);
+                }
+            }
         }
         self.guests
             .lock()
@@ -620,7 +730,93 @@ impl Inner {
         Ok(())
     }
 
-    fn save_invites(&self) -> Result<()> {
+    /// The owner tells us the album moved to a new space: follow it (only the owner may say so).
+    async fn accept_moved(self: &Arc<Self>, from: iroh::EndpointId, body: &[u8]) -> Result<()> {
+        let moved: Moved =
+            postcard::from_bytes(body).map_err(|e| anyhow!("malformed notice: {e}"))?;
+        let entry = self
+            .entries
+            .lock()
+            .unwrap()
+            .get(&moved.album)
+            .cloned()
+            .ok_or_else(|| anyhow!("not a member of that album"))?;
+        let sender = shoebox_node::from_iroh_id(&from);
+        let owner = entry
+            .album
+            .members()
+            .await?
+            .iter()
+            .any(|m| m.key == sender && m.role == MemberRole::Owner);
+        ensure!(owner, "only the owner can move an album");
+        let album = Arc::new(self.backend.open_album(&moved.capability).await?);
+        let mut reg = entry.reg.lock().unwrap().clone();
+        reg.capability = moved.capability;
+        reg.inviter = Some(moved.owner);
+        reg.pending_moves = vec![];
+        reg.viewers = vec![];
+        let shared = SharedAlbums {
+            inner: self.clone(),
+        };
+        shared.install(album, reg);
+        shared.save()?;
+        self.refresh_gate();
+        let _ = self.notices.send(AlbumNotice(moved.album));
+        self.wake.notify_one();
+        Ok(())
+    }
+
+    /// Tell the members who have not heard yet where the album went.
+    async fn push_moves(&self, e: &Arc<Entry>) {
+        let (album, pending) = {
+            let reg = e.reg.lock().unwrap();
+            if reg.pending_moves.is_empty() {
+                return;
+            }
+            (reg.album, reg.pending_moves.clone())
+        };
+        let (Ok(write), Ok(read)) = (
+            e.album.capability_for(true).await,
+            e.album.capability_for(false).await,
+        ) else {
+            return;
+        };
+        let owner = shoebox_node::from_endpoint_addr(&self.node.addr());
+        for (who, writer) in pending {
+            let notice = Moved {
+                album,
+                capability: if writer { write.clone() } else { read.clone() },
+                owner: owner.clone(),
+            };
+            let Ok(addr) = to_endpoint_addr(&PeerAddr::id_only(who)) else {
+                continue;
+            };
+            let go = async {
+                let conn = self.node.endpoint().connect(addr, ALBUM_ALPN).await?;
+                let (mut send, mut recv) = conn.open_bi().await?;
+                let mut msg = vec![TAG_MOVED];
+                msg.extend(postcard::to_stdvec(&notice)?);
+                send.write_all(&msg).await?;
+                send.finish()?;
+                let reply = recv.read_to_end(1024).await?;
+                conn.close(0u32.into(), b"done");
+                Ok::<bool, anyhow::Error>(reply == b"ok")
+            };
+            if matches!(
+                tokio::time::timeout(Duration::from_secs(15), go).await,
+                Ok(Ok(true))
+            ) {
+                e.reg
+                    .lock()
+                    .unwrap()
+                    .pending_moves
+                    .retain(|(w, _)| *w != who);
+                let _ = self.save_registry(); // saves the registry as a whole
+            }
+        }
+    }
+
+    fn save_registry(&self) -> Result<()> {
         let albums: Vec<Reg> = self
             .entries
             .lock()
@@ -651,7 +847,7 @@ impl Inner {
                 out.push(inv);
             }
         }
-        for id in e.album.known_member_ids() {
+        for id in Self::member_ids(e) {
             if seen.insert(id) {
                 out.push(PeerAddr::id_only(id));
             }
@@ -782,6 +978,7 @@ async fn run(weak: Weak<Inner>) {
                 .lock()
                 .unwrap()
                 .is_none_or(|t| t.elapsed() >= RESYNC);
+            inner.push_moves(&e).await;
             if due {
                 inner.sync_entry(&e).await;
             }
@@ -803,15 +1000,22 @@ impl ConnHandler for InviteHandler {
         let weak = self.0.clone();
         Box::pin(async move {
             let (mut send, mut recv) = conn.accept_bi().await?;
-            let bytes = recv.read_to_end(64).await?;
-            let reply: Vec<u8> = match (weak.upgrade(), <[u8; 16]>::try_from(bytes.as_slice())) {
-                (Some(inner), Ok(secret)) => {
-                    match inner.accept_invitation(conn.remote_id(), secret) {
+            let bytes = recv.read_to_end(64 * 1024).await?;
+            let reply: Vec<u8> = match (weak.upgrade(), bytes.split_first()) {
+                (Some(inner), Some((&TAG_INVITE, secret))) => match <[u8; 16]>::try_from(secret) {
+                    Ok(secret) => match inner.accept_invitation(conn.remote_id(), secret) {
                         Ok(()) => {
-                            let _ = inner.save_invites();
+                            let _ = inner.save_registry();
                             b"ok".to_vec()
                         }
                         Err(why) => why.as_bytes().to_vec(),
+                    },
+                    Err(_) => b"malformed invitation".to_vec(),
+                },
+                (Some(inner), Some((&TAG_MOVED, body))) => {
+                    match inner.accept_moved(conn.remote_id(), body).await {
+                        Ok(()) => b"ok".to_vec(),
+                        Err(e) => format!("{e:#}").into_bytes(),
                     }
                 }
                 _ => b"this device cannot take invitations right now".to_vec(),

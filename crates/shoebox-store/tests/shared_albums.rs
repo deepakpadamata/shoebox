@@ -229,3 +229,134 @@ async fn the_background_loop_keeps_members_up_to_date_and_keep_originals_fetches
     .await
     .expect("original arrives once the album is kept in full");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn removing_a_member_moves_the_album_without_them_and_nobody_else_has_to_do_anything() {
+    let c = Cluster::new(4).await.unwrap();
+    // Four separate households (their device lists are what the connection gate checks).
+    let _households = [
+        household(&c, 0).await,
+        household(&c, 1).await,
+        household(&c, 2).await,
+        household(&c, 3).await,
+    ];
+    let dirs: Vec<_> = (0..4).map(|_| tempfile::tempdir().unwrap()).collect();
+    let owner = open(&c, 0, dirs[0].path(), true).await;
+    let stays = open(&c, 1, dirs[1].path(), true).await;
+    let viewer = open(&c, 2, dirs[2].path(), true).await;
+    let leaves = open(&c, 3, dirs[3].path(), true).await;
+    let id = owner.create("Family", "Owner").await.unwrap();
+    let first = item(c.node(0), 1).await;
+    owner.add_items(&id, vec![first.clone()]).await.unwrap();
+    for (who, role, name) in [
+        (&stays, MemberRole::Contributor, "Stays"),
+        (&viewer, MemberRole::Viewer, "Viewer"),
+        (&leaves, MemberRole::Contributor, "Leaves"),
+    ] {
+        let t = owner.invite(&id, role, 7).await.unwrap();
+        who.join(&t, name).await.unwrap();
+    }
+    // Everybody sees the first photo (and the owner knows the three of them).
+    for who in [&stays, &viewer, &leaves] {
+        let w = who.clone();
+        wait_until(Duration::from_secs(40), || {
+            let w = w.clone();
+            async move {
+                w.album(&id)
+                    .unwrap()
+                    .items(Page::all())
+                    .await
+                    .unwrap()
+                    .len()
+                    == 1
+            }
+        })
+        .await
+        .expect("first photo arrives");
+    }
+    let leaver = shoebox_node::from_iroh_id(&c.node(3).id());
+    let o = owner.clone();
+    wait_until(Duration::from_secs(40), || {
+        let o = o.clone();
+        async move {
+            let m = o.members(&id).await.unwrap();
+            m.len() == 4 && m.iter().any(|x| x.member.role == MemberRole::Viewer)
+        }
+    })
+    .await
+    .expect("owner knows all members, viewers included");
+
+    // What the leaver has downloaded by now is theirs to keep.
+    leaves.fetch_all(&id).await.unwrap();
+    assert!(leaves.has(&first.thumb.hash).await.unwrap());
+    // Only the owner can remove people, and not themselves.
+    assert!(stays.remove_member(&id, &leaver).await.is_err());
+    assert!(owner
+        .remove_member(&id, &shoebox_node::from_iroh_id(&c.node(0).id()))
+        .await
+        .is_err());
+    owner.remove_member(&id, &leaver).await.unwrap();
+    let names: Vec<String> = owner
+        .members(&id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|m| m.member.display_name)
+        .collect();
+    assert!(!names.contains(&"Leaves".to_string()), "{names:?}");
+    assert!(names.contains(&"Stays".to_string()), "{names:?}");
+
+    // A photo added afterwards reaches the others without anyone doing anything.
+    let second = item(c.node(0), 2).await;
+    owner.add_items(&id, vec![second.clone()]).await.unwrap();
+    for who in [&stays, &viewer] {
+        let w = who.clone();
+        wait_until(Duration::from_secs(60), || {
+            let w = w.clone();
+            async move {
+                w.album(&id)
+                    .unwrap()
+                    .items(Page::all())
+                    .await
+                    .unwrap()
+                    .len()
+                    == 2
+            }
+        })
+        .await
+        .expect("members follow the album to its new space");
+    }
+    // The contributor who stayed can still add, and the owner sees it.
+    let third = item(c.node(1), 3).await;
+    stays.add_items(&id, vec![third]).await.unwrap();
+    let o = owner.clone();
+    wait_until(Duration::from_secs(60), || {
+        let o = o.clone();
+        async move {
+            o.album(&id)
+                .unwrap()
+                .items(Page::all())
+                .await
+                .unwrap()
+                .len()
+                == 3
+        }
+    })
+    .await
+    .expect("owner gets the new photo");
+
+    // The removed member keeps what they had and gets nothing new, not even the blobs.
+    let _ = leaves.sync_now(&id).await;
+    assert_eq!(
+        leaves
+            .album(&id)
+            .unwrap()
+            .items(Page::all())
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(leaves.has(&first.thumb.hash).await.unwrap());
+    assert!(leaves.fetch_now(&id, &second.thumb.hash).await.is_err());
+}

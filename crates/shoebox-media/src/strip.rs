@@ -28,9 +28,8 @@ pub fn strip_location(data: &[u8]) -> Result<Stripped, StripError> {
         png(data)
     } else if data.len() >= 12 && &data[4..8] == b"ftyp" {
         match &data[8..12] {
-            b"heic" | b"heix" | b"hevc" | b"hevx" | b"mif1" | b"msf1" | b"heim" | b"heis" | b"avif" => {
-                Err(StripError::Unsupported("HEIC/HEIF/AVIF".into()))
-            }
+            b"heic" | b"heix" | b"hevc" | b"hevx" | b"mif1" | b"msf1" | b"heim" | b"heis"
+            | b"avif" => Err(StripError::Unsupported("HEIC/HEIF/AVIF".into())),
             _ => mp4(data),
         }
     } else {
@@ -52,11 +51,19 @@ struct Tiff<'a> {
 impl Tiff<'_> {
     fn u16(&self, o: usize) -> Option<u16> {
         let b: [u8; 2] = self.d.get(o..o + 2)?.try_into().ok()?;
-        Some(if self.le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) })
+        Some(if self.le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        })
     }
     fn u32(&self, o: usize) -> Option<u32> {
         let b: [u8; 4] = self.d.get(o..o + 4)?.try_into().ok()?;
-        Some(if self.le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) })
+        Some(if self.le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        })
     }
     fn zero(&mut self, from: usize, len: usize) -> Option<()> {
         self.d.get_mut(from..from.checked_add(len)?)?.fill(0);
@@ -96,7 +103,9 @@ fn strip_exif_gps(tiff: &mut [u8]) -> Result<bool, StripError> {
             break;
         }
     }
-    let Some((index, entry)) = at else { return Ok(false) };
+    let Some((index, entry)) = at else {
+        return Ok(false);
+    };
     let gps = t.u32(entry + 8).ok_or_else(|| bad("GPS pointer"))? as usize;
     // Wipe the GPS IFD: its values first, then the entries.
     if let Some(n) = t.u16(gps).map(|n| n as usize).filter(|_| gps != 0) {
@@ -109,15 +118,20 @@ fn strip_exif_gps(tiff: &mut [u8]) -> Result<bool, StripError> {
             let size = type_size(ty).saturating_mul(cnt);
             if size > 4 {
                 let off = t.u32(e + 8).ok_or_else(|| bad("GPS value"))? as usize;
-                t.zero(off, size).ok_or_else(|| bad("GPS value out of range"))?;
+                t.zero(off, size)
+                    .ok_or_else(|| bad("GPS value out of range"))?;
             }
         }
-        t.zero(gps, 2 + n * 12).ok_or_else(|| bad("GPS IFD out of range"))?;
+        t.zero(gps, 2 + n * 12)
+            .ok_or_else(|| bad("GPS IFD out of range"))?;
     }
     // Remove the pointer entry from IFD0: shift the rest up, keep the next-IFD offset in place.
     let first_after = entry + 12;
     let next_at = ifd0 + 2 + count * 12;
-    let next: Vec<u8> = t.d.get(next_at..next_at + 4).ok_or_else(|| bad("IFD0 end"))?.to_vec();
+    let next: Vec<u8> =
+        t.d.get(next_at..next_at + 4)
+            .ok_or_else(|| bad("IFD0 end"))?
+            .to_vec();
     let tail: Vec<u8> = t.d[first_after..next_at].to_vec();
     t.d[entry..entry + tail.len()].copy_from_slice(&tail);
     let new_next = ifd0 + 2 + (count - 1) * 12;
@@ -213,7 +227,10 @@ fn jpeg(data: &[u8]) -> Result<Stripped, StripError> {
         }
         pos += 2 + len;
     }
-    Ok(Stripped { bytes: out, changed })
+    Ok(Stripped {
+        bytes: out,
+        changed,
+    })
 }
 
 // ---------- PNG ----------
@@ -256,7 +273,10 @@ fn png(data: &[u8]) -> Result<Stripped, StripError> {
         }
     }
     out.extend_from_slice(&data[pos..]);
-    Ok(Stripped { bytes: out, changed })
+    Ok(Stripped {
+        bytes: out,
+        changed,
+    })
 }
 
 // ---------- MP4 / MOV ----------
@@ -280,7 +300,12 @@ fn mp4_walk(d: &mut [u8], from: usize, to: usize, changed: &mut bool) -> Result<
         if size == 0 {
             size = to - pos;
         } else if size == 1 {
-            size = u64::from_be_bytes(d.get(pos + 8..pos + 16).ok_or_else(|| bad("box size"))?.try_into().unwrap()) as usize;
+            size = u64::from_be_bytes(
+                d.get(pos + 8..pos + 16)
+                    .ok_or_else(|| bad("box size"))?
+                    .try_into()
+                    .unwrap(),
+            ) as usize;
         }
         if size < header || pos + size > to {
             return Err(bad("box does not fit"));
@@ -363,5 +388,8 @@ fn mp4(data: &[u8]) -> Result<Stripped, StripError> {
     let mut changed = false;
     let len = out.len();
     mp4_walk(&mut out, 0, len, &mut changed)?;
-    Ok(Stripped { bytes: out, changed })
+    Ok(Stripped {
+        bytes: out,
+        changed,
+    })
 }

@@ -10,6 +10,8 @@ export const app = $state({
   /** Bumped whenever the library or the device list changed. */
   version: 0,
   devicesVersion: 0,
+  /** Bumped when something changed in a shared album. */
+  sharedVersion: 0,
   /** Peers currently connected, by device id (for the "n devices online" line). */
   pairing: null as null | { sas: string; peer_name: string; peer_role: string },
   pairingError: '',
@@ -97,6 +99,8 @@ function handle(e: AppEvent) {
       const { done, total } = e.ImportProgress;
       app.importProgress = done >= total ? null : { done, total };
       app.version++;
+    } else if ('SharedChanged' in e) {
+      app.sharedVersion++;
     } else if ('PeerConnected' in e || 'PeerDisconnected' in e) {
       app.devicesVersion++;
     } else if ('BackupProgress' in e) {

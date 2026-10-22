@@ -8,6 +8,7 @@
   import Sheet from '../components/Sheet.svelte';
   import Library from './Library.svelte';
   import Albums from './Albums.svelte';
+  import Shared from './Shared.svelte';
   import Deleted from './Deleted.svelte';
   import Devices from './Devices.svelte';
   import Health from './Health.svelte';
@@ -18,6 +19,7 @@
     { id: 'library', label: 'Library', icon: '▦' },
     { id: 'favorites', label: 'Favorites', icon: '♥' },
     { id: 'albums', label: 'Albums', icon: '▤' },
+    { id: 'shared', label: 'Shared', icon: '👥' },
     { id: 'deleted', label: 'Recently Deleted', icon: '🗑' },
   ];
   const more = [
@@ -71,7 +73,7 @@
   }
 
   const title = $derived(
-    sec === 'album' && albumName ? albumName : { library: 'Library', favorites: 'Favorites', albums: 'Albums', album: 'Album', deleted: 'Recently Deleted', devices: 'Devices', health: 'Storage', settings: 'Settings' }[sec] ?? 'Library',
+    sec === 'album' && albumName ? albumName : { library: 'Library', favorites: 'Favorites', albums: 'Albums', album: 'Album', shared: 'Shared albums', deleted: 'Recently Deleted', devices: 'Devices', health: 'Storage', settings: 'Settings' }[sec] ?? 'Library',
   );
 </script>
 
@@ -122,6 +124,7 @@
       {:else if sec === 'favorites'}<Library source="favorites" />
       {:else if sec === 'albums'}<Albums />
       {:else if sec === 'album'}{#key param()}<Library source="album" album={param()} />{/key}
+      {:else if sec === 'shared'}<Shared />
       {:else if sec === 'deleted'}<Deleted />
       {:else if sec === 'devices'}<Devices />
       {:else if sec === 'health'}<Health />

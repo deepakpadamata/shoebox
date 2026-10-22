@@ -6305,6 +6305,7 @@ dependencies = [
  "async-trait",
  "blake3",
  "bytes",
+ "data-encoding",
  "futures",
  "getrandom 0.3.4",
  "hex",

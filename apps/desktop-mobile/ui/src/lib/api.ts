@@ -1,5 +1,13 @@
 // The UI's only door to the app core. Inside Tauri it uses `invoke` and the `shoebox://` URI
 // scheme; in a browser (development, review) it talks to `desktop-dev-server` over HTTP.
+import type { AddCheck } from '../bindings/AddCheck';
+import type { AddResult } from '../bindings/AddResult';
+import type { FeedEntry } from '../bindings/FeedEntry';
+import type { InviteOut } from '../bindings/InviteOut';
+import type { SharedAlbumInfo } from '../bindings/SharedAlbumInfo';
+import type { SharedItemInfo } from '../bindings/SharedItemInfo';
+import type { SharedItemsPage } from '../bindings/SharedItemsPage';
+import type { SharedMemberInfo } from '../bindings/SharedMemberInfo';
 import type { AlbumInfo } from '../bindings/AlbumInfo';
 import type { AppEvent } from '../bindings/AppEvent';
 import type { AppState } from '../bindings/AppState';
@@ -21,6 +29,7 @@ import type { PhotoSummary } from '../bindings/PhotoSummary';
 import type { Settings } from '../bindings/Settings';
 
 export type {
+  AddCheck, AddResult, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
   AlbumInfo, AppEvent, BackupPolicy, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, ExportReport, FreeUpReport, Health, ImportSummary,
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Settings,
 };
@@ -52,7 +61,9 @@ async function call<T>(cmd: string, args: Record<string, unknown> = {}): Promise
 }
 
 /** URL of one rendition of a photo; never base64, served from the blob store. */
-export function blobUrl(id: string, kind: BlobKind): string {
+export function blobUrl(id: string, kind: BlobKind, album?: string): string {
+  // A photo of a shared album is addressed through the album: `kind=album:<album id>:<kind>`.
+  if (album) kind = `album:${album}:${kind}` as BlobKind;
   if (inTauri) {
     // macOS/Linux use `shoebox://localhost/…`; Windows and Android rewrite custom schemes to http.
     const windows = navigator.userAgent.includes('Windows') || navigator.userAgent.includes('Android');
@@ -119,6 +130,21 @@ export const api = {
   backupStatus: () => call<BackupStatus>('backup_status'),
   backupConfigure: (policy: BackupPolicy) => call<BackupStatus>('backup_configure', { policy }),
   backupRun: () => call<BackupReport>('backup_run'),
+  sharedAlbums: () => call<SharedAlbumInfo[]>('shared_albums'),
+  sharedCreate: (name: string) => call<SharedAlbumInfo>('shared_create', { name }),
+  sharedInvite: (album: string, role: string, days = 7) => call<InviteOut>('shared_invite', { album, role, days }),
+  sharedJoin: (text: string) => call<SharedAlbumInfo>('shared_join', { text }),
+  sharedLeave: (album: string) => call<{}>('shared_leave', { album }),
+  sharedItems: (album: string, after: string | null = null, limit = 500) => call<SharedItemsPage>('shared_items', { album, after, limit }),
+  sharedMembers: (album: string) => call<SharedMemberInfo[]>('shared_members', { album }),
+  sharedFeed: (album: string) => call<FeedEntry[]>('shared_feed', { album }),
+  sharedAddCheck: (album: string, ids: string[]) => call<AddCheck>('shared_add_check', { album, ids }),
+  sharedAdd: (album: string, ids: string[], location: string | null = null, remember = false) => call<AddResult>('shared_add', { album, ids, location, remember }),
+  sharedSave: (album: string, ids: string[]) => call<number>('shared_save', { album, ids }),
+  sharedSettings: (album: string, keep_originals: boolean | null = null, location: string | null = null) => call<{}>('shared_settings', { album, keep_originals, location }),
+  sharedSeen: (album: string) => call<{}>('shared_seen', { album }),
+  sharedFetch: (album: string, id: string, kind: BlobKind) => call<{}>('shared_fetch', { album, id, kind }),
+  sharedRemoveMember: (album: string, member: string) => call<{}>('shared_remove_member', { album, member }),
   exportLibrary: (dest: string) => call<ExportReport>('export_library', { dest }),
   watchFolder: (dir: string) => call<{}>('watch_folder', { dir }),
 };

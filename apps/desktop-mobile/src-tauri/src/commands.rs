@@ -81,6 +81,7 @@ pub const COMMANDS: &[&str] = &[
     "shared_settings",
     "shared_seen",
     "shared_fetch",
+    "shared_remove_member",
 ];
 
 pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Value> {
@@ -284,6 +285,14 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
                 &arg::<String>(&args, "album")?,
                 &arg::<String>(&args, "id")?,
                 &arg::<String>(&args, "kind")?,
+            )
+            .await?;
+            Ok(json!({}))
+        }
+        "shared_remove_member" => {
+            core.shared_remove_member(
+                &arg::<String>(&args, "album")?,
+                &arg::<String>(&args, "member")?,
             )
             .await?;
             Ok(json!({}))

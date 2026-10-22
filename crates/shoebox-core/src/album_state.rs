@@ -215,6 +215,13 @@ impl AlbumState {
         Ok(fx)
     }
 
+    /// Forget these members (used when an album moves to a new space without them).
+    pub fn drop_members(&mut self, keys: &[EndpointId]) {
+        for k in keys {
+            self.members.remove(k);
+        }
+    }
+
     pub fn item_count(&self) -> usize {
         self.items.len()
     }

@@ -186,15 +186,28 @@ impl DocsBackend {
         .await
     }
 
+    /// A new namespace for `old` without the `exclude`d members (they keep what they already
+    /// have but see nothing new). The caller hands the new capability to everyone who stays.
+    pub async fn move_album(&self, old: &DocsAlbum, exclude: &[EndpointId]) -> Result<DocsAlbum> {
+        let doc = self.node.docs().create().await.map_err(backend_err)?;
+        DocsAlbum::create_moved(
+            self.replica(doc).await?,
+            old.state_snapshot().await,
+            exclude,
+            self.device,
+            self.clock.clone(),
+            self.node.clone(),
+        )
+        .await
+    }
+
     async fn join_album_impl(&self, ticket: &InviteTicket) -> Result<DocsAlbum> {
         if let Expiry::At(t) = ticket.expires {
             if self.clock.now_ms() as i64 > t.0 {
                 return Err(StoreError::Expired);
             }
         }
-        let doc_ticket: DocTicket = String::from_utf8(ticket.backend.clone())
-            .map_err(|_| StoreError::Invalid("invite carries no iroh-docs ticket".into()))?
-            .parse()
+        let doc_ticket: DocTicket = postcard::from_bytes(&ticket.backend)
             .map_err(|e| StoreError::Invalid(format!("bad iroh-docs ticket: {e}")))?;
         let inviter = to_endpoint_addr(&ticket.inviter)?;
         let (doc, mut events) = self

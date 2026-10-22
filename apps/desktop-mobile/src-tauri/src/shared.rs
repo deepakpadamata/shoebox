@@ -6,7 +6,9 @@ use crate::types::*;
 use anyhow::{anyhow, bail, ensure, Result};
 use shoebox_core::ids::{Blake3Hash, EndpointId};
 use shoebox_core::merge::Lww;
-use shoebox_core::model::{AlbumId, BlobKind, BlobRef, ExifSummary, MemberRole, PhotoRecord, SharedItem};
+use shoebox_core::model::{
+    AlbumId, BlobKind, BlobRef, ExifSummary, MemberRole, PhotoRecord, SharedItem,
+};
 use shoebox_core::store::{AlbumEventKind, Cursor, LibraryStore, Page};
 use shoebox_media::strip_location;
 use shoebox_node::Protection;
@@ -85,7 +87,14 @@ impl AppCore {
     }
 
     pub async fn shared_albums(&self) -> Result<Vec<SharedAlbumInfo>> {
-        Ok(self.sa().await?.list().await?.into_iter().map(info).collect())
+        Ok(self
+            .sa()
+            .await?
+            .list()
+            .await?
+            .into_iter()
+            .map(info)
+            .collect())
     }
 
     async fn shared_info(&self, id: &AlbumId) -> Result<SharedAlbumInfo> {
@@ -108,7 +117,9 @@ impl AppCore {
     pub async fn shared_invite(&self, album: &str, role: &str, days: u32) -> Result<InviteOut> {
         ensure!((1..=90).contains(&days), "an invitation lasts 1 to 90 days");
         let sa = self.sa().await?;
-        let text = sa.invite(&album_id(album)?, parse_role(role)?, days).await?;
+        let text = sa
+            .invite(&album_id(album)?, parse_role(role)?, days)
+            .await?;
         let qr = qrcode::QrCode::new(text.as_bytes())
             .map_err(|e| anyhow!("the invitation is too long for a QR code: {e}"))?;
         let svg = qr
@@ -133,7 +144,9 @@ impl AppCore {
         self.sa().await?.leave(&album_id(album)?).await
     }
 
-    fn member_names(members: &[shoebox_store::MemberInfo]) -> std::collections::HashMap<EndpointId, String> {
+    fn member_names(
+        members: &[shoebox_store::MemberInfo],
+    ) -> std::collections::HashMap<EndpointId, String> {
         members
             .iter()
             .map(|m| {
@@ -169,7 +182,12 @@ impl AppCore {
             None => None,
         };
         use shoebox_core::store::AlbumStore;
-        let items = store.items(Page { after: cursor, limit: limit + 1 }).await?;
+        let items = store
+            .items(Page {
+                after: cursor,
+                limit: limit + 1,
+            })
+            .await?;
         let next = (items.len() > limit).then(|| items[limit - 1].id.to_string());
         let mut out = vec![];
         for it in items.into_iter().take(limit) {
@@ -183,7 +201,10 @@ impl AppCore {
                     .unwrap_or_else(|| format!("Device {}", short(&it.added_by))),
                 is_video: it.original.mime.starts_with("video/"),
                 has_thumb: sa.has(&it.thumb.hash).await.unwrap_or(false),
-                has_original: sa.has(&item_blob(&it, BlobKind::Original)).await.unwrap_or(false),
+                has_original: sa
+                    .has(&item_blob(&it, BlobKind::Original))
+                    .await
+                    .unwrap_or(false),
                 mine: it.added_by == me,
                 location_removed: it.shared_hash.is_some(),
             });
@@ -452,6 +473,18 @@ impl AppCore {
         Ok(())
     }
 
+    /// Remove a member (owner only): the album moves to a new space without them.
+    pub async fn shared_remove_member(&self, album: &str, member: &str) -> Result<()> {
+        let key: [u8; 32] = hex::decode(member.trim())
+            .ok()
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| anyhow!("`{member}` is not a member id"))?;
+        self.sa()
+            .await?
+            .remove_member(&album_id(album)?, &EndpointId(key))
+            .await
+    }
+
     pub async fn shared_seen(&self, album: &str) -> Result<()> {
         self.sa().await?.mark_seen(&album_id(album)?)
     }
@@ -491,7 +524,11 @@ impl AppCore {
         let (hash, mime, small) = match kind {
             "thumb" => (item.thumb.hash, item.thumb.mime.clone(), true),
             "preview" => (item.preview.hash, item.preview.mime.clone(), true),
-            "original" => (item_blob(&item, BlobKind::Original), item.original.mime.clone(), false),
+            "original" => (
+                item_blob(&item, BlobKind::Original),
+                item.original.mime.clone(),
+                false,
+            ),
             other => bail!("unknown kind `{other}`"),
         };
         if small && !sa.has(&hash).await? {

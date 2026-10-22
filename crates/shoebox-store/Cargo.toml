@@ -15,6 +15,7 @@ shoebox-store-docs.workspace = true
 async-trait.workspace = true
 anyhow.workspace = true
 blake3.workspace = true
+data-encoding = "2"
 getrandom = "0.3"
 iroh.workspace = true
 futures.workspace = true

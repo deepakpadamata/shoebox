@@ -108,6 +108,39 @@ impl DocsAlbum {
         Ok(album)
     }
 
+    /// Start a new album space holding everything `old` holds except `exclude` (M5-05): the
+    /// same album id, items and activity, the members that stay, this device as owner.
+    pub(crate) async fn create_moved(
+        replica: Replica,
+        old: AlbumState,
+        exclude: &[EndpointId],
+        device: EndpointId,
+        clock: Arc<dyn Clock>,
+        node: shoebox_node::Node,
+    ) -> Result<Self> {
+        let events = replica.doc.subscribe().await.map_err(backend_err)?;
+        let id = old.meta().id;
+        let mut state = old.fork_for(device);
+        state.drop_members(exclude);
+        state.install_member(MemberRole::Owner, clock.now_ms());
+        let album = Self::assemble(replica, state, id, device, clock, node, events, true);
+        {
+            let mut core = album.inner.core.lock().await;
+            for entry in core.state.all_entries() {
+                let bytes = encode_album_entry(&entry);
+                core.replica
+                    .put(&album_key(&entry), bytes)
+                    .await
+                    .map_err(backend_err)?;
+            }
+        }
+        Ok(album)
+    }
+
+    pub(crate) async fn state_snapshot(&self) -> AlbumState {
+        self.inner.core.lock().await.state.clone()
+    }
+
     /// Join an album whose namespace has just been imported and synced: read its meta, load
     /// everything, then record this device as a member (unless the capability is read-only).
     pub(crate) async fn join(
@@ -243,8 +276,16 @@ impl DocsAlbum {
 
     /// The iroh-docs capability (serialised) that lets this device reopen the album later.
     pub async fn capability(&self) -> Result<Vec<u8>> {
+        self.capability_for(self.inner.writable).await
+    }
+
+    /// The capability to hand to someone who may `write` (contributors) or only read (viewers).
+    pub async fn capability_for(&self, write: bool) -> Result<Vec<u8>> {
         use iroh_docs::api::protocol::{AddrInfoOptions, ShareMode};
-        let mode = if self.inner.writable {
+        if write && !self.inner.writable {
+            return Err(StoreError::ReadOnly);
+        }
+        let mode = if write {
             ShareMode::Write
         } else {
             ShareMode::Read
@@ -413,7 +454,7 @@ impl AlbumStore for DocsAlbum {
             expires: expiry,
             inviter: shoebox_node::from_endpoint_addr(&self.inner.node.addr()),
             secret,
-            backend: doc_ticket.to_string().into_bytes(),
+            backend: postcard::to_stdvec(&doc_ticket).map_err(backend_err)?,
         })
     }
 

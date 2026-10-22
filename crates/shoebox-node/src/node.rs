@@ -262,7 +262,27 @@ impl PeerTracker {
     }
 
     fn set_album_peers(&self, ids: HashSet<EndpointId>) {
-        *self.album_peers.lock().unwrap() = ids;
+        let dropped: Vec<EndpointId> = {
+            let mut peers = self.album_peers.lock().unwrap();
+            let dropped = peers.difference(&ids).copied().collect();
+            *peers = ids;
+            dropped
+        };
+        // Someone left the albums: end what they had open that only the albums justified.
+        let listed = self.allowed.lock().unwrap().clone();
+        let mut conns = self.conns.lock().unwrap();
+        for id in dropped {
+            if listed.as_ref().is_none_or(|l| l.contains(&id)) {
+                continue;
+            }
+            if let Some(list) = conns.get_mut(&id) {
+                for conn in list.iter().filter_map(WeakConnectionHandle::upgrade) {
+                    if !self.open_to_outsiders(&id, conn.alpn()) {
+                        conn.close(1u32.into(), b"no longer in a shared album");
+                    }
+                }
+            }
+        }
     }
 
     fn block(&self, id: EndpointId) {

@@ -14,6 +14,7 @@
   import { hasKeepAwake, keepAwake } from '../lib/host';
   import Library from './Library.svelte';
   import Albums from './Albums.svelte';
+  import Shared from './Shared.svelte';
   import Deleted from './Deleted.svelte';
   import Devices from './Devices.svelte';
   import Health from './Health.svelte';
@@ -78,8 +79,7 @@
     {:else if sec === 'favorites'}<Library source="favorites" />
     {:else if sec === 'albums'}<Albums />
     {:else if sec === 'album'}{#key param()}<Library source="album" album={param()} />{/key}
-    {:else if sec === 'shared'}
-      <div class="placeholder"><b>Shared albums</b><span class="muted">Share albums with other people without a cloud. Coming in a later version.</span></div>
+    {:else if sec === 'shared'}<Shared />
     {:else if sec === 'deleted'}<Deleted />
     {:else if sec === 'devices'}<Devices />
     {:else if sec === 'health'}<Health />
@@ -120,7 +120,6 @@
   .t { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10px; color: var(--ink-3); text-decoration: none; min-width: 64px; }
   .t .i { font-size: 20px; line-height: 1; }
   .t.on { color: var(--accent); }
-  .placeholder { height: 100%; display: grid; place-content: center; text-align: center; gap: 6px; padding: 24px; }
   .menu { display: flex; flex-direction: column; }
   .menu a { padding: 14px 4px; text-decoration: none; border-top: 1px solid var(--line); font-size: 16px; }
   .menu a:first-child { border-top: 0; }

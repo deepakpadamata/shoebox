@@ -397,12 +397,9 @@ impl AppCore {
             ln.start_presence(PresenceConfig::default()).await?;
         }
         self.forward_library_changes(&ln);
-        let shared = shoebox_store::SharedAlbums::open(
-            self.node.clone(),
-            &self.dir,
-            self.opts.background,
-        )
-        .await?;
+        let shared =
+            shoebox_store::SharedAlbums::open(self.node.clone(), &self.dir, self.opts.background)
+                .await?;
         self.forward_shared_changes(&shared);
         *self.shared.write().await = Some(shared);
         *self.library.write().await = Some(ln);

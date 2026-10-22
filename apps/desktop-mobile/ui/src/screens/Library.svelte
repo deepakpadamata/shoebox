@@ -1,0 +1,210 @@
+<script lang="ts">
+  // The timeline (M3-06): photos grouped by day, virtualised so 100k photos scroll smoothly,
+  // with multi-select and the actions of mockup 2b.
+  import { onMount, untrack } from 'svelte';
+  import { api, type PageCursor, type PhotoPage, type PhotoSummary } from '../lib/api';
+  import { dayLabel, plural } from '../lib/format';
+  import { buildLayout, visibleRows } from '../lib/timeline';
+  import { app, fail, toast } from '../lib/store.svelte';
+  import Tile from '../components/Tile.svelte';
+  import Button from '../components/Button.svelte';
+  import Sheet from '../components/Sheet.svelte';
+  import Viewer from './Viewer.svelte';
+
+  interface Props { source: 'all' | 'favorites' | 'album'; album?: string; }
+  let { source, album }: Props = $props();
+
+  const GAP = 2;
+  const HEAD = 44;
+  let items = $state<PhotoSummary[]>([]);
+  let loaded = $state(false);
+  let width = $state(900);
+  let viewport = $state(600);
+  let scrollTop = $state(0);
+  let scroller: HTMLDivElement | undefined = $state();
+  let selected = $state<string[]>([]);
+  let lastClicked = $state(-1);
+  let viewing = $state<number | null>(null);
+  let albums = $state<{ id: string; name: string }[]>([]);
+  let albumSheet = $state(false);
+  let newAlbum = $state('');
+  const selecting = $derived(selected.length > 0);
+  const selectedSet = $derived(new Set(selected));
+  const target = $derived(app.counts?.redundancy_target ?? 2);
+
+  const layout = $derived(buildLayout(items, { width, minTile: width < 700 ? 96 : 140, gap: GAP, headHeight: HEAD }));
+  const range = $derived(visibleRows(layout, scrollTop, viewport));
+  const shown = $derived(layout.rows.slice(range[0], range[1]));
+
+  async function load() {
+    const out: PhotoSummary[] = [];
+    let cursor: PageCursor | null = null;
+    for (;;) {
+      const page: PhotoPage = source === 'album' && album ? await api.albumPage(album, cursor, 2000) : await api.libraryPage(cursor, 2000);
+      out.push(...page.items);
+      if (!page.next) break;
+      cursor = page.next;
+    }
+    items = source === 'favorites' ? out.filter((p) => p.favorite) : out;
+    selected = selected.filter((id) => items.some((p) => p.id === id));
+    loaded = true;
+  }
+
+  onMount(() => {
+    load().catch(fail);
+  });
+
+  // Reload when the library changes (debounced), when the source changes.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    app.version;
+    source;
+    album;
+    untrack(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => load().catch(fail), loaded ? 350 : 0);
+    });
+  });
+
+  function click(i: number, e: MouseEvent) {
+    const id = items[i].id;
+    if (e.shiftKey && lastClicked >= 0) {
+      const [a, b] = [Math.min(lastClicked, i), Math.max(lastClicked, i)];
+      selected = [...new Set([...selected, ...items.slice(a, b + 1).map((p) => p.id)])];
+    } else if (selecting || e.metaKey || e.ctrlKey) {
+      selected = selectedSet.has(id) ? selected.filter((x) => x !== id) : [...selected, id];
+      lastClicked = i;
+    } else {
+      viewing = i;
+    }
+  }
+
+  async function act<T>(f: () => Promise<T>, done?: string) {
+    try {
+      await f();
+      if (done) toast(done);
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  const allFavorite = $derived(selected.length > 0 && selected.every((id) => items.find((p) => p.id === id)?.favorite));
+
+  function keydown(e: KeyboardEvent) {
+    if (viewing !== null) return;
+    if (e.key === 'Escape') selected = [];
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selecting && !(e.target instanceof HTMLInputElement)) removeSelected();
+    if ((e.metaKey || e.ctrlKey) && e.key === 'a' && !(e.target instanceof HTMLInputElement)) {
+      e.preventDefault();
+      selected = items.map((p) => p.id);
+    }
+  }
+
+  async function removeSelected() {
+    const ids = [...selected];
+    await act(() => api.delete(ids), `${plural(ids.length, 'photo')} moved to Recently Deleted`);
+    selected = [];
+  }
+
+  async function openAlbumSheet() {
+    albums = await api.albums();
+    albumSheet = true;
+  }
+
+  async function addToAlbum(id: string) {
+    const ids = [...selected];
+    await act(() => api.albumAdd(id, ids), `Added ${plural(ids.length, 'photo')}`);
+    albumSheet = false;
+    selected = [];
+  }
+
+  async function createAndAdd() {
+    if (!newAlbum.trim()) return;
+    try {
+      const a = await api.createAlbum(newAlbum);
+      newAlbum = '';
+      await addToAlbum(a.id);
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  function jump(delta: number) {
+    if (viewing === null) return;
+    viewing = Math.min(items.length - 1, Math.max(0, viewing + delta));
+  }
+</script>
+
+<svelte:window onkeydown={keydown} />
+
+<div class="wrap">
+  {#if selecting}
+    <div class="selbar">
+      <b>{selected.length} selected</b>
+      <span class="grow"></span>
+      <Button size="sm" onclick={() => act(() => api.setFavorite(selected, !allFavorite))}>{allFavorite ? '♡ Unfavorite' : '♥ Favorite'}</Button>
+      <Button size="sm" onclick={openAlbumSheet}>＋ Add to album</Button>
+      <Button size="sm" onclick={() => act(() => Promise.all(selected.map((id) => api.pinOriginal(id, true))), 'Originals will be kept on this device')}>📌 Keep on this device</Button>
+      <Button size="sm" kind="danger" onclick={removeSelected}>Delete from all devices</Button>
+      <Button size="sm" kind="ghost" onclick={() => (selected = [])}>Cancel</Button>
+    </div>
+  {/if}
+
+  <div class="scroller" bind:this={scroller} bind:clientWidth={width} bind:clientHeight={viewport}
+    onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}>
+    {#if !loaded}
+      <div class="empty">Loading…</div>
+    {:else if items.length === 0}
+      <div class="empty">
+        <b>{source === 'favorites' ? 'No favorites yet' : source === 'album' ? 'This album is empty' : 'No photos yet'}</b>
+        <span class="muted">{source === 'all' ? 'Import a folder from the toolbar, or pair a phone to start backing up.' : 'Select photos in your library and add them here.'}</span>
+      </div>
+    {:else}
+      <div class="canvas" style="height:{layout.height}px">
+        {#each shown as row (row.top)}
+          {#if row.type === 'head'}
+            <div class="head" style="top:{row.top}px;height:{row.height}px">
+              <b>{dayLabel(row.day)}</b><span>{row.count.toLocaleString('en')}</span>
+            </div>
+          {:else}
+            <div class="tiles" style="top:{row.top}px;height:{row.height}px;gap:{GAP}px">
+              {#each items.slice(row.from, row.to) as p, k (p.id)}
+                <Tile id={p.id} size={layout.tile} favorite={p.favorite} video={p.is_video} copies={p.copies} {target}
+                  hasThumb={p.has_thumb} selected={selectedSet.has(p.id)} {selecting} onclick={(e) => click(row.from + k, e)} />
+              {/each}
+            </div>
+          {/if}
+        {/each}
+      </div>
+    {/if}
+  </div>
+</div>
+
+{#if viewing !== null && items[viewing]}
+  <Viewer {items} index={viewing} onclose={() => (viewing = null)} onmove={jump} />
+{/if}
+
+<Sheet open={albumSheet} title="Add to album" onclose={() => (albumSheet = false)} width={380}>
+  <div class="stack">
+    {#each albums as a}
+      <Button block onclick={() => addToAlbum(a.id)}>{a.name}</Button>
+    {/each}
+    <form class="row-flex" onsubmit={(e) => { e.preventDefault(); createAndAdd(); }}>
+      <input class="input grow" placeholder="New album…" bind:value={newAlbum} />
+      <Button type="submit" kind="primary" disabled={!newAlbum.trim()}>Create</Button>
+    </form>
+  </div>
+</Sheet>
+
+<style>
+  .wrap { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+  .selbar { display: flex; gap: 8px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--accent-soft); flex-wrap: wrap; }
+  .scroller { flex: 1; overflow-y: auto; position: relative; min-height: 0; }
+  .canvas { position: relative; }
+  .head { position: absolute; left: 0; right: 0; display: flex; justify-content: space-between; align-items: baseline; padding: 20px 18px 6px; }
+  .head b { font-size: 15px; }
+  .head span { font-size: 12px; color: var(--ink-3); }
+  .tiles { position: absolute; left: 0; right: 0; display: flex; }
+  .empty { height: 100%; display: grid; place-content: center; text-align: center; gap: 6px; color: var(--ink-2); padding: 20px; }
+  .input { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 0 12px; color: var(--ink); font: inherit; }
+</style>

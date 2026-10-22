@@ -1,10 +1,24 @@
 [package]
 name = "shoebox-store-mem"
+description = "In-memory StoreBackend for unit tests and the conformance suite."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "Apache-2.0 OR MIT"
 publish = false
+
+[features]
+# `MemHarness`: plugs this backend into the shoebox-core conformance suite.
+testing = ["shoebox-core/testing"]
+
+[dependencies]
+shoebox-core.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+
+[dev-dependencies]
+shoebox-core = { workspace = true, features = ["testing"] }
+shoebox-store-mem = { path = ".", features = ["testing"] }
 
 [lints]
 workspace = true

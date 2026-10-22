@@ -13,10 +13,16 @@ postcard.workspace = true
 thiserror.workspace = true
 hex.workspace = true
 blake3.workspace = true
+async-trait.workspace = true
+futures.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
 hex.workspace = true
+
+[features]
+# Exposes the backend conformance suite (`shoebox_core::conformance`).
+testing = []
 
 [lints]
 workspace = true

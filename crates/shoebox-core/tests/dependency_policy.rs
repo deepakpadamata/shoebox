@@ -1,5 +1,6 @@
 //! `shoebox-core` must stay free of async runtimes and iroh (M0-04), so it remains pure and the
-//! store backend swappable.
+//! store backend swappable. (`futures` and `async-trait` are allowed: the store traits are async
+//! but executor-agnostic.)
 
 #[test]
 fn core_has_no_async_runtime_or_iroh_dependency() {
@@ -8,14 +9,7 @@ fn core_has_no_async_runtime_or_iroh_dependency() {
         .lines()
         .filter(|l| !l.trim_start().starts_with('#'))
         .collect();
-    for forbidden in [
-        "tokio",
-        "async-std",
-        "smol",
-        "iroh",
-        "futures",
-        "async-trait",
-    ] {
+    for forbidden in ["tokio", "async-std", "smol", "iroh"] {
         assert!(
             !deps.iter().any(|l| l.trim_start().starts_with(forbidden)),
             "shoebox-core must not depend on `{forbidden}`"

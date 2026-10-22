@@ -49,3 +49,26 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
 - **A-014 · M0-05** · `OrSet` keeps removed tags forever (grow-only). Compaction is deferred; at personal-album
   scale this is small. `Lww` equal-HLC/different-value ties (impossible in practice) resolve by value.
 - **A-015 · M0-05** · `merge` on records returns `Result<_, IdMismatch>` instead of panicking when ids differ.
+- **A-016 · M0-06** · `shoebox-core` may depend on `futures` and `async-trait` (executor-agnostic traits and
+  `BoxStream`); the dependency-policy test now forbids only runtimes (`tokio`, `async-std`, `smol`) and `iroh`.
+- **A-017 · M0-06** · The trait sketch in `05-prototype-plan.md` was extended where the issues needed it:
+  `LibraryStore::restore_photo`, `deleted_photos`, `album_items`; `StoreBackend::device()`. `SignedDeviceList` /
+  `SignedDeviceChange` are `{devices, admins}` / `Device(cert) | Admin(cert)`; device certs merge LWW per device
+  by HLC (a revocation is just a later cert with `revoked = true`).
+- **A-018 · M0-06** · `AlbumStore::sync_with` was added (the sketch had none) so shared albums can be tested with two
+  replicas; M5-01 may reshape it. `PeerAddr` is a backend-agnostic `{id, relay_url, direct_addrs}`; the iroh
+  backend maps it to `EndpointAddr`. Invites in the mem backend are validated by a per-inviter secret table; `Viewer`
+  and `Contributor` cannot invite, only `Owner` can.
+- **A-019 · M0-06** · Purging is replicated with a per-photo purge marker (an HLC, merged by max). A record is dropped
+  everywhere if its latest delete/edit HLC is not after the marker, so stale replicas cannot resurrect it, while
+  re-importing the same file later is a fresh record that survives. Markers are kept forever (tiny).
+- **A-020 · M0-06** · `mark_deleted` on an already-deleted photo is a no-op (keeps the original deletion time);
+  `restore_photo` on a live photo is a no-op. `put_holdings` rejects any device other than the store's own
+  (`Invalid`), after the read-only check. Every store write observes incoming HLCs so a local write issued after a
+  sync always orders after everything seen.
+- **A-021 · M0-06** · `album_items` hides soft-deleted/purged photos but not photos that have not synced yet.
+- **A-022 · M0-07** · Conformance lives in `shoebox-core::conformance` (feature `testing`), runtime-agnostic (async
+  but no executor). A backend implements `Harness` (`fresh`, `backend`, `peer_addr`) and calls
+  `conformance::run(&harness)` from any executor; `shoebox-store-mem` ships `MemHarness` behind its `testing`
+  feature, so its own test is three lines. Sanity-checked by mutating the mem backend (broken add-wins, thumbs
+  counted as copies, HLC ignored in holdings merge): the suite failed each time.

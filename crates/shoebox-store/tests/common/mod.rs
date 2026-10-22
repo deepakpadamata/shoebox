@@ -81,11 +81,22 @@ pub async fn rig(c: &Cluster, roles: &[Role]) -> (Rig, Vec<Library>) {
 }
 
 pub async fn rig_with_root(c: &Cluster, root: KeyPair, roles: &[Role]) -> (Rig, Vec<Library>) {
+    let clocks = vec![c.clock().clone(); c.len()];
+    rig_with_clocks(c, root, roles, &clocks).await
+}
+
+/// Like [`rig_with_root`] with a clock of its own for every node (clock-skew scenarios).
+pub async fn rig_with_clocks(
+    c: &Cluster,
+    root: KeyPair,
+    roles: &[Role],
+    clocks: &[shoebox_core::clock::ManualClock],
+) -> (Rig, Vec<Library>) {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
     let backends: Vec<HybridBackend> = (0..c.len())
-        .map(|i| HybridBackend::for_node(c.node(i).clone(), c.clock().clone()))
+        .map(|i| HybridBackend::for_node(c.node(i).clone(), clocks[i].clone()))
         .collect();
     let (l0, cap) = backends[0]
         .create_library(&root.root_public())

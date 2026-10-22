@@ -1,0 +1,45 @@
+name: Nightly real-network test
+
+# A keeper on a VPS and this runner (behind the provider's NAT) pair, import a corpus, sync, fetch
+# every original and revoke, over the real internet and the relays (M6-01). The report is archived
+# every night; the job fails (and so alerts) when a step fails or gets much slower.
+#
+# Needs repository secrets: NIGHTLY_VPS_HOST (user@host), NIGHTLY_VPS_SSH_KEY (private key).
+# Not exercised yet: it has never run on GitHub (no remote exists), see docs/notes/real-network-nightly.md.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  scenario:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release -p keeper --bin shoebox-keeper && cargo build --release -p desktop-mobile --features http --bin desktop-dev-server
+      - name: SSH key
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.NIGHTLY_VPS_SSH_KEY }}" > ~/.ssh/id_nightly
+          chmod 600 ~/.ssh/id_nightly
+          printf 'Host *\n  IdentityFile ~/.ssh/id_nightly\n  StrictHostKeyChecking accept-new\n' > ~/.ssh/config
+      - name: Put the keeper on the VPS
+        run: scp target/release/shoebox-keeper "${{ secrets.NIGHTLY_VPS_HOST }}:/tmp/shoebox-keeper-nightly"
+      - name: Scenario
+        run: |
+          python3 scripts/real-network/scenario.py --remote "${{ secrets.NIGHTLY_VPS_HOST }}" \
+            --remote-keeper-bin /tmp/shoebox-keeper-nightly --preset small --report real-network-report.json
+      - name: Compare with the last good run
+        if: always()
+        run: python3 scripts/real-network/compare.py real-network-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-network-report-${{ github.run_id }}
+          path: real-network-report.json
+          retention-days: 90

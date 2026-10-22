@@ -625,6 +625,21 @@ impl SharedAlbums {
         Ok(())
     }
 
+    /// This device got a new name: tell the members of every album (viewers cannot).
+    pub async fn rename_me(&self, name: &str) {
+        let entries: Vec<Arc<Entry>> = self
+            .inner
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect();
+        for e in entries {
+            let _ = e.album.set_display_name(name).await;
+        }
+    }
+
     /// Sync one album with its members now.
     pub async fn sync_now(&self, id: &AlbumId) -> Result<()> {
         let e = self.entry(id)?;

@@ -398,3 +398,37 @@ async fn a_photo_on_one_keeper_is_backed_up_even_below_the_copy_target() {
     );
     c.shutdown().await;
 }
+
+/// Renaming a device shows up on the others: at once through presence, and for good in the
+/// device list when the renamed device is an admin (it re-signs its own certificate).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn renaming_a_device_reaches_the_others() {
+    use shoebox_node::PresenceConfig;
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Phone])
+        .await
+        .unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    for n in &nodes {
+        n.start_presence(PresenceConfig::default()).await.unwrap();
+    }
+    c.node(0)
+        .update_config(|cfg| cfg.name = "Studio Mac".into())
+        .unwrap();
+    nodes[0].announce_rename("Studio Mac").await.unwrap();
+    let me = nodes[0].device();
+    wait_until(Duration::from_secs(30), || async {
+        let by_presence = nodes[1]
+            .devices()
+            .iter()
+            .any(|d| d.id == me && d.name.as_deref() == Some("Studio Mac"));
+        let list = nodes[1].store().device_list().await.unwrap();
+        let by_cert = list
+            .devices
+            .iter()
+            .any(|d| d.device == me && d.name == "Studio Mac");
+        by_presence && by_cert
+    })
+    .await
+    .expect("the other device sees the new name, live and in the device list");
+    c.shutdown().await;
+}

@@ -2,7 +2,7 @@
   // Settings (mockup 6b/6c): this device, how many copies to keep, relay, watched folders, theme.
   import { onMount } from 'svelte';
   import { api, type Settings } from '../lib/api';
-  import { app, fail, toast } from '../lib/store.svelte';
+  import { app, fail, refreshState, toast } from '../lib/store.svelte';
   import Button from '../components/Button.svelte';
   import List from '../components/List.svelte';
   import Row from '../components/Row.svelte';
@@ -85,7 +85,7 @@
       <span class="small muted">Name</span>
       <div class="row-flex">
         <input class="input grow" bind:value={name} />
-        <Button size="sm" disabled={!name.trim() || name === s.device_name} onclick={() => save(() => api.renameDevice(name), 'Renamed')}>Save</Button>
+        <Button size="sm" disabled={!name.trim() || name === s.device_name} onclick={() => save(async () => { await api.renameDevice(name); await refreshState(); }, 'Renamed')}>Save</Button>
       </div>
       <div class="small muted">Role: <b>{s.role}</b></div>
     </div>

@@ -157,6 +157,34 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(())
     }
 
+    /// This device was renamed (the node's config already has the new name). Tell the others
+    /// that are online right away; if this device is an admin it also re-signs its own
+    /// certificate, so the new name reaches devices that are offline now and the device list.
+    pub async fn announce_rename(&self, name: &str) -> Result<()> {
+        if let (Ok(cap), Ok(list)) = (self.capability(), self.store().device_list().await) {
+            if list.admins.iter().any(|a| a.admin == self.device()) {
+                if let Some(me) = list.devices.iter().find(|d| d.device == self.device()) {
+                    if me.name != name && !me.revoked {
+                        let cert = shoebox_core::identity::issue_device_cert(
+                            &self.node().device_key(),
+                            cap.identity_id(),
+                            self.device(),
+                            me.role,
+                            name,
+                            self.holdings_hlc(),
+                            false,
+                        );
+                        self.store()
+                            .apply_device_change(SignedDeviceChange::Device(cert))
+                            .await?;
+                    }
+                }
+            }
+        }
+        self.send_hello().await;
+        Ok(())
+    }
+
     /// Whether the user has saved the recovery kit (drives the nag banner).
     pub async fn recovery_kit_saved(&self) -> Result<bool> {
         Ok(self

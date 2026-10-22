@@ -124,7 +124,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(())
     }
 
-    async fn send_hello(&self) {
+    pub(crate) async fn send_hello(&self) {
         send_hello(&self.inner).await;
     }
 

@@ -1010,7 +1010,17 @@ impl AppCore {
             };
             out.push(DeviceInfo {
                 id: hex::encode(d.device.0),
-                name: d.name.clone(),
+                // The name a device reports about itself is the freshest; the certificate's name
+                // (set when it joined, updated by an admin) is the fallback.
+                name: if d.device == me {
+                    self.device_name()
+                } else {
+                    presence
+                        .iter()
+                        .find(|p| p.id == d.device)
+                        .and_then(|p| p.name.clone())
+                        .unwrap_or_else(|| d.name.clone())
+                },
                 role: role_name(d.role).into(),
                 online: d.device == me || presence.iter().any(|p| p.id == d.device && p.online),
                 is_this_device: d.device == me,
@@ -1264,7 +1274,15 @@ impl AppCore {
         ensure!(!name.is_empty(), "the device needs a name");
         self.file.lock().unwrap().device_name = name.to_string();
         self.node.update_config(|c| c.name = name.to_string())?;
-        self.save()
+        self.save()?;
+        if let Ok(ln) = self.ln().await {
+            ln.announce_rename(name).await?;
+        }
+        if let Some(shared) = self.shared.read().await.clone() {
+            shared.rename_me(name).await;
+        }
+        self.emit(AppEvent::DevicesChanged);
+        Ok(())
     }
 
     pub async fn watch_folder(&self, dir: &str) -> Result<()> {

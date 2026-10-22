@@ -54,6 +54,8 @@ pub(crate) struct PeerState {
     next_attempt: Instant,
     last_attempt: Option<Instant>,
     syncing: bool,
+    /// A local change happened that this peer has not been synced with yet.
+    dirty: bool,
     /// Outcome of the most recent finished attempt (`None` = it succeeded).
     last_error: Option<String>,
 }
@@ -66,6 +68,7 @@ impl PeerState {
             next_attempt: Instant::now(),
             last_attempt: None,
             syncing: false,
+            dirty: false,
             last_error: None,
         }
     }
@@ -109,7 +112,29 @@ impl<L: LibraryStore> LibraryNode<L> {
         let weak = Arc::downgrade(&self.inner);
         let events = self.node().events();
         let tick = self.inner.sync_config.tick;
-        tokio::spawn(manager(weak, events, rx, tick));
+        tokio::spawn(manager(weak.clone(), events, rx, tick));
+        if self.inner.store.replicates_by_push() {
+            // No live replication underneath: tell every peer soon after something changed.
+            let mut changes = self.inner.store.subscribe();
+            tokio::spawn(async move {
+                while futures::StreamExt::next(&mut changes).await.is_some() {
+                    let Some(inner) = weak.upgrade() else { break };
+                    let ids: Vec<EndpointId> = {
+                        let mut peers = inner.peers.lock().unwrap();
+                        peers
+                            .iter_mut()
+                            .map(|(id, p)| {
+                                p.dirty = true;
+                                *id
+                            })
+                            .collect()
+                    };
+                    for id in ids {
+                        let _ = inner.nudge.send(id);
+                    }
+                }
+            });
+        }
     }
 }
 
@@ -141,7 +166,7 @@ async fn manager<L: LibraryStore>(
                 run.extend(
                     peers
                         .iter()
-                        .filter(|(_, p)| !p.syncing && p.next_attempt <= now)
+                        .filter(|(_, p)| !p.syncing && (p.next_attempt <= now || p.dirty))
                         .map(|(id, _)| *id),
                 );
             } else {
@@ -208,6 +233,7 @@ pub(crate) async fn sync_peer<L: LibraryStore>(
             None
         } else {
             p.syncing = true;
+            p.dirty = false;
             p.last_attempt = Some(Instant::now());
             Some(p.addr.clone())
         }

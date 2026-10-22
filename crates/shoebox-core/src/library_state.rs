@@ -136,6 +136,22 @@ impl LibraryState {
         s
     }
 
+    /// Once any device is certified the library is "armed": replicated records must then come
+    /// from certified authors (see the Loro backend). Before that nothing can be judged.
+    pub fn is_armed(&self) -> bool {
+        self.chain.is_some() && !self.devices.is_empty()
+    }
+
+    /// Devices with a valid cert (revoked ones included, so history stays readable) whose id
+    /// starts with `prefix`.
+    pub fn certified_with_prefix(&self, prefix: &[u8]) -> Vec<(EndpointId, Role)> {
+        self.devices
+            .iter()
+            .filter(|(id, _)| id.0.starts_with(prefix))
+            .map(|(id, c)| (*id, c.role))
+            .collect()
+    }
+
     /// Whether `device` is currently certified (and not revoked). Always true when no root is
     /// known, because nothing can be verified then.
     pub fn is_member(&self, device: &EndpointId) -> bool {

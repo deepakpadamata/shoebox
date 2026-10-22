@@ -5,6 +5,7 @@ members = [
     "crates/shoebox-store-mem",
     "crates/shoebox-store-docs",
     "crates/shoebox-store-loro",
+    "crates/shoebox-store",
     "crates/shoebox-media",
     "crates/shoebox-node",
     "crates/shoebox-testkit",
@@ -51,6 +52,7 @@ shoebox-core = { path = "crates/shoebox-core" }
 shoebox-store-mem = { path = "crates/shoebox-store-mem" }
 shoebox-store-docs = { path = "crates/shoebox-store-docs" }
 shoebox-store-loro = { path = "crates/shoebox-store-loro" }
+shoebox-store = { path = "crates/shoebox-store" }
 shoebox-media = { path = "crates/shoebox-media" }
 shoebox-node = { path = "crates/shoebox-node" }
 shoebox-testkit = { path = "crates/shoebox-testkit" }

@@ -355,6 +355,12 @@ pub trait LibraryStore: Send + Sync + 'static {
     async fn sync_with(&self, peer: &PeerAddr) -> Result<()>;
 
     fn capability(&self) -> Capability;
+
+    /// `true` if local writes only reach other devices when someone syncs (no live replication
+    /// underneath), so the node should sync with its peers after local changes.
+    fn replicates_by_push(&self) -> bool {
+        false
+    }
 }
 
 /// A shared album space with its own membership and capabilities.

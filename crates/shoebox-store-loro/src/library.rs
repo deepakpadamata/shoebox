@@ -1,48 +1,95 @@
-use crate::backend::LoroNetwork;
+use crate::auth;
+use crate::backend::Transport;
+use crate::persist::Persist;
 use async_trait::async_trait;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::stream::BoxStream;
-use loro::{ExportMode, LoroDoc, LoroValue};
+use loro::{ExportMode, LoroDoc, LoroValue, VersionVector};
 use shoebox_core::clock::Clock;
 use shoebox_core::entry_codec::{decode_library_entry, encode_library_entry, touched_key};
+use shoebox_core::identity::KeyPair;
 use shoebox_core::ids::{Blake3Hash, EndpointId, Timestamp};
-use shoebox_core::library_state::{Effect, LibraryState};
+use shoebox_core::library_state::{Effect, LibraryState, StateEntry};
 use shoebox_core::model::*;
 use shoebox_core::store::*;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
+use tracing::{debug, warn};
 
 /// Name of the Loro map holding every replicated record.
 const ENTRIES: &str = "entries";
+/// Records from authors whose certificate has not arrived yet wait here (bounded).
+const MAX_PENDING: usize = 50_000;
+
+fn be(e: impl std::fmt::Display) -> StoreError {
+    StoreError::Backend(e.to_string())
+}
 
 pub(crate) struct Inner {
-    state: LibraryState,
-    doc: LoroDoc,
+    pub(crate) state: LibraryState,
+    pub(crate) doc: LoroDoc,
+    /// Hex of the first 8 bytes of this device's id: the map-key prefix of its own records.
     author: String,
-    /// Records already folded into `state`, by key, with a fingerprint of their bytes.
-    known: HashMap<String, [u8; 32]>,
+    library: LibraryId,
+    signer: Option<KeyPair>,
+    persist: Option<Persist>,
+    /// What has been written to the log already.
+    logged: VersionVector,
+    /// Signed records whose author is not (yet) known to be certified: `key → sealed value`.
+    pending: HashMap<String, Vec<u8>>,
 }
 
 pub(crate) struct LibraryShared {
-    inner: Mutex<Inner>,
+    pub(crate) inner: Mutex<Inner>,
     subs: Mutex<Vec<UnboundedSender<Change>>>,
 }
 
+fn author_prefix(device: &EndpointId) -> String {
+    hex::encode(&device.0[..8])
+}
+
 impl LibraryShared {
-    pub(crate) fn new(device: EndpointId, root: RootPublicKey, library: LibraryId) -> Self {
+    pub(crate) fn new(
+        device: EndpointId,
+        root: RootPublicKey,
+        library: LibraryId,
+        signer: Option<KeyPair>,
+        dir: Option<&Path>,
+    ) -> Result<Self> {
         let doc = LoroDoc::new();
         // A stable Loro peer id per device keeps its operations in one lane.
         let peer = u64::from_le_bytes(device.0[..8].try_into().expect("8 bytes"));
         let _ = doc.set_peer_id(peer.max(1));
-        Self {
-            inner: Mutex::new(Inner {
-                state: LibraryState::with_root(device, root, library),
-                doc,
-                author: hex_short(&device),
-                known: HashMap::new(),
-            }),
-            subs: Mutex::new(vec![]),
+        let mut inner = Inner {
+            state: LibraryState::with_root(device, root, library),
+            doc,
+            author: author_prefix(&device),
+            library,
+            signer,
+            persist: None,
+            logged: VersionVector::default(),
+            pending: HashMap::new(),
+        };
+        if let Some(dir) = dir {
+            let (persist, snapshot, updates) = Persist::open(dir).map_err(be)?;
+            if let Some(s) = snapshot {
+                inner.doc.import(&s).map_err(be)?;
+            }
+            for u in updates {
+                // A damaged update inside a valid frame cannot happen unless the disk lies; skip it.
+                if let Err(e) = inner.doc.import(&u) {
+                    warn!("skipping unreadable logged update: {e}");
+                }
+            }
+            inner.logged = inner.doc.oplog_vv();
+            inner.persist = Some(persist);
+            inner.fold_all();
         }
+        Ok(Self {
+            inner: Mutex::new(inner),
+            subs: Mutex::new(vec![]),
+        })
     }
 
     fn emit(&self, changes: Vec<Change>) {
@@ -51,66 +98,247 @@ impl LibraryShared {
             subs.retain(|tx| tx.unbounded_send(change.clone()).is_ok());
         }
     }
+
+    /// Import updates from a peer (or a file) and fold what changed into the state.
+    pub(crate) fn import_bytes(&self, bytes: &[u8]) -> Result<()> {
+        let changes = self.inner.lock().unwrap().import(bytes)?;
+        self.emit(changes);
+        Ok(())
+    }
+
+    pub(crate) fn oplog_vv(&self) -> VersionVector {
+        self.inner.lock().unwrap().doc.oplog_vv()
+    }
+
+    pub(crate) fn updates_since(&self, vv: &VersionVector) -> Result<Vec<u8>> {
+        self.inner
+            .lock()
+            .unwrap()
+            .doc
+            .export(ExportMode::updates(vv))
+            .map_err(be)
+    }
 }
 
-fn hex_short(id: &EndpointId) -> String {
-    id.0.iter().take(8).map(|b| format!("{b:02x}")).collect()
-}
-
-fn fingerprint(bytes: &[u8]) -> [u8; 32] {
-    Blake3Hash::of_bytes(bytes).0
+enum Verdict {
+    Accept,
+    Pending,
+    Reject(&'static str),
 }
 
 impl Inner {
-    /// Write the records a mutation touched into the Loro document.
-    fn persist(&mut self, effect: &Effect) {
+    /// Write the records a mutation touched into the Loro document, then log the update.
+    fn persist_effect(&mut self, effect: &Effect) -> Vec<Change> {
         let map = self.doc.get_map(ENTRIES);
         for touched in &effect.touched {
-            let key = format!("{}/{}", self.author, touched_key(touched));
+            let record_key = touched_key(touched);
+            let key = format!("{}/{}", self.author, record_key);
             match self.state.entry(touched) {
                 Some(entry) => {
-                    let bytes = encode_library_entry(&entry);
-                    self.known.insert(key.clone(), fingerprint(&bytes));
-                    let _ = map.insert(&key, LoroValue::Binary(bytes.into()));
+                    let payload = encode_library_entry(&entry);
+                    let value = auth::seal(self.signer.as_ref(), self.library, &key, &payload);
+                    let _ = map.insert(&key, LoroValue::Binary(value.into()));
                 }
                 None => {
-                    self.known.remove(&key);
                     let _ = map.delete(&key);
                 }
             }
         }
         self.doc.commit();
+        self.log_new_ops();
+        // A new certificate may settle records that were waiting for their author.
+        let mut extra = vec![];
+        if !self.pending.is_empty()
+            && effect
+                .changes
+                .iter()
+                .any(|c| matches!(c, Change::DeviceListChanged))
+        {
+            self.retry_pending(&mut extra);
+        }
+        extra
     }
 
-    /// Fold new or changed records of the Loro document into the state.
-    fn rescan(&mut self) -> Vec<Change> {
+    /// Append everything not yet logged to the update log (compacting when it grew large).
+    fn log_new_ops(&mut self) {
+        let Some(persist) = &mut self.persist else {
+            return;
+        };
+        let now = self.doc.oplog_vv();
+        if now == self.logged {
+            return;
+        }
+        match self.doc.export(ExportMode::updates(&self.logged)) {
+            Ok(update) => {
+                if let Err(e) = persist.append(&update) {
+                    warn!("could not write the update log: {e}");
+                    return;
+                }
+                self.logged = now;
+            }
+            Err(e) => warn!("could not export updates: {e}"),
+        }
+        if persist.should_compact() {
+            if let Ok(snapshot) = self.doc.export(ExportMode::Snapshot) {
+                if let Err(e) = persist.compact(&snapshot) {
+                    warn!("compaction failed: {e}");
+                }
+            }
+        }
+    }
+
+    fn import(&mut self, bytes: &[u8]) -> Result<Vec<Change>> {
+        let before = self.doc.state_frontiers();
+        self.doc.import(bytes).map_err(be)?;
+        self.log_new_ops();
+        let after = self.doc.state_frontiers();
+        if before == after {
+            return Ok(vec![]);
+        }
+        let diff = self.doc.diff(&before, &after).map_err(be)?;
+        let mut keys: Vec<String> = vec![];
+        for (_, d) in diff.iter() {
+            if let loro::event::Diff::Map(m) = d {
+                keys.extend(m.updated.keys().map(|k| k.to_string()));
+            }
+        }
+        Ok(self.fold_keys(keys))
+    }
+
+    /// Fold every record of the document (used once, when opening from disk).
+    fn fold_all(&mut self) {
         let map = self.doc.get_map(ENTRIES);
-        let mut fresh: Vec<(String, Vec<u8>)> = vec![];
-        map.for_each(|key, value| {
-            if let Some(loro::ValueOrContainer::Value(LoroValue::Binary(bytes))) = Some(value) {
-                if self.known.get(key) != Some(&fingerprint(&bytes)) {
-                    fresh.push((key.to_string(), bytes.to_vec()));
-                }
-            }
-        });
+        let mut keys = vec![];
+        map.for_each(|k, _| keys.push(k.to_string()));
+        self.fold_keys(keys);
+    }
+
+    /// Fold the records stored under `keys`. Certificates go first so that records in the same
+    /// batch can already be judged.
+    fn fold_keys(&mut self, mut keys: Vec<String>) -> Vec<Change> {
+        let rank = |k: &str| match k.split_once('/').map(|(_, r)| r) {
+            Some(r) if r.starts_with("devices/") || r.starts_with("admins/") => 0,
+            _ => 1,
+        };
+        keys.sort_by_key(|k| rank(k));
+        let map = self.doc.get_map(ENTRIES);
         let mut changes = vec![];
-        for (key, bytes) in fresh {
-            // Keys are `<author>/<record key>`; the record key is validated against the value.
-            if let Some((_, record_key)) = key.split_once('/') {
-                if let Ok(entry) = decode_library_entry(record_key, &bytes) {
-                    changes.extend(self.state.apply_entry(&entry).changes);
-                }
-            }
-            self.known.insert(key, fingerprint(&bytes));
+        for key in keys {
+            let Some(loro::ValueOrContainer::Value(LoroValue::Binary(value))) = map.get(&key)
+            else {
+                continue;
+            };
+            self.admit(&key, &value, &mut changes);
         }
         changes
+    }
+
+    /// Judge one stored record and, if it passes, merge it into the state.
+    fn admit(&mut self, key: &str, value: &[u8], changes: &mut Vec<Change>) {
+        match self.judge(key, value) {
+            Verdict::Accept => {
+                let payload = auth::open(value).map(|o| o.payload).unwrap_or_default();
+                let Some((_, record_key)) = key.split_once('/') else {
+                    return;
+                };
+                if let Ok(entry) = decode_library_entry(record_key, payload) {
+                    let effect = self.state.apply_entry(&entry);
+                    let devices_changed = effect
+                        .changes
+                        .iter()
+                        .any(|c| matches!(c, Change::DeviceListChanged));
+                    changes.extend(effect.changes);
+                    self.pending.remove(key);
+                    if devices_changed && !self.pending.is_empty() {
+                        self.retry_pending(changes);
+                    }
+                }
+            }
+            Verdict::Pending => {
+                if self.pending.len() < MAX_PENDING {
+                    self.pending.insert(key.to_string(), value.to_vec());
+                }
+            }
+            Verdict::Reject(why) => {
+                debug!(key, why, "rejected a replicated record");
+                self.pending.remove(key);
+            }
+        }
+    }
+
+    fn retry_pending(&mut self, changes: &mut Vec<Change>) {
+        let waiting: Vec<(String, Vec<u8>)> = self.pending.drain().collect();
+        for (key, value) in waiting {
+            // `admit` re-queues what is still undecided; guard against unbounded recursion by
+            // only retrying once per device-list change.
+            match self.judge(&key, &value) {
+                Verdict::Pending => {
+                    self.pending.insert(key, value);
+                }
+                _ => self.admit(&key, &value, changes),
+            }
+        }
+    }
+
+    fn judge(&self, key: &str, value: &[u8]) -> Verdict {
+        let Some((prefix, record_key)) = key.split_once('/') else {
+            return Verdict::Reject("malformed key");
+        };
+        let Some(opened) = auth::open(value) else {
+            return Verdict::Reject("malformed value");
+        };
+        let Ok(entry) = decode_library_entry(record_key, opened.payload) else {
+            return Verdict::Reject("undecodable record");
+        };
+        // Certificates are judged by the certificate chain itself, whoever carries them.
+        if matches!(entry, StateEntry::Device(_) | StateEntry::Admin(_)) {
+            return Verdict::Accept;
+        }
+        let Ok(prefix_bytes) = hex::decode(prefix) else {
+            return Verdict::Reject("malformed author");
+        };
+        if opened.signature.is_none() {
+            // Replicas without a signing key (in-process tests) never enforce signatures.
+            return if self.signer.is_some() && self.state.is_armed() {
+                Verdict::Reject("unsigned record in a library with certified devices")
+            } else {
+                Verdict::Accept
+            };
+        }
+        let candidates = self.state.certified_with_prefix(&prefix_bytes);
+        if candidates.is_empty() {
+            return Verdict::Pending;
+        }
+        let Some((author, role)) = candidates
+            .into_iter()
+            .find(|(id, _)| auth::verify(&id.0, self.library, key, &opened))
+        else {
+            return Verdict::Reject("bad signature");
+        };
+        match &entry {
+            // A device may only publish its own holdings.
+            StateEntry::Holding { device, .. } => {
+                if *device == author {
+                    Verdict::Accept
+                } else {
+                    Verdict::Reject("holdings of another device")
+                }
+            }
+            _ => {
+                if role == Role::Viewer {
+                    Verdict::Reject("a viewer cannot publish library records")
+                } else {
+                    Verdict::Accept
+                }
+            }
+        }
     }
 }
 
 /// A personal library replica on a Loro document.
 pub struct LoroLibrary {
     shared: Arc<LibraryShared>,
-    network: LoroNetwork,
+    transport: Transport,
     library: LibraryId,
     clock: Arc<dyn Clock>,
     mode: Capability,
@@ -119,14 +347,14 @@ pub struct LoroLibrary {
 impl LoroLibrary {
     pub(crate) fn new(
         shared: Arc<LibraryShared>,
-        network: LoroNetwork,
+        transport: Transport,
         library: LibraryId,
         clock: Arc<dyn Clock>,
         mode: Capability,
     ) -> Self {
         Self {
             shared,
-            network,
+            transport,
             library,
             clock,
             mode,
@@ -148,9 +376,10 @@ impl LoroLibrary {
         self.writable()?;
         let mut inner = self.shared.inner.lock().unwrap();
         let (out, effect) = f(&mut inner.state)?;
-        inner.persist(&effect);
+        let extra = inner.persist_effect(&effect);
         drop(inner);
         self.shared.emit(effect.changes);
+        self.shared.emit(extra);
         Ok(out)
     }
 
@@ -182,25 +411,28 @@ impl LoroLibrary {
 
     /// Import a snapshot or updates produced by another replica and apply what changed.
     pub fn import(&self, bytes: &[u8]) -> Result<()> {
+        self.shared.import_bytes(bytes)
+    }
+
+    /// Write a fresh snapshot now and empty the update log (normally automatic).
+    pub fn compact(&self) -> Result<()> {
         let mut inner = self.shared.inner.lock().unwrap();
-        inner
-            .doc
-            .import(bytes)
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
-        let changes = inner.rescan();
-        drop(inner);
-        self.shared.emit(changes);
+        let snapshot = inner.doc.export(ExportMode::Snapshot).map_err(be)?;
+        if let Some(p) = &mut inner.persist {
+            p.compact(&snapshot).map_err(be)?;
+        }
         Ok(())
     }
 
-    fn peer(&self, peer: &PeerAddr) -> Result<Arc<LibraryShared>> {
-        self.network
-            .0
+    /// Bytes on disk: `(snapshot, update log)`; `(0, 0)` for a memory-only replica.
+    pub fn disk_usage(&self) -> (u64, u64) {
+        self.shared
+            .inner
             .lock()
             .unwrap()
-            .get(&(self.library, peer.id))
-            .cloned()
-            .ok_or(StoreError::Unreachable(peer.id))
+            .persist
+            .as_ref()
+            .map_or((0, 0), |p| p.sizes())
     }
 }
 
@@ -280,50 +512,14 @@ impl LibraryStore for LoroLibrary {
     }
 
     async fn sync_with(&self, peer: &PeerAddr) -> Result<()> {
-        let theirs = self.peer(peer)?;
-        if Arc::ptr_eq(&theirs, &self.shared) {
-            return Ok(());
-        }
-        // Real Loro exchange, version-vector based, in both directions (never holding both locks).
-        let (my_vv, my_updates_for_them) = {
-            let mine = self.shared.inner.lock().unwrap();
-            let vv = mine.doc.oplog_vv();
-            let theirs_inner = theirs.inner.lock().unwrap();
-            let for_me = theirs_inner
-                .doc
-                .export(ExportMode::updates(&vv))
-                .map_err(|e| StoreError::Backend(e.to_string()))?;
-            let their_vv = theirs_inner.doc.oplog_vv();
-            let for_them = mine
-                .doc
-                .export(ExportMode::updates(&their_vv))
-                .map_err(|e| StoreError::Backend(e.to_string()))?;
-            (for_me, for_them)
-        };
-        {
-            let mut inner = self.shared.inner.lock().unwrap();
-            inner
-                .doc
-                .import(&my_vv)
-                .map_err(|e| StoreError::Backend(e.to_string()))?;
-            let changes = inner.rescan();
-            drop(inner);
-            self.shared.emit(changes);
-        }
-        {
-            let mut inner = theirs.inner.lock().unwrap();
-            inner
-                .doc
-                .import(&my_updates_for_them)
-                .map_err(|e| StoreError::Backend(e.to_string()))?;
-            let changes = inner.rescan();
-            drop(inner);
-            theirs.emit(changes);
-        }
-        Ok(())
+        self.transport.sync(&self.shared, self.library, peer).await
     }
 
     fn capability(&self) -> Capability {
         self.mode
+    }
+
+    fn replicates_by_push(&self) -> bool {
+        true
     }
 }

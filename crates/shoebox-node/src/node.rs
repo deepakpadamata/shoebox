@@ -37,6 +37,8 @@ const PROGRESS_STEP: u64 = 256 * 1024;
 pub const PING_ALPN: &[u8] = b"shoebox/ping/0";
 /// ALPN of the pairing protocol (M2-04). Open to devices that are not in the device list yet.
 pub const PAIR_ALPN: &[u8] = b"shoebox/pair/0";
+/// ALPN of the Loro library-store sync protocol (handler plugged in by `shoebox-store-loro`).
+pub const LORO_ALPN: &[u8] = b"shoebox/loro/0";
 /// ALPN of the "do you hold these blobs?" probe used before freeing space (M2-08).
 pub const HAS_ALPN: &[u8] = b"shoebox/has/0";
 
@@ -329,6 +331,7 @@ struct Inner {
     /// The endpoint secret, kept to sign device certificates as an admin (M2-04).
     secret_seed: [u8; 32],
     pub(crate) pair_slot: crate::pairing::PairSlot,
+    loro_slot: crate::ext::ExtSlot,
     /// Most recent measured round-trip time per peer.
     rtts: Mutex<HashMap<EndpointId, Duration>>,
 }
@@ -354,6 +357,7 @@ impl Node {
         let secret = load_or_create_secret(&config.key_path())?;
         let secret_seed = secret.to_bytes();
         let pair_slot = crate::pairing::PairSlot::default();
+        let loro_slot = crate::ext::ExtSlot::default();
         let id = secret.public();
         let span = info_span!("node", id = %id.fmt_short(), name = %config.name);
         async move {
@@ -423,6 +427,7 @@ impl Node {
                 .accept(GOSSIP_ALPN, gossip.clone())
                 .accept(DOCS_ALPN, docs.clone())
                 .accept(PING_ALPN, Ping)
+                .accept(LORO_ALPN, crate::ext::ExtProtocol(loro_slot.clone()))
                 .accept(
                     HAS_ALPN,
                     crate::freeup::HasProtocol {
@@ -452,6 +457,7 @@ impl Node {
                     tracker,
                     secret_seed,
                     pair_slot,
+                    loro_slot,
                     rtts: Mutex::new(HashMap::new()),
                 }),
             })
@@ -467,6 +473,11 @@ impl Node {
     /// This device's signing key (the endpoint key), for certificates it issues as an admin.
     pub fn device_key(&self) -> shoebox_core::identity::KeyPair {
         shoebox_core::identity::KeyPair::from_seed(self.inner.secret_seed)
+    }
+
+    /// Where the Loro backend registers its connection handler.
+    pub fn loro_slot(&self) -> &crate::ext::ExtSlot {
+        &self.inner.loro_slot
     }
 
     pub(crate) fn inner_pair_slot(&self) -> &crate::pairing::PairSlot {

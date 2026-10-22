@@ -1,6 +1,6 @@
 [package]
 name = "shoebox-store-loro"
-description = "SPIKE (M1-14): LibraryStore on a Loro CRDT document, for the metadata backend decision (#7)."
+description = "LibraryStore on a Loro CRDT document: iroh transport, crash-safe persistence, signed records (M1-14/M1-16)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,7 @@ publish = false
 default = ["loro"]
 # Pulls in the Loro CRDT library. Other crates can depend on this crate with
 # `default-features = false` to leave it out of their build.
-loro = ["dep:loro"]
+loro = ["dep:loro", "dep:shoebox-node", "dep:iroh", "dep:serde", "dep:postcard", "dep:blake3", "dep:getrandom", "dep:anyhow", "dep:tokio", "dep:tracing", "dep:hex"]
 # `LoroHarness` for the shoebox-core conformance suite.
 testing = ["shoebox-core/testing"]
 
@@ -20,8 +20,21 @@ shoebox-core.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 loro = { version = "1", optional = true }
+shoebox-node = { workspace = true, optional = true }
+iroh = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+postcard = { workspace = true, optional = true }
+blake3 = { workspace = true, optional = true }
+getrandom = { version = "0.3", optional = true }
+anyhow = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
 
 [dev-dependencies]
+tempfile.workspace = true
+hex.workspace = true
+shoebox-testkit.workspace = true
 shoebox-core = { workspace = true, features = ["testing"] }
 shoebox-store-loro = { path = ".", features = ["testing"] }
 

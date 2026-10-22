@@ -40,7 +40,10 @@ fn keys_are_deterministic_and_a_device_id_is_its_public_key() {
 
 #[test]
 fn generated_keys_differ() {
-    assert_ne!(KeyPair::generate().public_bytes(), KeyPair::generate().public_bytes());
+    assert_ne!(
+        KeyPair::generate().public_bytes(),
+        KeyPair::generate().public_bytes()
+    );
 }
 
 #[test]

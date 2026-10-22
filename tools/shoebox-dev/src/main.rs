@@ -9,14 +9,11 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use shoebox_core::clock::{Clock, SystemClock};
-use shoebox_core::identity::{issue_admin_cert, issue_device_cert, KeyPair};
+use shoebox_core::clock::SystemClock;
+use shoebox_core::identity::KeyPair;
 use shoebox_core::ids::EndpointId;
 use shoebox_core::model::{BlobKind, PhotoRecord, Role};
-use shoebox_core::store::{
-    LibraryStore, Page, PeerAddr, SignedDeviceChange, StoreBackend, TimeRange,
-};
-use shoebox_core::Hlc;
+use shoebox_core::store::{LibraryStore, Page, PeerAddr, StoreBackend, TimeRange};
 use shoebox_node::{
     FetcherConfig, ImportMode, ImportOptions, LibraryNode, LibraryTicket, MaintenanceConfig, Node,
     NodeConfig, NodeEvent, PathKind, PresenceConfig, RelaySetting,
@@ -295,34 +292,12 @@ async fn cmd_init(cli: &Cli, name: &str, role: &str) -> Result<()> {
     // devices never store it (it lives only in the recovery kit, M2-02).
     let root = KeyPair::generate();
     let (library, cap) = backend.create_library(&root.root_public()).await?;
-    // This device is the library's first admin and first member.
-    let now = Hlc {
-        physical_ms: SystemClock.now_ms(),
-        counter: 0,
-        device,
-    };
-    library
-        .apply_device_change(SignedDeviceChange::Admin(issue_admin_cert(
-            &root,
-            cap.library,
-            device,
-            now,
-            None,
-        )))
-        .await?;
-    library
-        .apply_device_change(SignedDeviceChange::Device(issue_device_cert(
-            &root,
-            cap.library,
-            device,
-            role,
-            name,
-            now,
-            false,
-        )))
-        .await?;
     let ln =
         LibraryNode::new(node.clone(), Arc::new(library), SystemClock).with_capability(cap.clone());
+    // This device is the library's first admin and first member; the kit is the only way back.
+    let kit = ln.create_identity(&root, role, name).await?;
+    let kit_path = dir.join("recovery-kit.txt");
+    std::fs::write(&kit_path, kit.to_text())?;
     let ticket = ln.ticket()?.to_string();
     let state = DevState {
         name: name.into(),

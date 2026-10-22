@@ -16,6 +16,7 @@ blake3.workspace = true
 async-trait.workspace = true
 ed25519-dalek = "3"
 getrandom = "0.3"
+bip39 = "3"
 futures.workspace = true
 
 [dev-dependencies]

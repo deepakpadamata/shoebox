@@ -224,3 +224,10 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
 - **A-059 · M2-01** · Known flake: `shoebox-store-docs` `autosync::sync_now_waits_for_a_sync_already_in_flight` (300 records, `fast()` 10 s sync timeout) fails
   intermittently — 1 in 6 runs on the pre-M2 tree (verified with `git stash -u`), more often on a nearly full disk. It is a sync that hangs inside iroh-docs, unrelated
   to identity. Not fixed; re-run before treating it as a regression. Worth a proper look if it appears in CI.
+- **A-060 · M2-02** · The kit holds the *root key* (24 words = its 32-byte seed as BIP39 entropy, English list; typed phrases are case/space-forgiving) plus library id and
+  creation date in a printable text file (`RecoveryKit::to_text/from_text`). `LibraryNode::create_identity(root, …)` returns the kit and keeps nothing (the issue's
+  `Node::export_recovery_kit()` cannot exist because the root is never stored; export happens once, at creation). `restore_from_kit(phrase)` verifies the phrase against the
+  library's root key before writing anything, then certifies the new device as admin member. **Gap (acceptance "rejoins and sees all photos once a keeper is reachable")**:
+  the kit does not contain the library's *space capability*, so a device that lost everything cannot yet fetch data; this needs a root-proof handshake in which a surviving
+  member/keeper hands the capability to a device that signs a challenge with the root key — scheduled with the pairing protocol (M2-04). `recovery_kit_saved` is the
+  replicated setting `recovery_kit_saved` (`[1]`).

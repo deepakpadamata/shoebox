@@ -106,6 +106,12 @@ impl<L: LibraryStore> LibraryNode<L> {
         })
     }
 
+    pub(crate) fn capability(&self) -> Result<LibraryCapability> {
+        self.inner.cap.lock().unwrap().clone().ok_or_else(|| {
+            anyhow::anyhow!("this library node was not given a capability (see with_capability)")
+        })
+    }
+
     pub fn node(&self) -> &Node {
         &self.inner.node
     }

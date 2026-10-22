@@ -36,3 +36,16 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   same information). `AlbumId` is 16 random bytes. `Member.key` is an `EndpointId`.
 - **A-011 · M0-04** · `blake3` is a normal dependency of `shoebox-core` (for `Blake3Hash::of_bytes`); the "no async
   runtime / iroh" rule is enforced by `tests/dependency_policy.rs`.
+- **A-012 · M0-05** · Tombstone rule. `05-prototype-plan.md` §2 says "tombstones win over edits made at or *after*
+  the delete" while the issue says "at or *before*". I implemented the reading both share: **a field edit never
+  undeletes a photo** and the edit is **not discarded** (favorite is its own LWW register, so a delete racing a
+  favorite yields "deleted + favorited", and the favorite is still there after a restore). Only an explicit
+  `restore` (an LWW write of `deleted_at = None`) with an HLC after the delete's HLC brings the photo back; a
+  restore with an older HLC (clock skew) loses. Reverse/extend: add a max-register "delete floor" if edits at or
+  before the delete must be dropped after a restore.
+- **A-013 · M0-05** · Conflicting *immutable* `PhotoRecord` fields (two importers rendering different
+  previews/thumbs of the same original) resolve to the lexicographically lowest
+  `(original, preview, thumb, taken_at, exif, imported_by)` on every replica, which keeps merge commutative.
+- **A-014 · M0-05** · `OrSet` keeps removed tags forever (grow-only). Compaction is deferred; at personal-album
+  scale this is small. `Lww` equal-HLC/different-value ties (impossible in practice) resolve by value.
+- **A-015 · M0-05** · `merge` on records returns `Result<_, IdMismatch>` instead of panicking when ids differ.

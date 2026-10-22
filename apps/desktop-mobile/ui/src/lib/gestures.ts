@@ -168,26 +168,36 @@ export interface PullRefreshOptions {
 }
 
 /**
- * Pull down from the top of a scrolling list to refresh it. A small pill follows the finger, says
- * "Release to refresh" once the pull is long enough, and "Refreshing…" until `onRefresh` settles.
+ * Pull down from the top of a scrolling list to refresh it. A circle follows the finger and fills
+ * as the pull gets longer; past the threshold, letting go refreshes, and it spins until
+ * `onRefresh` settles.
  */
 export function pullRefresh(node: HTMLElement, opts: PullRefreshOptions) {
   const threshold = opts.threshold ?? 72;
+  const SIZE = 36;
+  const R = 13;
+  const C = 2 * Math.PI * R;
   let startY = 0;
   let pulling = false;
   let busy = false;
-  const pill = document.createElement('div');
-  pill.setAttribute('role', 'status');
-  pill.style.cssText =
-    'position:fixed;left:50%;z-index:20;transform:translate(-50%,-60px);padding:6px 14px;border-radius:999px;background:var(--surface);color:var(--ink-2);border:1px solid var(--line);box-shadow:var(--shadow);font:600 12px var(--font);pointer-events:none;opacity:0;transition:opacity .12s';
-  document.body.appendChild(pill);
+  let spin: Animation | undefined;
+  const wrap = document.createElement('div');
+  wrap.setAttribute('role', 'progressbar');
+  wrap.setAttribute('aria-label', 'Refreshing');
+  wrap.style.cssText = `position:fixed;left:50%;z-index:20;width:${SIZE}px;height:${SIZE}px;margin-left:-${SIZE / 2}px;border-radius:50%;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);pointer-events:none;opacity:0;display:grid;place-items:center`;
+  wrap.innerHTML = `<svg width="${SIZE - 8}" height="${SIZE - 8}" viewBox="0 0 ${SIZE} ${SIZE}" style="transform:rotate(-90deg)"><circle cx="${SIZE / 2}" cy="${SIZE / 2}" r="${R}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C}"/></svg>`;
+  document.body.appendChild(wrap);
+  const arc = wrap.querySelector('circle') as SVGCircleElement;
+  const svg = wrap.querySelector('svg') as SVGElement;
 
-  const place = (dy: number, text: string) => {
+  const place = (dy: number) => {
     const top = node.getBoundingClientRect().top;
-    pill.textContent = text;
-    pill.style.top = `${top}px`;
-    pill.style.transform = `translate(-50%, ${Math.min(dy, threshold * 1.4) - 40}px)`;
-    pill.style.opacity = dy > 8 || busy ? '1' : '0';
+    const progress = Math.min(1, dy / threshold);
+    wrap.style.top = `${top}px`;
+    wrap.style.transform = `translateY(${Math.min(dy, threshold * 1.3) - SIZE - 4}px)`;
+    wrap.style.opacity = dy > 6 || busy ? '1' : '0';
+    arc.style.strokeDashoffset = String(C * (1 - progress * 0.85));
+    svg.style.transform = `rotate(${-90 + progress * 270}deg)`;
   };
   const start = (e: TouchEvent) => {
     if (busy || node.scrollTop > 0 || e.touches.length !== 1) return;
@@ -198,26 +208,29 @@ export function pullRefresh(node: HTMLElement, opts: PullRefreshOptions) {
     if (!pulling) return;
     const dy = e.touches[0].clientY - startY;
     if (dy <= 0 || node.scrollTop > 0) {
-      pill.style.opacity = '0';
+      wrap.style.opacity = '0';
       return;
     }
-    place(dy * 0.6, dy * 0.6 >= threshold ? 'Release to refresh' : 'Pull to refresh');
+    place(dy * 0.6);
   };
   const end = async (e: TouchEvent) => {
     if (!pulling) return;
     pulling = false;
     const dy = (e.changedTouches[0]?.clientY ?? startY) - startY;
     if (dy * 0.6 < threshold) {
-      pill.style.opacity = '0';
+      wrap.style.opacity = '0';
       return;
     }
     busy = true;
-    place(threshold, 'Refreshing…');
+    place(threshold);
+    arc.style.strokeDashoffset = String(C * 0.3);
+    spin = svg.animate([{ transform: 'rotate(-90deg)' }, { transform: 'rotate(270deg)' }], { duration: 800, iterations: Infinity });
     try {
       await opts.onRefresh();
     } finally {
       busy = false;
-      pill.style.opacity = '0';
+      spin?.cancel();
+      wrap.style.opacity = '0';
     }
   };
   node.addEventListener('touchstart', start, { passive: true });
@@ -230,7 +243,8 @@ export function pullRefresh(node: HTMLElement, opts: PullRefreshOptions) {
       node.removeEventListener('touchmove', move);
       node.removeEventListener('touchend', end);
       node.removeEventListener('touchcancel', end);
-      pill.remove();
+      spin?.cancel();
+      wrap.remove();
     },
   };
 }

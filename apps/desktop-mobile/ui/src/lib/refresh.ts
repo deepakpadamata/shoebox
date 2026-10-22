@@ -11,7 +11,6 @@ export async function refreshEverything(): Promise<void> {
     app.version++;
     app.sharedVersion++;
     app.devicesVersion++;
-    toast('Up to date');
   } catch {
     toast('Could not refresh. Check that your other devices are reachable.');
   }

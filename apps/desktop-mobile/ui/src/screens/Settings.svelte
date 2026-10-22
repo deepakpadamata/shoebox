@@ -9,6 +9,7 @@
   import Segmented from '../components/Segmented.svelte';
   import BackupCard from '../components/BackupCard.svelte';
   import Sheet from '../components/Sheet.svelte';
+  import { canPick, pickFolder } from '../lib/pick';
   import { applyTextSize, savedTextSize } from '../lib/textsize';
 
   let s = $state<Settings | null>(null);
@@ -115,16 +116,24 @@
       {#if s.watched_folders.length === 0}<Row title="No folders watched" subtitle="Photos that appear in a watched folder are imported automatically." />{/if}
     </List>
     <div class="row-flex" style="margin-top:8px">
+      {#if canPick()}
+        <Button size="sm" onclick={async () => { const d = await pickFolder('Watch a folder').catch(() => null); if (d) save(async () => { await api.watchFolder(d); }, 'Watching'); }}>Choose a folder to watch…</Button>
+      {:else}
       <input class="input grow" placeholder="/Users/you/Pictures/Inbox" bind:value={folder} />
       <Button size="sm" disabled={!folder.trim()} onclick={() => save(async () => { await api.watchFolder(folder); folder = ''; }, 'Watching')}>Watch</Button>
+      {/if}
     </div>
 
     <div class="section">Export</div>
     <div class="card pad stack">
       <p class="small muted" style="margin:0">Copies every original on this device into plain folders by year and month, with a <span class="mono">library.json</span> listing favorites and albums. Your library is never locked in.</p>
       <div class="row-flex">
+        {#if canPick()}
+          <Button size="sm" disabled={exporting} onclick={async () => { const d = await pickFolder('Export to a folder').catch(() => null); if (d) { exportDir = d; await doExport(); } }}>{exporting ? 'Exporting…' : 'Choose a folder and export…'}</Button>
+        {:else}
         <input class="input grow" placeholder="/Users/you/Shoebox export" bind:value={exportDir} />
         <Button size="sm" disabled={!exportDir.trim() || exporting} onclick={doExport}>{exporting ? 'Exporting…' : 'Export'}</Button>
+        {/if}
       </div>
     </div>
 

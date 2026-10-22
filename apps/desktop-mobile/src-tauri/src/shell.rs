@@ -146,6 +146,9 @@ pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(target_os = "android")]
     let builder = builder.plugin(crate::android_photos::init());
+    // Native file and folder pickers for importing (desktop only).
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_dialog::init());
     // QR scanning when joining a library from a phone (M4-07).
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_barcode_scanner::init());

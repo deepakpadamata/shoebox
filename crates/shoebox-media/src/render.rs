@@ -11,10 +11,40 @@ pub const THUMB_SIZE: u32 = 256;
 pub const PREVIEW_LONG_EDGE: u32 = 2048;
 
 /// JPEG decoders happily return a partly grey picture for a cut-off file; an importer must not
-/// accept that, so require the end-of-image marker (ignoring trailing zero padding).
+/// accept that. Walk the file's own structure and require that the first image ends with an
+/// end-of-image marker. Anything after it is fine: phones append gain maps, motion-photo videos
+/// and vendor trailers (so "the file ends with FFD9" is not the test).
 fn jpeg_is_complete(bytes: &[u8]) -> bool {
-    let end = bytes.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
-    bytes[..end].ends_with(&[0xFF, 0xD9])
+    let mut i = 2; // after SOI
+    while i + 1 < bytes.len() {
+        if bytes[i] != 0xFF {
+            // Entropy-coded data between markers is handled below; here it means damage.
+            return false;
+        }
+        let m = bytes[i + 1];
+        match m {
+            0xFF => i += 1,
+            0xD9 => return true,
+            0x01 | 0xD0..=0xD8 => i += 2,
+            _ => {
+                if i + 3 >= bytes.len() {
+                    return false;
+                }
+                let len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
+                i += 2 + len;
+                if m == 0xDA {
+                    // Scan data: runs until a marker that is not a stuffed zero or a restart.
+                    while i + 1 < bytes.len() {
+                        if bytes[i] == 0xFF && bytes[i + 1] != 0x00 && !(0xD0..=0xD7).contains(&bytes[i + 1]) {
+                            break;
+                        }
+                        i += 1;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 pub fn decode(bytes: &[u8], format: ImageFormat) -> Result<DynamicImage, AnalyzeError> {

@@ -164,3 +164,18 @@ fn heic_and_unknown_files_are_refused_not_passed_through() {
         Err(StripError::Malformed(_))
     ));
 }
+
+#[test]
+fn a_jpeg_with_a_vendor_trailer_after_its_end_marker_is_complete() {
+    use shoebox_media::analyze;
+    let mut jpeg = render_jpeg(&spec(None), 5);
+    jpeg.extend(b"SEFHtrailer-that-phones-append\x00\x01\x02");
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("trailer.jpg");
+    std::fs::write(&p, &jpeg).unwrap();
+    analyze(&p).expect("a trailer after EOI is not truncation");
+    // A cut-off file is still refused, even though it still contains an EXIF thumbnail's markers.
+    let cut = &jpeg[..jpeg.len() / 2];
+    std::fs::write(&p, cut).unwrap();
+    assert!(analyze(&p).is_err());
+}

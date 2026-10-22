@@ -3,6 +3,7 @@
   import { go, param, section } from '../lib/route.svelte';
   import { app, fail, toast } from '../lib/store.svelte';
   import { plural } from '../lib/format';
+  import { canPick, pickFiles, pickFolder } from '../lib/pick';
   import Banner from '../components/Banner.svelte';
   import Button from '../components/Button.svelte';
   import Sheet from '../components/Sheet.svelte';
@@ -58,12 +59,13 @@
   const counts = $derived(app.counts);
   const atRisk = $derived(counts?.at_risk ?? 0);
 
-  async function doImport() {
-    if (!importPath.trim()) return;
+  async function doImport(paths: string[]) {
+    if (paths.length === 0) return;
     busy = true;
     try {
-      const r = await api.importPaths([importPath.trim()]);
-      toast(`Imported ${plural(r.imported, 'photo')}${r.duplicates ? `, ${plural(r.duplicates, 'duplicate')} skipped` : ''}${r.failed.length ? `, ${r.failed.length} failed` : ''}`);
+      const r = await api.importPaths(paths);
+      const why = r.failed.length ? ` Why: ${r.failed[0].replace(/^.*?: /, '')}` : '';
+      toast(`Imported ${plural(r.imported, 'photo')}${r.duplicates ? `, ${plural(r.duplicates, 'duplicate')} skipped` : ''}${r.skipped ? `, ${plural(r.skipped, 'file')} not a photo or video` : ''}${r.failed.length ? `, ${r.failed.length} failed.${why}` : ''}`);
       importOpen = false;
       importPath = '';
     } catch (e) {
@@ -137,9 +139,14 @@
 
 <Sheet open={importOpen} title="Import photos" onclose={() => (importOpen = false)} width={440}>
   <div class="stack">
-    <p class="muted small">Type or paste the path of a folder (or a photo) on this computer. Copies already in the library are skipped.</p>
-    <input class="input" placeholder="/Users/you/Pictures" bind:value={importPath} onkeydown={(e) => e.key === 'Enter' && doImport()} />
-    <Button kind="primary" block disabled={busy || !importPath.trim()} onclick={doImport}>{busy ? 'Importing…' : 'Import'}</Button>
+    <p class="muted small">Copies already in the library are skipped. Your originals stay where they are.</p>
+    {#if canPick()}
+      <Button kind="primary" block disabled={busy} onclick={async () => doImport(await pickFiles().catch((e) => { fail(e); return []; }))}>{busy ? 'Importing…' : 'Choose photos and videos…'}</Button>
+      <Button block disabled={busy} onclick={async () => { const d = await pickFolder('Import a folder').catch((e) => { fail(e); return null; }); if (d) doImport([d]); }}>Choose a folder…</Button>
+    {:else}
+      <input class="input" placeholder="/Users/you/Pictures" bind:value={importPath} onkeydown={(e) => e.key === 'Enter' && doImport([importPath.trim()])} />
+      <Button kind="primary" block disabled={busy || !importPath.trim()} onclick={() => doImport([importPath.trim()])}>{busy ? 'Importing…' : 'Import'}</Button>
+    {/if}
   </div>
 </Sheet>
 

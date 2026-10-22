@@ -36,6 +36,22 @@ so devices keep syncing; choose *Quit Shoebox* in the tray menu to exit.
   `ui/src/bindings/*.ts` (CI fails if they changed). Add `--features http` for the HTTP bridge test.
 * `cd ui && npm run check && npm test` — svelte-check and the pure UI logic (timeline layout, formatting).
 
+## Two instances in a browser (shared albums)
+
+`.claude/launch.json` has `desktop-ui` (port 1421) and `desktop-ui-b` (1422), two dev servers with separate data
+directories. Create a library on each, make a shared album on one, *Invite*, paste the code into *Shared → Join*
+on the other: the photos, people and activity show up on both, over loopback.
+
+## Data format and upgrades
+
+The data directory carries `format.json` (see `crates/shoebox-node/src/format.rs`). Opening older data copies the
+small files to `backups/format-N-<time>/` and upgrades; opening data from a newer layout is refused with a message.
+
+## Diagnostics
+
+*Settings → Help → Create a diagnostics report* (`diagnostics` command): counts, versions, roles and a redacted
+log tail. Nothing is uploaded.
+
 ## Not verified
 
 The Tauri window itself (rendering, tray, keystore prompts, single-instance behaviour) has only been

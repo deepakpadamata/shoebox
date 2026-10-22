@@ -40,10 +40,16 @@ pub enum StateEntry {
         id: PhotoId,
         hlc: Hlc,
     },
+    /// A library setting (last writer wins per key).
+    Setting {
+        key: String,
+        value: Vec<u8>,
+        hlc: Hlc,
+    },
 }
 
 /// Which stored record a write changed (and so must be persisted/announced).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Touched {
     Photo(PhotoId),
     Album(AlbumId),
@@ -51,6 +57,7 @@ pub enum Touched {
     Admin(EndpointId),
     Holding(EndpointId, Blake3Hash),
     Purged(PhotoId),
+    Setting(String),
 }
 
 /// The result of a state mutation.
@@ -92,6 +99,7 @@ pub struct LibraryState {
     devices: BTreeMap<EndpointId, DeviceCert>,
     admins: BTreeMap<EndpointId, AdminCert>,
     holdings: BTreeMap<(EndpointId, Blake3Hash), Lww<Option<BlobKind>>>,
+    settings: BTreeMap<String, Lww<Vec<u8>>>,
     /// Devices currently holding each blob (any kind).
     holders_by_blob: BTreeMap<Blake3Hash, BTreeSet<EndpointId>>,
 }
@@ -123,6 +131,7 @@ impl LibraryState {
             devices: BTreeMap::new(),
             admins: BTreeMap::new(),
             holdings: BTreeMap::new(),
+            settings: BTreeMap::new(),
             holders_by_blob: BTreeMap::new(),
         }
     }
@@ -279,7 +288,34 @@ impl LibraryState {
         changed
     }
 
+    fn merge_setting(&mut self, key: &str, value: &Lww<Vec<u8>>) -> bool {
+        self.observe(&value.hlc);
+        let merged = match self.settings.get(key) {
+            Some(existing) => existing.merge(value),
+            None => value.clone(),
+        };
+        self.settings.insert(key.to_string(), merged.clone()) != Some(merged)
+    }
+
     // ---------- local writes ----------
+
+    /// Write a library setting (last writer wins per key).
+    pub fn put_setting(&mut self, key: &str, value: Vec<u8>, now_ms: u64) -> Result<Effect> {
+        let valid = (1..=64).contains(&key.len())
+            && key.bytes().all(|b| {
+                b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-')
+            });
+        if !valid {
+            return Err(StoreError::Invalid(format!("invalid setting key `{key}`")));
+        }
+        let hlc = self.tick(now_ms);
+        let mut fx = Effect::default();
+        if self.merge_setting(key, &Lww::new(value, hlc)) {
+            fx.change(Change::SettingChanged(key.to_string()));
+            fx.touch(Touched::Setting(key.to_string()));
+        }
+        Ok(fx)
+    }
 
     pub fn upsert_photo(&mut self, rec: &PhotoRecord) -> Effect {
         let mut fx = Effect::default();
@@ -479,6 +515,12 @@ impl LibraryState {
                 }
             }
             StateEntry::Purged { id, hlc } => self.merge_purge(*id, *hlc, &mut fx),
+            StateEntry::Setting { key, value, hlc } => {
+                if self.merge_setting(key, &Lww::new(value.clone(), *hlc)) {
+                    fx.change(Change::SettingChanged(key.clone()));
+                    fx.touch(Touched::Setting(key.clone()));
+                }
+            }
         }
         fx
     }
@@ -505,6 +547,11 @@ impl LibraryState {
                 .purged
                 .get(id)
                 .map(|hlc| StateEntry::Purged { id: *id, hlc: *hlc }),
+            Touched::Setting(key) => self.settings.get(key).map(|l| StateEntry::Setting {
+                key: key.clone(),
+                value: l.value.clone(),
+                hlc: l.hlc,
+            }),
         }
     }
 
@@ -526,6 +573,11 @@ impl LibraryState {
                 .iter()
                 .map(|(id, hlc)| StateEntry::Purged { id: *id, hlc: *hlc }),
         );
+        out.extend(self.settings.iter().map(|(k, l)| StateEntry::Setting {
+            key: k.clone(),
+            value: l.value.clone(),
+            hlc: l.hlc,
+        }));
         out
     }
 
@@ -552,6 +604,10 @@ impl LibraryState {
 
     pub fn photo(&self, id: &PhotoId) -> Option<PhotoRecord> {
         self.photos.get(id).cloned()
+    }
+
+    pub fn setting(&self, key: &str) -> Option<Vec<u8>> {
+        self.settings.get(key).map(|l| l.value.clone())
     }
 
     pub fn photo_count(&self) -> usize {

@@ -163,6 +163,7 @@ impl DocsAlbum {
     where
         S: futures::Stream<Item = anyhow::Result<LiveEvent>> + Unpin + Send + 'static,
     {
+        let (dirty, peers) = (replica.dirty(), replica.peers_handle());
         let inner = Arc::new(Inner {
             core: AsyncMutex::new(Core { state, replica }),
             subs: Mutex::new(vec![]),
@@ -171,22 +172,34 @@ impl DocsAlbum {
             clock,
             node,
         });
-        spawn_watcher(&inner, events);
+        spawn_watcher(&inner, events, dirty, peers);
         Self { inner }
     }
 }
 
-fn spawn_watcher<S>(inner: &Arc<Inner>, mut events: S)
-where
+fn spawn_watcher<S>(
+    inner: &Arc<Inner>,
+    mut events: S,
+    dirty: Arc<tokio::sync::Notify>,
+    peers: Arc<Mutex<std::collections::HashSet<iroh::EndpointId>>>,
+) where
     S: futures::Stream<Item = anyhow::Result<LiveEvent>> + Unpin + Send + 'static,
 {
     // iroh-docs delivers events through bounded channels and stalls the *whole engine* if any
     // subscriber stops draining. Rescans need the engine, so draining and rescanning must be
     // separate tasks: this one only notes that something changed.
-    let dirty = Arc::new(tokio::sync::Notify::new());
     let signal = dirty.clone();
     tokio::spawn(async move {
         while let Some(event) = events.next().await {
+            match &event {
+                Ok(LiveEvent::InsertRemote { from, .. }) => {
+                    peers.lock().unwrap().insert(*from);
+                }
+                Ok(LiveEvent::SyncFinished(ev)) if ev.result.is_ok() => {
+                    peers.lock().unwrap().insert(ev.peer);
+                }
+                _ => {}
+            }
             if matches!(
                 event,
                 Ok(LiveEvent::InsertRemote { .. }
@@ -289,12 +302,13 @@ impl AlbumStore for DocsAlbum {
 
     async fn sync_with(&self, peer: &PeerAddr) -> Result<()> {
         let target = to_endpoint_addr(peer)?;
-        let doc = { self.inner.core.lock().await.replica.doc.clone() };
+        let (doc, node) = {
+            let core = self.inner.core.lock().await;
+            core.replica.note_peer(target.id);
+            (core.replica.doc.clone(), core.replica.node().clone())
+        };
         let mut events = doc.subscribe().await.map_err(backend_err)?;
-        doc.start_sync(vec![target.clone()])
-            .await
-            .map_err(backend_err)?;
-        crate::replica::wait_synced(&mut events, target.id)
+        crate::replica::sync_and_wait(&doc, &node, &mut events, target.clone())
             .await
             .map_err(|_| StoreError::Unreachable(peer.id))?;
         self.inner.settle().await

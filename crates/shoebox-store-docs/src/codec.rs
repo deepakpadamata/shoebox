@@ -9,6 +9,7 @@
 //! admins/<deviceId hex>                → StateEntry::Admin
 //! holdings/<deviceId hex>/<blob hex>   → StateEntry::Holding   (written only by that device)
 //! purged/<photoId hex>                 → StateEntry::Purged
+//! settings/<key>                       → StateEntry::Setting
 //! ```
 //!
 //! Shared-album namespace (one per album):
@@ -66,6 +67,7 @@ pub fn library_key(e: &StateEntry) -> String {
             format!("holdings/{}/{}", hex32(&device.0), hex32(&blob.0))
         }
         StateEntry::Purged { id, .. } => format!("purged/{}", hex32(&id.0)),
+        StateEntry::Setting { key, .. } => format!("settings/{key}"),
     }
 }
 
@@ -80,6 +82,7 @@ pub fn touched_key(t: &Touched) -> String {
             format!("holdings/{}/{}", hex32(&device.0), hex32(&blob.0))
         }
         Touched::Purged(id) => format!("purged/{}", hex32(&id.0)),
+        Touched::Setting(key) => format!("settings/{key}"),
     }
 }
 

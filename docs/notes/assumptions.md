@@ -155,3 +155,16 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   do not. Messages are unauthenticated in M1 (signed with device certs in M2). Defaults: heartbeat 10 s, offline after 35 s (the issue's
   budget is 60 s). A `NewItems` nudge makes the receiver sync with the announcing device (only if it is a known library peer); imports announce
   automatically. `start_presence` must be called explicitly after `with_capability`.
+- **A-046 · M1-11** · Added a replicated, last-writer-wins `settings` facility to `LibraryStore` (`setting`/`put_setting`, keys `[a-z0-9._-]{1,64}`,
+  opaque byte values) with its own conformance scenario; the redundancy target is the setting `redundancy.target` (one byte, default 2, ≥1).
+  Copy counts include devices that are currently offline (their data exists). `at_risk` over 100k photos takes ~22 ms in a release build
+  (the debug-build test uses 10k photos because *building* a 100k library in debug takes over a minute).
+- **A-047 · M1-05/08/11** · Hardening of the docs backend found by stress runs (each run of the docs test binaries, 25–40×, before/after):
+  (1) `SyncFinished` carries no reliable outcome in iroh-docs 0.101/iroh 1.4: nearly every sync reports "Failed to close connection",
+  including complete ones and ones where two syncs between the same peers overlapped and *no data moved*. So `sync_with` now asks the peer for
+  an order-independent **digest** of its namespace (`shoebox/doc-digest/0`, a tiny protocol served by every node) and syncs again until the
+  digests match (≤ 6 rounds, then it accepts — live writes can keep digests moving). It costs one O(entries) listing per round on each side.
+  (2) A sync request is ignored while another sync with that peer is running, and that one may predate the data: only a sync that *started
+  after the request* counts, and a stale finish triggers a fresh request. (3) iroh-docs fetches an entry's content once per sync run and
+  never retries, so the replica fetches content that has been missing for 750 ms itself, from peers it has exchanged entries with, retrying
+  every 4 s and rescanning every 500 ms while anything is pending. Flake rate went from ~15% to 0 in 90 consecutive runs.

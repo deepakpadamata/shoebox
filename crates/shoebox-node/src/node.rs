@@ -351,6 +351,10 @@ impl Node {
                 .accept(GOSSIP_ALPN, gossip.clone())
                 .accept(DOCS_ALPN, docs.clone())
                 .accept(PING_ALPN, Ping)
+                .accept(
+                    crate::doc_digest::DOC_DIGEST_ALPN,
+                    crate::doc_digest::DigestProtocol { docs: docs.clone() },
+                )
                 .spawn();
             info!("node started");
             let _ = events.send(NodeEvent::Started { id });
@@ -434,6 +438,33 @@ impl Node {
         NodeEvents {
             started: Some(NodeEvent::Started { id: self.inner.id }),
             rx: self.inner.events.subscribe(),
+        }
+    }
+
+    /// Ask `peer` for the digest of one of its iroh-docs namespaces (see [`crate::doc_digest`]).
+    /// `Ok(None)` if the peer does not have the namespace open.
+    pub async fn peer_doc_digest(
+        &self,
+        peer: EndpointId,
+        namespace: iroh_docs::NamespaceId,
+    ) -> Result<Option<[u8; 32]>> {
+        let conn = self
+            .inner
+            .endpoint
+            .connect(peer, crate::doc_digest::DOC_DIGEST_ALPN)
+            .await
+            .context("connecting")?;
+        let (mut send, mut recv) = conn.open_bi().await?;
+        send.write_all(&namespace.to_bytes()).await?;
+        send.finish()?;
+        let reply = recv.read_to_end(64).await?;
+        conn.close(0u32.into(), b"done");
+        match reply.as_slice() {
+            [1, digest @ ..] if digest.len() == 32 => {
+                Ok(Some(digest.try_into().expect("32 bytes")))
+            }
+            [0] => Ok(None),
+            _ => Err(anyhow!("malformed digest reply")),
         }
     }
 

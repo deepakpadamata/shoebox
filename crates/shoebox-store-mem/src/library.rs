@@ -181,6 +181,16 @@ impl LibraryStore for MemLibrary {
         Ok(self.read(|s| s.at_risk(min_copies, page)))
     }
 
+    async fn setting(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        Ok(self.read(|s| s.setting(key)))
+    }
+
+    async fn put_setting(&self, key: &str, value: Vec<u8>) -> Result<()> {
+        self.writable()?;
+        let now = self.now();
+        self.with_state(|s| Ok(((), s.put_setting(key, value, now)?)))
+    }
+
     fn subscribe(&self) -> BoxStream<'static, Change> {
         let (tx, rx) = unbounded();
         self.shared.subs.lock().unwrap().push(tx);

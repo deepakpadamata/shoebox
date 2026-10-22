@@ -3,6 +3,8 @@
 mod addr;
 mod blobs;
 mod config;
+mod doc_digest;
+mod holdings;
 mod import;
 mod keys;
 mod library_node;
@@ -14,6 +16,8 @@ mod ticket;
 pub use addr::{from_endpoint_addr, from_iroh_id, to_endpoint_addr, to_iroh_id};
 pub use blobs::{BlobStore, ImportMode, Protection};
 pub use config::{NodeConfig, RelaySetting};
+pub use doc_digest::{doc_digest, DOC_DIGEST_ALPN};
+pub use holdings::{DEFAULT_REDUNDANCY, REDUNDANCY_KEY};
 pub use import::{ImportOptions, ImportReport};
 pub use keys::load_or_create_secret;
 pub use library_node::LibraryNode;

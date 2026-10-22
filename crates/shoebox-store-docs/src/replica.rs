@@ -8,8 +8,10 @@ use iroh_docs::engine::LiveEvent;
 use iroh_docs::store::Query;
 use iroh_docs::AuthorId;
 use shoebox_node::Node;
-use std::collections::HashMap;
-use std::time::Duration;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tokio::sync::Notify;
 use tracing::{debug, warn};
 
 /// How long [`Replica::sync_with`] waits for a peer before giving up.
@@ -18,12 +20,25 @@ pub const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
 /// Prefix of the iroh-docs error for a failure in the connection-closing phase.
 const CLOSE_PHASE_ERROR: &str = "Failed to close connection";
 
+/// Content that has been missing this long is fetched by us instead of waiting for iroh-docs.
+const FETCH_AFTER: Duration = Duration::from_millis(750);
+/// After a failed content fetch, wait this long before trying the same hash again.
+const FETCH_RETRY: Duration = Duration::from_secs(4);
+
 pub struct Replica {
     pub doc: Doc,
     pub author: AuthorId,
     node: Node,
     /// `(author, key)` → content hash already applied, so a scan only returns what changed.
     known: HashMap<(AuthorId, Vec<u8>), Hash>,
+    /// Peers this namespace has exchanged entries with: candidate sources for missing content.
+    peers: Arc<Mutex<HashSet<iroh::EndpointId>>>,
+    /// When each still-missing content hash was first noticed.
+    missing_since: HashMap<Hash, Instant>,
+    /// Hashes with a fetch task in flight (or cooling down after a failure).
+    fetching: Arc<Mutex<HashSet<Hash>>>,
+    /// Signalled when something may have changed and a rescan is worthwhile.
+    dirty: Arc<Notify>,
 }
 
 impl Replica {
@@ -33,7 +48,72 @@ impl Replica {
             author,
             node,
             known: HashMap::new(),
+            peers: Default::default(),
+            missing_since: HashMap::new(),
+            fetching: Default::default(),
+            dirty: Arc::new(Notify::new()),
         }
+    }
+
+    pub fn node(&self) -> &Node {
+        &self.node
+    }
+
+    /// Wake the rescan task.
+    pub fn dirty(&self) -> Arc<Notify> {
+        self.dirty.clone()
+    }
+
+    /// Shared set of peers that entries came from (updated by the event-drain task).
+    pub fn peers_handle(&self) -> Arc<Mutex<HashSet<iroh::EndpointId>>> {
+        self.peers.clone()
+    }
+
+    pub fn note_peer(&self, id: iroh::EndpointId) {
+        self.peers.lock().unwrap().insert(id);
+    }
+
+    /// Download content that iroh-docs failed to fetch (it tries once per sync run, and a later
+    /// sync of an already-known entry does not ask again). Retries every few seconds.
+    fn fetch_missing(&self, hashes: Vec<Hash>) {
+        let peers: Vec<iroh::EndpointId> = self.peers.lock().unwrap().iter().copied().collect();
+        if peers.is_empty() || hashes.is_empty() {
+            return;
+        }
+        let todo: Vec<Hash> = {
+            let mut busy = self.fetching.lock().unwrap();
+            hashes.into_iter().filter(|h| busy.insert(*h)).collect()
+        };
+        if todo.is_empty() {
+            return;
+        }
+        let node = self.node.clone();
+        let fetching = self.fetching.clone();
+        let dirty = self.dirty.clone();
+        tokio::spawn(async move {
+            let downloader = node.blobs().raw().downloader(node.endpoint());
+            for hash in todo {
+                let result = tokio::time::timeout(
+                    Duration::from_secs(30),
+                    downloader.download(hash, peers.clone()),
+                )
+                .await;
+                match result {
+                    Ok(Ok(_)) => {
+                        fetching.lock().unwrap().remove(&hash);
+                        dirty.notify_one();
+                    }
+                    other => {
+                        debug!("fetching missing docs content {hash} failed: {other:?}");
+                        let fetching = fetching.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(FETCH_RETRY).await;
+                            fetching.lock().unwrap().remove(&hash);
+                        });
+                    }
+                }
+            }
+        });
     }
 
     /// Write `value` under `key` as this replica's author.
@@ -81,10 +161,18 @@ impl Replica {
         let blobs = self.node.blobs();
         let mut out = vec![];
         let mut pending = 0;
+        let mut overdue = vec![];
+        let mut still_missing = HashSet::new();
         for ((author, key), hash) in candidates {
             let core_hash = shoebox_core::Blake3Hash(*hash.as_bytes());
             if !blobs.has(&core_hash).await? {
-                pending += 1; // content still downloading
+                // Content still downloading (or never arrived).
+                pending += 1;
+                still_missing.insert(hash);
+                let since = *self.missing_since.entry(hash).or_insert_with(Instant::now);
+                if since.elapsed() >= FETCH_AFTER {
+                    overdue.push(hash);
+                }
                 continue;
             }
             let bytes = blobs.get(&core_hash).await?;
@@ -93,6 +181,16 @@ impl Replica {
                 Ok(key) => out.push((key, bytes.to_vec())),
                 Err(_) => warn!("ignoring entry with a non-UTF-8 key"),
             }
+        }
+        self.missing_since.retain(|h, _| still_missing.contains(h));
+        if pending > 0 {
+            self.fetch_missing(overdue);
+            // Keep looking until everything has arrived, even if no further event comes.
+            let dirty = self.dirty.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                dirty.notify_one();
+            });
         }
         Ok(Scan {
             entries: out,
@@ -109,37 +207,91 @@ pub struct Scan {
     pub pending: usize,
 }
 
-/// Wait for a finished sync with `peer`, then for the content it queued to arrive.
-pub async fn wait_synced<S>(events: &mut S, peer: iroh::EndpointId) -> Result<()>
+/// Rounds of "sync, then compare digests" before giving up on exact agreement (live writes on
+/// either side can keep the digests moving; the library converges via gossip regardless).
+const MAX_ROUNDS: usize = 6;
+
+/// Sync `doc` with `peer` and return once both sides hold the same entries (verified by comparing
+/// digests, see `shoebox_node::doc_digest`) and the content we queued has arrived.
+pub async fn sync_and_wait<S>(
+    doc: &Doc,
+    node: &Node,
+    events: &mut S,
+    peer: iroh::EndpointAddr,
+) -> Result<()>
 where
     S: futures::Stream<Item = Result<LiveEvent, anyhow::Error>> + Unpin,
 {
-    let wait = async {
-        let mut finished = false;
-        while let Some(event) = events.next().await {
-            match event? {
-                LiveEvent::SyncFinished(ev) if ev.peer == peer => {
-                    if let Err(reason) = ev.result {
-                        // iroh-docs 0.101 on iroh 1.4 can report a failure from its *closing*
-                        // handshake ("Failed to close connection") after the exchange itself
-                        // completed and the entries were applied. That is not a failed sync.
-                        if !reason.contains(CLOSE_PHASE_ERROR) {
-                            bail!("sync with {} failed: {reason}", peer.fmt_short());
-                        }
-                        debug!(
-                            "sync with {} ended with a close-phase error: {reason}",
-                            peer.fmt_short()
-                        );
-                    }
-                    finished = true;
+    let overall = async {
+        for round in 0..MAX_ROUNDS {
+            sync_round(doc, events, &peer).await?;
+            let mine = shoebox_node::doc_digest(doc).await?;
+            match node.peer_doc_digest(peer.id, doc.id()).await {
+                Ok(Some(theirs)) if theirs == mine => return Ok(()),
+                Ok(Some(_)) => {
+                    debug!("digests differ after round {round}; syncing again");
+                    tokio::time::sleep(Duration::from_millis(40)).await;
                 }
-                LiveEvent::PendingContentReady if finished => return Ok(()),
-                _ => {}
+                // The peer cannot (or will not) tell us: trust the sync event.
+                Ok(None) | Err(_) => return Ok(()),
             }
         }
-        bail!("event stream ended before the sync finished")
+        debug!("digests still differ after {MAX_ROUNDS} rounds (concurrent writes?)");
+        Ok(())
     };
-    tokio::time::timeout(SYNC_TIMEOUT, wait)
+    tokio::time::timeout(SYNC_TIMEOUT, overall)
         .await
-        .map_err(|_| anyhow!("sync with {} timed out", peer.fmt_short()))?
+        .map_err(|_| anyhow!("sync with {} timed out", peer.id.fmt_short()))?
+}
+
+/// One request for a sync with `peer`: wait until a sync that *started after the request* has
+/// finished and the content it queued has arrived.
+///
+/// iroh-docs ignores a request while a sync with that peer is already running, and that running
+/// sync may have begun before the data we expect existed. So when a stale sync finishes we ask
+/// again, which then starts a fresh one.
+async fn sync_round<S>(doc: &Doc, events: &mut S, peer: &iroh::EndpointAddr) -> Result<()>
+where
+    S: futures::Stream<Item = Result<LiveEvent, anyhow::Error>> + Unpin,
+{
+    let mut since = std::time::SystemTime::now();
+    doc.start_sync(vec![peer.clone()])
+        .await
+        .map_err(|e| anyhow!("starting sync: {e}"))?;
+    let mut finished = false;
+    let mut retries = 0;
+    while let Some(event) = events.next().await {
+        match event? {
+            LiveEvent::SyncFinished(ev) if ev.peer == peer.id => {
+                if ev.started < since {
+                    // Stale: it began before our request. Ask for a fresh one.
+                    retries += 1;
+                    if retries > 5 {
+                        bail!("could not start a fresh sync with {}", peer.id.fmt_short());
+                    }
+                    since = std::time::SystemTime::now();
+                    doc.start_sync(vec![peer.clone()])
+                        .await
+                        .map_err(|e| anyhow!("starting sync: {e}"))?;
+                    continue;
+                }
+                if let Err(reason) = ev.result {
+                    // iroh-docs 0.101 on iroh 1.4 reports "Failed to close connection" from its
+                    // closing handshake after nearly every sync, including complete ones, so the
+                    // event cannot tell us whether data moved; the caller verifies by digest.
+                    if !reason.contains(CLOSE_PHASE_ERROR) {
+                        bail!("sync with {} failed: {reason}", peer.id.fmt_short());
+                    }
+                    debug!(
+                        "sync with {} ended with a close-phase error: {reason}",
+                        peer.id.fmt_short()
+                    );
+                }
+                finished = true;
+            }
+            LiveEvent::PendingContentReady if finished => return Ok(()),
+            _ => {}
+        }
+    }
+    bail!("event stream ended before the sync finished")
 }

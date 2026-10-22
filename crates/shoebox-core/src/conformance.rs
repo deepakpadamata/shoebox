@@ -54,6 +54,7 @@ pub async fn run<H: Harness>(h: &H) {
         concurrent_edits_converge,
         delete_races_favorite,
         device_list_is_signed_and_order_independent,
+        library_settings_are_last_writer_wins,
         read_only_capability,
         shared_album_flow,
     );
@@ -734,6 +735,61 @@ async fn device_list_is_signed_and_order_independent<H: Harness>(h: &H) {
     assert_eq!(la.admins, vec![admin]);
 }
 
+async fn library_settings_are_last_writer_wins<H: Harness>(h: &H) {
+    let (a, b) = pair(h).await;
+    assert_eq!(a.store.setting("redundancy.target").await.unwrap(), None);
+    a.store
+        .put_setting("redundancy.target", vec![3])
+        .await
+        .unwrap();
+    assert_eq!(
+        a.store.setting("redundancy.target").await.unwrap(),
+        Some(vec![3])
+    );
+    sync_both(h, &a, &b).await;
+    assert_eq!(
+        b.store.setting("redundancy.target").await.unwrap(),
+        Some(vec![3])
+    );
+
+    // Concurrent offline writes: the later HLC wins on both sides, whoever syncs first.
+    a.clock.set(1_000);
+    a.store
+        .put_setting("redundancy.target", vec![4])
+        .await
+        .unwrap();
+    b.clock.set(2_000);
+    b.store
+        .put_setting("redundancy.target", vec![5])
+        .await
+        .unwrap();
+    b.store
+        .put_setting("other.key", b"x".to_vec())
+        .await
+        .unwrap();
+    sync_both(h, &a, &b).await;
+    for n in [&a, &b] {
+        assert_eq!(
+            n.store.setting("redundancy.target").await.unwrap(),
+            Some(vec![5])
+        );
+        assert_eq!(
+            n.store.setting("other.key").await.unwrap(),
+            Some(b"x".to_vec())
+        );
+    }
+    // Keys are restricted to a safe alphabet; anything else is rejected before it is stored.
+    for bad in ["", "Has Space", "slash/inside", "ünïcode", &"k".repeat(200)] {
+        assert!(
+            matches!(
+                a.store.put_setting(bad, vec![1]).await,
+                Err(StoreError::Invalid(_))
+            ),
+            "{bad:?}"
+        );
+    }
+}
+
 async fn read_only_capability<H: Harness>(h: &H) {
     let (a, cap) = solo(h, 1, 100).await;
     assert_eq!(a.store.capability(), Capability::Write);
@@ -752,6 +808,10 @@ async fn read_only_capability<H: Harness>(h: &H) {
     );
     assert_eq!(
         ro.set_favorite(&hash(1), true).await,
+        Err(StoreError::ReadOnly)
+    );
+    assert_eq!(
+        ro.put_setting("redundancy.target", vec![1]).await,
         Err(StoreError::ReadOnly)
     );
     assert_eq!(ro.mark_deleted(&hash(1)).await, Err(StoreError::ReadOnly));

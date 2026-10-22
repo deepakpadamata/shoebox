@@ -15,7 +15,7 @@ pub use shoebox_node::{from_endpoint_addr, from_iroh_id, to_endpoint_addr, to_ir
 use async_trait::async_trait;
 use iroh_docs::api::protocol::{AddrInfoOptions, ShareMode};
 use iroh_docs::{Capability as DocsCapability, DocTicket};
-use replica::{wait_synced, Replica};
+use replica::{sync_and_wait, Replica};
 use shoebox_core::clock::Clock;
 use shoebox_core::ids::EndpointId;
 use shoebox_core::store::*;
@@ -167,14 +167,14 @@ impl StoreBackend for DocsBackend {
             .map_err(|_| StoreError::Invalid("invite carries no iroh-docs ticket".into()))?
             .parse()
             .map_err(|e| StoreError::Invalid(format!("bad iroh-docs ticket: {e}")))?;
-        let inviter = to_iroh_id(&ticket.inviter.id)?;
+        let inviter = to_endpoint_addr(&ticket.inviter)?;
         let (doc, mut events) = self
             .node
             .docs()
             .import_and_subscribe(doc_ticket)
             .await
             .map_err(|_| StoreError::Unreachable(ticket.inviter.id))?;
-        wait_synced(&mut events, inviter)
+        sync_and_wait(&doc, &self.node, &mut events, inviter)
             .await
             .map_err(|_| StoreError::Unreachable(ticket.inviter.id))?;
         DocsAlbum::join(

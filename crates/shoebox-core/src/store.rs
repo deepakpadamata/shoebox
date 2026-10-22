@@ -135,6 +135,8 @@ pub enum Change {
     PhotoDeleted(PhotoId),
     AlbumChanged(AlbumId),
     DeviceListChanged,
+    /// A library setting was written (locally or by a peer).
+    SettingChanged(String),
     HoldingsChanged {
         device: EndpointId,
     },
@@ -330,6 +332,16 @@ pub trait LibraryStore: Send + Sync + 'static {
     /// Non-deleted photos whose *original* is held by fewer than `min_copies` distinct devices,
     /// in id order after `page.after.id`.
     async fn at_risk(&self, min_copies: u8, page: Page) -> Result<Vec<PhotoId>>;
+
+    // ----- settings -----
+
+    /// A library-wide setting (e.g. `redundancy.target`), or `None` if never written. Keys are
+    /// 1-64 chars of `[a-z0-9._-]`.
+    async fn setting(&self, key: &str) -> Result<Option<Vec<u8>>>;
+
+    /// Write a setting with a fresh HLC. **Last writer wins** per key, on every replica. An invalid
+    /// key is `Invalid`; the value is opaque bytes (callers define the encoding).
+    async fn put_setting(&self, key: &str, value: Vec<u8>) -> Result<()>;
 
     // ----- sync plumbing -----
 

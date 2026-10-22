@@ -5,67 +5,10 @@ mod common;
 
 use common::*;
 use shoebox_core::store::*;
-use shoebox_node::{LibraryNode, LibraryTicket, NodeEvent, SyncConfig, SyncPhase};
-use shoebox_store_docs::{from_endpoint_addr, DocsBackend, DocsLibrary};
+use shoebox_node::{LibraryNode, NodeEvent, SyncPhase};
+use shoebox_store_docs::{from_endpoint_addr, DocsLibrary};
 use shoebox_testkit::{assert_converged, wait_until, Cluster};
-use std::sync::Arc;
 use std::time::Duration;
-
-fn fast() -> SyncConfig {
-    SyncConfig {
-        tick: Duration::from_millis(100),
-        resync_interval: Duration::from_secs(2),
-        backoff_min: Duration::from_millis(200),
-        backoff_max: Duration::from_millis(800),
-        timeout: Duration::from_secs(10),
-    }
-}
-
-/// Node 0 creates the library; the others join through its ticket string.
-async fn library_nodes(c: &Cluster) -> Vec<LibraryNode<DocsLibrary>> {
-    let b0 = DocsBackend::for_node(c.node(0).clone(), c.clock().clone());
-    let (l0, cap) = b0.create_library(&RootPublicKey([7; 32])).await.unwrap();
-    let ln0 =
-        LibraryNode::with_sync_config(c.node(0).clone(), Arc::new(l0), c.clock().clone(), fast())
-            .with_capability(cap);
-    let ticket = ln0.ticket().unwrap().to_string();
-
-    let mut all = vec![ln0];
-    for i in 1..c.len() {
-        let ticket: LibraryTicket = ticket.parse().unwrap();
-        let b = DocsBackend::for_node(c.node(i).clone(), c.clock().clone());
-        let lib = b.open_library(&ticket.cap).await.unwrap();
-        let ln = LibraryNode::with_sync_config(
-            c.node(i).clone(),
-            Arc::new(lib),
-            c.clock().clone(),
-            fast(),
-        )
-        .with_capability(ticket.cap.clone());
-        for peer in ticket.peers {
-            ln.add_peer(peer).unwrap();
-        }
-        all.push(ln);
-    }
-    all
-}
-
-async fn converged(nodes: &[LibraryNode<DocsLibrary>]) -> bool {
-    let stores: Vec<&DocsLibrary> = nodes.iter().map(|n| n.store().as_ref()).collect();
-    let first = stores[0]
-        .photos_by_time(TimeRange::ALL, Page::all())
-        .await
-        .unwrap();
-    let first_deleted = stores[0].deleted_photos().await.unwrap();
-    for s in &stores[1..] {
-        if s.photos_by_time(TimeRange::ALL, Page::all()).await.unwrap() != first
-            || s.deleted_photos().await.unwrap() != first_deleted
-        {
-            return false;
-        }
-    }
-    true
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn joined_nodes_converge_without_any_manual_sync() {
@@ -78,9 +21,20 @@ async fn joined_nodes_converge_without_any_manual_sync() {
             .await
             .unwrap();
     }
+    // Entries arrive in any order, so wait for *all* of them, not just the last one written.
     wait_until(Duration::from_secs(20), || async {
-        nodes[1].store().photo(&hash(3)).await.unwrap().is_some()
-            && nodes[2].store().photo(&hash(3)).await.unwrap().is_some()
+        let all = |n: &LibraryNode<DocsLibrary>| {
+            let store = n.store().clone();
+            async move {
+                store
+                    .photos_by_time(TimeRange::ALL, Page::all())
+                    .await
+                    .unwrap()
+                    .len()
+                    == 3
+            }
+        };
+        all(&nodes[1]).await && all(&nodes[2]).await
     })
     .await
     .expect("joiners receive the library on their own");

@@ -103,8 +103,12 @@ impl DocsLibrary {
             clock,
             mode,
         });
+        let (dirty, peers) = {
+            let core = inner.core.lock().await;
+            (core.replica.dirty(), core.replica.peers_handle())
+        };
         inner.refresh(false).await?;
-        spawn_watcher(&inner, events);
+        spawn_watcher(&inner, events, dirty, peers);
         Ok(Self { inner })
     }
 
@@ -148,17 +152,30 @@ impl DocsLibrary {
 }
 
 /// Rescan (debounced) whenever peers deliver entries or content; stops when the library drops.
-fn spawn_watcher<S>(inner: &Arc<Inner>, mut events: S)
-where
+fn spawn_watcher<S>(
+    inner: &Arc<Inner>,
+    mut events: S,
+    dirty: Arc<tokio::sync::Notify>,
+    peers: Arc<Mutex<std::collections::HashSet<iroh::EndpointId>>>,
+) where
     S: futures::Stream<Item = anyhow::Result<LiveEvent>> + Unpin + Send + 'static,
 {
     // iroh-docs delivers events through bounded channels and stalls the *whole engine* if any
     // subscriber stops draining. Rescans need the engine, so draining and rescanning must be
     // separate tasks: this one only notes that something changed.
-    let dirty = Arc::new(tokio::sync::Notify::new());
     let signal = dirty.clone();
     tokio::spawn(async move {
         while let Some(event) = events.next().await {
+            // Remember who we exchanged entries with: they are where missing content comes from.
+            match &event {
+                Ok(LiveEvent::InsertRemote { from, .. }) => {
+                    peers.lock().unwrap().insert(*from);
+                }
+                Ok(LiveEvent::SyncFinished(ev)) if ev.result.is_ok() => {
+                    peers.lock().unwrap().insert(ev.peer);
+                }
+                _ => {}
+            }
             if matches!(
                 event,
                 Ok(LiveEvent::InsertRemote { .. }
@@ -269,6 +286,16 @@ impl LibraryStore for DocsLibrary {
         Ok(self.read(|s| s.at_risk(min_copies, page)).await)
     }
 
+    async fn setting(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        Ok(self.read(|s| s.setting(key)).await)
+    }
+
+    async fn put_setting(&self, key: &str, value: Vec<u8>) -> Result<()> {
+        let now = self.now();
+        self.write(|s| Ok(((), s.put_setting(key, value, now)?)))
+            .await
+    }
+
     fn subscribe(&self) -> BoxStream<'static, Change> {
         let (tx, rx) = unbounded();
         self.inner.subs.lock().unwrap().push(tx);
@@ -277,13 +304,14 @@ impl LibraryStore for DocsLibrary {
 
     async fn sync_with(&self, peer: &PeerAddr) -> Result<()> {
         let target = to_endpoint_addr(peer)?;
-        let doc = { self.inner.core.lock().await.replica.doc.clone() };
+        let (doc, node) = {
+            let core = self.inner.core.lock().await;
+            core.replica.note_peer(target.id);
+            (core.replica.doc.clone(), core.replica.node().clone())
+        };
         // Do not hold the state lock while waiting on the network.
         let mut events = doc.subscribe().await.map_err(backend_err)?;
-        doc.start_sync(vec![target.clone()])
-            .await
-            .map_err(backend_err)?;
-        crate::replica::wait_synced(&mut events, target.id)
+        crate::replica::sync_and_wait(&doc, &node, &mut events, target.clone())
             .await
             .map_err(|e| {
                 warn!("sync with {} failed: {e:#}", peer.id);

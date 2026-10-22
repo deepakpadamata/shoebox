@@ -6300,10 +6300,18 @@ dependencies = [
 name = "shoebox-store"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
  "async-trait",
+ "blake3",
  "bytes",
+ "futures",
+ "getrandom 0.3.4",
  "hex",
+ "iroh",
  "iroh-blobs",
+ "postcard",
+ "serde",
+ "serde_json",
  "shoebox-core",
  "shoebox-node",
  "shoebox-store-docs",
@@ -6311,6 +6319,7 @@ dependencies = [
  "shoebox-testkit",
  "tempfile",
  "tokio",
+ "tracing",
  "tracing-subscriber",
  "xtask",
 ]

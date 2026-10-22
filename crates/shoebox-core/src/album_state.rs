@@ -70,6 +70,10 @@ fn member_key(m: &(Hlc, Member)) -> impl Ord + '_ {
     (m.0, &m.1.display_name, m.1.role)
 }
 
+/// Decision #19: how big a shared album may get.
+pub const MAX_ALBUM_MEMBERS: usize = 50;
+pub const MAX_ALBUM_ITEMS: usize = 50_000;
+
 impl AlbumState {
     pub fn new(meta: SharedAlbumMeta, device: EndpointId) -> Self {
         Self {
@@ -195,6 +199,28 @@ impl AlbumState {
             self.put_event(&ev, &mut fx);
         }
         Ok(fx)
+    }
+
+    /// Publish this device's display name for the album (shown to the other members).
+    pub fn set_my_name(&mut self, name: &str, now_ms: u64) -> Result<AlbumEffect> {
+        let role = self.my_role().ok_or(StoreError::ReadOnly)?;
+        let mut fx = AlbumEffect::default();
+        let hlc = self.tick(now_ms);
+        let member = Member {
+            key: self.me,
+            display_name: name.to_string(),
+            role,
+        };
+        self.put_member(hlc, member, &mut fx);
+        Ok(fx)
+    }
+
+    pub fn item_count(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn has_item(&self, id: &PhotoId) -> bool {
+        self.items.contains_key(id)
     }
 
     pub fn meta(&self) -> SharedAlbumMeta {

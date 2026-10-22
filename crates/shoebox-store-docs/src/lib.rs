@@ -160,6 +160,33 @@ impl StoreBackend for DocsBackend {
     }
 
     async fn join_album(&self, ticket: &InviteTicket) -> Result<DocsAlbum> {
+        self.join_album_impl(ticket).await
+    }
+}
+
+impl DocsBackend {
+    /// Reopen an album from the capability [`DocsAlbum::capability`] returned.
+    pub async fn open_album(&self, capability: &[u8]) -> Result<DocsAlbum> {
+        let capability: DocsCapability = postcard::from_bytes(capability)
+            .map_err(|e| StoreError::Invalid(format!("not an album capability: {e}")))?;
+        let writable = matches!(capability, DocsCapability::Write(_));
+        let doc = self
+            .node
+            .docs()
+            .import_namespace(capability)
+            .await
+            .map_err(backend_err)?;
+        DocsAlbum::open(
+            self.replica(doc).await?,
+            self.device,
+            self.clock.clone(),
+            self.node.clone(),
+            writable,
+        )
+        .await
+    }
+
+    async fn join_album_impl(&self, ticket: &InviteTicket) -> Result<DocsAlbum> {
         if let Expiry::At(t) = ticket.expires {
             if self.clock.now_ms() as i64 > t.0 {
                 return Err(StoreError::Expired);

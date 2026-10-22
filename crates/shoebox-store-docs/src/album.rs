@@ -7,7 +7,7 @@ use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use iroh_docs::engine::LiveEvent;
-use shoebox_core::album_state::AlbumState;
+use shoebox_core::album_state::{AlbumState, MAX_ALBUM_ITEMS, MAX_ALBUM_MEMBERS};
 use shoebox_core::clock::Clock;
 use shoebox_core::hlc::Hlc;
 use shoebox_core::ids::EndpointId;
@@ -35,6 +35,8 @@ struct Inner {
     device: EndpointId,
     clock: Arc<dyn Clock>,
     node: shoebox_node::Node,
+    /// Whether this replica holds the album's write capability (viewers do not).
+    writable: bool,
 }
 
 impl Inner {
@@ -92,7 +94,7 @@ impl DocsAlbum {
         let id = meta.id;
         let mut state = AlbumState::new(meta, device);
         state.install_member(MemberRole::Owner, clock.now_ms());
-        let album = Self::assemble(replica, state, id, device, clock, node, events);
+        let album = Self::assemble(replica, state, id, device, clock, node, events, true);
         {
             let mut core = album.inner.core.lock().await;
             for entry in core.state.all_entries() {
@@ -133,7 +135,16 @@ impl DocsAlbum {
                 state.apply_entry(&entry);
             }
         }
-        let album = Self::assemble(replica, state, id, device, clock.clone(), node, events);
+        let album = Self::assemble(
+            replica,
+            state,
+            id,
+            device,
+            clock.clone(),
+            node,
+            events,
+            role != MemberRole::Viewer,
+        );
         if role != MemberRole::Viewer {
             // A viewer holds a read-only capability and cannot publish its membership.
             let mut core = album.inner.core.lock().await;
@@ -151,6 +162,100 @@ impl DocsAlbum {
         Ok(album)
     }
 
+    /// Reopen an album this device already belongs to (after a restart): nothing is announced.
+    pub(crate) async fn open(
+        mut replica: Replica,
+        device: EndpointId,
+        clock: Arc<dyn Clock>,
+        node: shoebox_node::Node,
+        writable: bool,
+    ) -> Result<Self> {
+        let events = replica.doc.subscribe().await.map_err(backend_err)?;
+        let scanned = replica.scan().await.map_err(backend_err)?.entries;
+        let meta = scanned
+            .iter()
+            .find(|(k, _)| k == "meta")
+            .and_then(|(k, b)| match decode_album_entry(k, b) {
+                Ok(shoebox_core::album_state::AlbumEntry::Meta(m)) => Some(m),
+                _ => None,
+            })
+            .ok_or_else(|| StoreError::Invalid("the album has no data on this device".into()))?;
+        let id = meta.id;
+        let mut state = AlbumState::new(meta, device);
+        for (key, bytes) in &scanned {
+            if let Ok(entry) = decode_album_entry(key, bytes) {
+                state.apply_entry(&entry);
+            }
+        }
+        Ok(Self::assemble(
+            replica, state, id, device, clock, node, events, writable,
+        ))
+    }
+
+    /// Keys of the members this replica knows about (devices to sync with and fetch from).
+    pub fn known_member_ids(&self) -> Vec<EndpointId> {
+        match self.inner.core.try_lock() {
+            Ok(core) => core.state.members().into_iter().map(|m| m.key).collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    pub async fn item_count(&self) -> usize {
+        self.inner.core.lock().await.state.item_count()
+    }
+
+    /// Whether this device may add photos (owners and contributors).
+    pub async fn can_add(&self) -> bool {
+        matches!(
+            self.inner.core.lock().await.state.my_role(),
+            Some(MemberRole::Owner | MemberRole::Contributor)
+        )
+    }
+
+    pub async fn my_role(&self) -> Option<MemberRole> {
+        self.inner.core.lock().await.state.my_role()
+    }
+
+    /// Tell the other members what to call this device (a viewer cannot).
+    pub async fn set_display_name(&self, name: &str) -> Result<()> {
+        let now = self.inner.clock.now_ms();
+        let mut core = self.inner.core.lock().await;
+        let effect = core.state.set_my_name(name, now)?;
+        for t in &effect.touched {
+            if let Some(entry) = core.state.entry(t) {
+                let bytes = encode_album_entry(&entry);
+                core.replica
+                    .put(&album_key(&entry), bytes)
+                    .await
+                    .map_err(backend_err)?;
+            }
+        }
+        drop(core);
+        if effect.changed() {
+            self.inner.emit();
+        }
+        Ok(())
+    }
+
+    /// The iroh-docs capability (serialised) that lets this device reopen the album later.
+    pub async fn capability(&self) -> Result<Vec<u8>> {
+        use iroh_docs::api::protocol::{AddrInfoOptions, ShareMode};
+        let mode = if self.inner.writable {
+            ShareMode::Write
+        } else {
+            ShareMode::Read
+        };
+        let core = self.inner.core.lock().await;
+        let ticket = core
+            .replica
+            .doc
+            .share(mode, AddrInfoOptions::Id)
+            .await
+            .map_err(backend_err)?;
+        postcard::to_stdvec(&ticket.capability).map_err(backend_err)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn assemble<S>(
         replica: Replica,
         state: AlbumState,
@@ -159,6 +264,7 @@ impl DocsAlbum {
         clock: Arc<dyn Clock>,
         node: shoebox_node::Node,
         events: S,
+        writable: bool,
     ) -> Self
     where
         S: futures::Stream<Item = anyhow::Result<LiveEvent>> + Unpin + Send + 'static,
@@ -171,6 +277,7 @@ impl DocsAlbum {
             device,
             clock,
             node,
+            writable,
         });
         spawn_watcher(&inner, events, dirty, peers);
         Self { inner }
@@ -235,6 +342,13 @@ impl AlbumStore for DocsAlbum {
     async fn add_items(&self, items: Vec<SharedItem>) -> Result<()> {
         let now = self.inner.clock.now_ms();
         let mut core = self.inner.core.lock().await;
+        let have = core.state.item_count();
+        let fresh = items.iter().filter(|i| !core.state.has_item(&i.id)).count();
+        if have + fresh > MAX_ALBUM_ITEMS {
+            return Err(StoreError::Invalid(format!(
+                "a shared album holds at most {MAX_ALBUM_ITEMS} photos"
+            )));
+        }
         let effect = core.state.add_items(&items, now)?;
         for t in &effect.touched {
             if let Some(entry) = core.state.entry(t) {
@@ -269,6 +383,11 @@ impl AlbumStore for DocsAlbum {
         let core = self.inner.core.lock().await;
         if core.state.my_role() != Some(MemberRole::Owner) {
             return Err(StoreError::ReadOnly);
+        }
+        if core.state.members().len() >= MAX_ALBUM_MEMBERS {
+            return Err(StoreError::Invalid(format!(
+                "a shared album has at most {MAX_ALBUM_MEMBERS} members"
+            )));
         }
         // The capability *is* the bearer secret: viewers get a read-only namespace key.
         let mode = if role == MemberRole::Viewer {

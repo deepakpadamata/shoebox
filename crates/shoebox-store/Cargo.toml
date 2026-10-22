@@ -13,13 +13,22 @@ shoebox-node.workspace = true
 shoebox-store-loro.workspace = true
 shoebox-store-docs.workspace = true
 async-trait.workspace = true
+anyhow.workspace = true
+blake3.workspace = true
+getrandom = "0.3"
+iroh.workspace = true
+futures.workspace = true
+hex.workspace = true
+postcard.workspace = true
+serde.workspace = true
+serde_json = "1"
+tokio.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 shoebox-testkit.workspace = true
 shoebox-core = { workspace = true, features = ["testing"] }
-tokio.workspace = true
 tempfile.workspace = true
-hex.workspace = true
 iroh-blobs.workspace = true
 xtask = { path = "../../xtask" }
 bytes.workspace = true

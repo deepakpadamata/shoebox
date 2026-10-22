@@ -39,6 +39,9 @@ pub const PING_ALPN: &[u8] = b"shoebox/ping/0";
 pub const PAIR_ALPN: &[u8] = b"shoebox/pair/0";
 /// ALPN of the root-key recovery handshake (M2-02/A-060). Open to devices that are not listed.
 pub const RECOVER_ALPN: &[u8] = b"shoebox/recover/0";
+/// ALPN a shared-album joiner uses to present its invitation to the inviter (M5). Open to
+/// devices that are not listed.
+pub const ALBUM_ALPN: &[u8] = b"shoebox/album/0";
 /// ALPN of the rotation notice push (M2-03b).
 pub const ROTATE_ALPN: &[u8] = b"shoebox/rotate/0";
 /// ALPN of the Loro library-store sync protocol (handler plugged in by `shoebox-store-loro`).
@@ -187,6 +190,9 @@ struct PeerTracker {
     /// When set, only these peers may connect (the library's valid device list, M2-03);
     /// [`PAIR_ALPN`] stays open so new devices can be paired.
     allowed: Arc<Mutex<Option<HashSet<EndpointId>>>>,
+    /// Members of shared albums (M5): outside the device list, so the only library-side thing
+    /// they may do is fetch blobs (whose hashes they know from the album).
+    album_peers: Arc<Mutex<HashSet<EndpointId>>>,
     conns: Arc<Mutex<HashMap<EndpointId, Vec<WeakConnectionHandle>>>>,
     /// Last time a connection with the peer was established or closed.
     last_seen: Arc<Mutex<HashMap<EndpointId, Instant>>>,
@@ -199,6 +205,7 @@ impl PeerTracker {
             open: Default::default(),
             blocked: Default::default(),
             allowed: Default::default(),
+            album_peers: Default::default(),
             conns: Default::default(),
             last_seen: Default::default(),
         }
@@ -214,9 +221,22 @@ impl PeerTracker {
             return true;
         }
         match &*self.allowed.lock().unwrap() {
-            Some(allowed) => !allowed.contains(id) && alpn != PAIR_ALPN && alpn != RECOVER_ALPN,
+            Some(allowed) => !allowed.contains(id) && !self.open_to_outsiders(id, alpn),
             None => false,
         }
+    }
+
+    /// What a peer outside the device list may still do. Pairing and recovery are how devices
+    /// get in. Namespace sync and gossip are guarded by the namespace capability, which only
+    /// shared albums use. Blob transfer is open only to members of a shared album.
+    fn open_to_outsiders(&self, id: &EndpointId, alpn: &[u8]) -> bool {
+        alpn == PAIR_ALPN
+            || alpn == RECOVER_ALPN
+            || alpn == ALBUM_ALPN
+            || alpn == crate::doc_digest::DOC_DIGEST_ALPN
+            || alpn == DOCS_ALPN
+            || alpn == GOSSIP_ALPN
+            || (alpn == BLOBS_ALPN && self.album_peers.lock().unwrap().contains(id))
     }
 
     fn set_allowed(&self, allowed: Option<HashSet<EndpointId>>) {
@@ -227,14 +247,22 @@ impl PeerTracker {
             if allowed.contains(id) {
                 return true;
             }
+            let mut keep = false;
             for conn in list.iter().filter_map(WeakConnectionHandle::upgrade) {
-                // Pairing connections of not-yet-listed devices are left alone.
-                if conn.alpn() != PAIR_ALPN && conn.alpn() != RECOVER_ALPN {
+                // Pairing connections of not-yet-listed devices, and what shared albums need,
+                // are left alone.
+                if self.open_to_outsiders(id, conn.alpn()) {
+                    keep = true;
+                } else {
                     conn.close(1u32.into(), b"not in the device list");
                 }
             }
-            false
+            keep
         });
+    }
+
+    fn set_album_peers(&self, ids: HashSet<EndpointId>) {
+        *self.album_peers.lock().unwrap() = ids;
     }
 
     fn block(&self, id: EndpointId) {
@@ -343,6 +371,7 @@ struct Inner {
     loro_slot: crate::ext::ExtSlot,
     rotate_slot: crate::ext::ExtSlot,
     recover_slot: crate::ext::ExtSlot,
+    album_slot: crate::ext::ExtSlot,
     /// Most recent measured round-trip time per peer.
     rtts: Mutex<HashMap<EndpointId, Duration>>,
 }
@@ -384,6 +413,7 @@ impl Node {
         let loro_slot = crate::ext::ExtSlot::default();
         let rotate_slot = crate::ext::ExtSlot::default();
         let recover_slot = crate::ext::ExtSlot::default();
+        let album_slot = crate::ext::ExtSlot::default();
         let id = secret.public();
         let span = info_span!("node", id = %id.fmt_short(), name = %config.name);
         async move {
@@ -454,6 +484,7 @@ impl Node {
                 .accept(DOCS_ALPN, docs.clone())
                 .accept(PING_ALPN, Ping)
                 .accept(RECOVER_ALPN, crate::ext::ExtProtocol(recover_slot.clone()))
+                .accept(ALBUM_ALPN, crate::ext::ExtProtocol(album_slot.clone()))
                 .accept(ROTATE_ALPN, crate::ext::ExtProtocol(rotate_slot.clone()))
                 .accept(LORO_ALPN, crate::ext::ExtProtocol(loro_slot.clone()))
                 .accept(
@@ -488,6 +519,7 @@ impl Node {
                     loro_slot,
                     rotate_slot,
                     recover_slot,
+                    album_slot,
                     rtts: Mutex::new(HashMap::new()),
                 }),
             })
@@ -512,6 +544,11 @@ impl Node {
     /// Where a library node registers its rotation-notice handler.
     pub(crate) fn rotate_slot(&self) -> &crate::ext::ExtSlot {
         &self.inner.rotate_slot
+    }
+
+    /// Where the shared-album manager registers its invitation handler.
+    pub fn album_slot(&self) -> &crate::ext::ExtSlot {
+        &self.inner.album_slot
     }
 
     /// Where the Loro backend registers its connection handler.
@@ -582,6 +619,12 @@ impl Node {
 
     /// Only let `allowed` connect (and close other connections), or lift the restriction with
     /// `None`. The pairing protocol stays reachable by everyone.
+    /// The members of this device's shared albums: they may fetch blobs although they are not
+    /// in the library's device list. Replaces the previous set; takes effect on new connections.
+    pub fn set_album_peers(&self, ids: HashSet<EndpointId>) {
+        self.inner.tracker.set_album_peers(ids);
+    }
+
     pub fn set_allowed_peers(&self, allowed: Option<HashSet<EndpointId>>) {
         self.inner.tracker.set_allowed(allowed);
     }

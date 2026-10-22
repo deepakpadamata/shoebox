@@ -17,6 +17,11 @@ See [docs/05-prototype-plan.md](docs/05-prototype-plan.md) §1. In short: `crate
 `apps/` are binaries, `tools/` and `xtask/` are developer tooling, `examples/` are throwaway spikes.
 `shoebox-core` has no async runtime and no iroh dependency.
 
+## Fixtures
+
+`cargo xtask fixtures --preset small|medium|large` generates a synthetic photo corpus; `cargo xtask samples`
+regenerates the checked-in sample files. See [fixtures/README.md](fixtures/README.md).
+
 ## Licensing
 
 - Library crates (`crates/*`, `tools/*`, `xtask`, `examples/*`): `Apache-2.0 OR MIT` (`LICENSE-APACHE`, `LICENSE-MIT`).

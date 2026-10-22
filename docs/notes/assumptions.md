@@ -72,3 +72,15 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   `conformance::run(&harness)` from any executor; `shoebox-store-mem` ships `MemHarness` behind its `testing`
   feature, so its own test is three lines. Sanity-checked by mutating the mem backend (broken add-wins, thumbs
   counted as copies, HLC ignored in holdings merge): the suite failed each time.
+- **A-023 · M0-08** · Real HEIC/RAW/MP4 samples with third-party licenses would have to be downloaded, so the checked-in
+  set is **generated from scratch** by `cargo xtask samples` (CC0). HEIC comes from `heif-enc`, video from `ffmpeg`.
+  The RAW+JPEG pair's `.dng` is a *synthetic stand-in* (valid TIFF/DNG structure, not decodable by macOS ImageIO), good
+  for pairing/extension logic only. **Follow-up for review:** swap in a real, permissively licensed DNG before M1-04
+  tests RAW decoding.
+- **A-024 · M0-08** · The corpus is tiny JPEGs (48–80 px) so 10k photos generate in <1 s and fit in ~42 MB. Duplicate
+  rate is a fixed 5%; seeds are deterministic (SplitMix64). In metadata-only mode (`large`), hashes are stand-ins
+  derived from the content seed and `size` is 0. `cargo xtask` is an alias for a *release* build of `xtask`.
+- **A-025 · M0-01/M0-08** · The `hello-sync` spike ran on loopback with `MemoryLookup` only: relay, NAT traversal and
+  real mDNS behaviour are *not* verified yet (M1-09 / M6-01).
+- **A-026 · M0-08** · `jpeg-encoder` (xtask only) is `(MIT OR Apache-2.0) AND IJG`; IJG is permissive but needs
+  attribution in shipped binaries, so `deny.toml` carries a per-crate exception instead of allowing IJG globally.

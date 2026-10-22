@@ -24,6 +24,13 @@ allow = [
 ]
 unused-allowed-license = "allow"
 
+# IJG is permissive but requires attribution in shipped binaries. jpeg-encoder is used only by the
+# developer-only `xtask` (synthetic fixtures), so allow it for that crate alone; if it ever enters a
+# shipped crate, add the attribution to the third-party notices first.
+[[licenses.exceptions]]
+crate = "jpeg-encoder"
+allow = ["IJG"]
+
 [licenses.private]
 # Our own workspace crates (publish = false) are not license-checked here; apps/* are AGPL by design.
 ignore = true

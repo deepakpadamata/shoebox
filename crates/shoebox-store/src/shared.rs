@@ -182,6 +182,20 @@ pub fn item_blob(item: &SharedItem, kind: BlobKind) -> Blake3Hash {
     }
 }
 
+/// The registry holds the keys to the albums (and the invitations' secrets): only this user.
+fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)?.write_all(bytes)?;
+    Ok(())
+}
+
 fn read_registry(path: &Path) -> Result<RegFile> {
     match std::fs::read(path) {
         Ok(b) => serde_json::from_slice(&b).context("reading shared-albums.json"),
@@ -250,22 +264,7 @@ impl SharedAlbums {
     }
 
     fn save(&self) -> Result<()> {
-        let albums: Vec<Reg> = self
-            .inner
-            .entries
-            .lock()
-            .unwrap()
-            .values()
-            .map(|e| e.reg.lock().unwrap().clone())
-            .collect();
-        let tmp = self.inner.path.with_extension("json.tmp");
-        let invites = self.inner.invites.lock().unwrap().clone();
-        std::fs::write(
-            &tmp,
-            serde_json::to_vec_pretty(&RegFile { albums, invites })?,
-        )?;
-        std::fs::rename(tmp, &self.inner.path)?;
-        Ok(())
+        self.inner.save_registry()
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<AlbumNotice> {
@@ -842,10 +841,7 @@ impl Inner {
             .collect();
         let invites = self.invites.lock().unwrap().clone();
         let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(
-            &tmp,
-            serde_json::to_vec_pretty(&RegFile { albums, invites })?,
-        )?;
+        write_private(&tmp, &serde_json::to_vec_pretty(&RegFile { albums, invites })?)?;
         std::fs::rename(tmp, &self.path)?;
         Ok(())
     }

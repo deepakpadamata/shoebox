@@ -162,6 +162,18 @@ async fn two_households_share_an_album_and_roles_are_enforced() {
     // Only owners invite.
     assert!(friend.invite(&id, MemberRole::Viewer, 1).await.is_err());
 
+    // The file with the keys to the albums is private to the user.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(dirs[0].path().join("shared-albums.json"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
     // Everything reopens after a restart.
     drop(owner);
     let again = open(&c, 0, dirs[0].path(), false).await;

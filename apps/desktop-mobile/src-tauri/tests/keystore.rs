@@ -102,3 +102,31 @@ async fn an_app_with_a_keystore_has_a_stable_identity_and_no_key_file_in_its_dat
         Some(32)
     );
 }
+
+#[test]
+fn migrating_from_the_file_store_keeps_the_identity_and_wipes_the_file() {
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (files, keystore) = (FileStore::new(a.path()), FileStore::new(b.path()));
+    let secret = files.load_or_create("endpoint-key").unwrap();
+    assert!(
+        desktop_mobile::keystore::migrate_from_files(&files, &keystore, "endpoint-key").unwrap()
+    );
+    assert_eq!(
+        keystore.load("endpoint-key").unwrap(),
+        Some(secret),
+        "same identity"
+    );
+    assert!(
+        files_named_key(a.path()).is_empty(),
+        "no secret left in the old place"
+    );
+    assert!(
+        !desktop_mobile::keystore::migrate_from_files(&files, &keystore, "endpoint-key").unwrap()
+    );
+    // A different key already in the keystore is never overwritten.
+    files.store("endpoint-key", &[1u8; 32]).unwrap();
+    assert!(
+        desktop_mobile::keystore::migrate_from_files(&files, &keystore, "endpoint-key").is_err()
+    );
+    assert_eq!(keystore.load("endpoint-key").unwrap(), Some(secret));
+}

@@ -27,7 +27,11 @@ impl AppCore {
         let devices = ln.store().device_list().await?;
         // Members this device was never given an address for (it invited them, they dialled in)
         // are looked up by id; the node remembers how they reached it.
-        for d in devices.devices.iter().filter(|d| !d.revoked && d.device != ln.device()) {
+        for d in devices
+            .devices
+            .iter()
+            .filter(|d| !d.revoked && d.device != ln.device())
+        {
             if !ln.peers().contains(&d.device) {
                 let _ = ln.add_peer(shoebox_core::store::PeerAddr::id_only(d.device));
             }

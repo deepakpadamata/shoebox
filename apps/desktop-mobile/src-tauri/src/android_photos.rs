@@ -75,6 +75,56 @@ fn permission(state: &str) -> Permission {
     }
 }
 
+/// Device secrets wrapped by the Android Keystore (M4-02).
+#[derive(Debug)]
+pub struct AndroidKeystore(pub PluginHandle<Wry>);
+
+#[derive(Deserialize)]
+struct SecretReply {
+    hex: Option<String>,
+}
+
+impl crate::keystore::SecretStore for AndroidKeystore {
+    fn load(&self, name: &str) -> Result<Option<[u8; 32]>> {
+        let r: SecretReply = self
+            .0
+            .run_mobile_plugin("secretLoad", json!({ "name": name }))
+            .map_err(|e| anyhow!("{e}"))?;
+        match r.hex {
+            None => Ok(None),
+            Some(h) => {
+                Ok(Some(hex::decode(h)?.try_into().map_err(|_| {
+                    anyhow!("the stored secret has the wrong length")
+                })?))
+            }
+        }
+    }
+
+    fn store(&self, name: &str, secret: &[u8; 32]) -> Result<()> {
+        self.0
+            .run_mobile_plugin::<serde_json::Value>(
+                "secretStore",
+                json!({ "name": name, "hex": hex::encode(secret) }),
+            )
+            .map(|_| ())
+            .map_err(|e| anyhow!("{e}"))
+    }
+
+    fn load_or_create(&self, name: &str) -> Result<[u8; 32]> {
+        if let Some(s) = self.load(name)? {
+            return Ok(s);
+        }
+        let mut s = [0u8; 32];
+        getrandom::fill(&mut s).expect("operating system randomness");
+        self.store(name, &s)?;
+        Ok(s)
+    }
+
+    fn describe(&self) -> String {
+        "the Android Keystore".into()
+    }
+}
+
 impl PhotoSource for AndroidPhotoSource {
     fn permission(&self) -> BoxFuture<'_, Result<Permission>> {
         Box::pin(async move {

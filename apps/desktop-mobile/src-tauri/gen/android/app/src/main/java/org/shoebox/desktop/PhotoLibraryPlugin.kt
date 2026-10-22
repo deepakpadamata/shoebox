@@ -21,7 +21,14 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import java.io.File
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 /**
  * The camera roll for the backup pipeline (M4-04): permission state, an incremental MediaStore
@@ -136,6 +143,57 @@ class PhotoLibraryPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve(JSObject().put("path", out.absolutePath))
         } catch (e: Exception) {
             invoke.reject("cannot read asset: ${e.message}")
+        }
+    }
+
+    // ---- device secrets (M4-02): wrapped by a non-exportable Android Keystore key ----
+
+    private fun wrappingKey(): SecretKey {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (ks.getKey("shoebox-wrap", null) as? SecretKey)?.let { return it }
+        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        gen.init(
+            KeyGenParameterSpec.Builder("shoebox-wrap", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+        )
+        return gen.generateKey()
+    }
+
+    private fun secretFile(name: String) =
+        File(File(activity.filesDir, "keystore").apply { mkdirs() }, "$name.bin")
+
+    /** The secret called `name` as hex, or absent. Stored only as ciphertext (IV ++ AES-GCM). */
+    @Command
+    fun secretLoad(invoke: Invoke) {
+        try {
+            val name = invoke.getArgs().getString("name") ?: return invoke.reject("missing name")
+            val f = secretFile(name)
+            if (!f.exists()) return invoke.resolve(JSObject())
+            val blob = f.readBytes()
+            val c = Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.DECRYPT_MODE, wrappingKey(), GCMParameterSpec(128, blob.copyOfRange(0, 12)))
+            val plain = c.doFinal(blob, 12, blob.size - 12)
+            invoke.resolve(JSObject().put("hex", plain.joinToString("") { "%02x".format(it) }))
+        } catch (e: Exception) {
+            invoke.reject("cannot read the secret: ${e.message}")
+        }
+    }
+
+    @Command
+    fun secretStore(invoke: Invoke) {
+        try {
+            val name = invoke.getArgs().getString("name") ?: return invoke.reject("missing name")
+            val hex = invoke.getArgs().getString("hex") ?: return invoke.reject("missing value")
+            val plain = ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+            val c = Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.ENCRYPT_MODE, wrappingKey())
+            secretFile(name).writeBytes(c.iv + c.doFinal(plain))
+            invoke.resolve(JSObject())
+        } catch (e: Exception) {
+            invoke.reject("cannot store the secret: ${e.message}")
         }
     }
 

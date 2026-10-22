@@ -88,7 +88,26 @@ async fn serve_blob(
 
 /// The platform keystore when there is one (and there is a key from an earlier run to move into
 /// it), a file otherwise (with a warning).
-fn secret_store(data_dir: &std::path::Path) -> Arc<dyn SecretStore> {
+fn secret_store(app: &tauri::AppHandle, data_dir: &std::path::Path) -> Arc<dyn SecretStore> {
+    #[cfg(target_os = "android")]
+    {
+        let store: Arc<dyn SecretStore> = Arc::new(crate::android_photos::AndroidKeystore(
+            app.state::<crate::android_photos::PhotoLibrary>().0.clone(),
+        ));
+        // Keys written by earlier builds (a key file under node/, or the file store) move into
+        // the keystore, so the device keeps its identity.
+        if let Err(e) = migrate_file_key(&data_dir.join("node"), store.as_ref(), "endpoint-key") {
+            tracing::warn!("could not move the device key into the keystore: {e:#}");
+        }
+        let files = FileStore::new(data_dir.join("secrets"));
+        if let Err(e) = crate::keystore::migrate_from_files(&files, store.as_ref(), "endpoint-key")
+        {
+            tracing::warn!("could not move the device key into the keystore: {e:#}");
+        }
+        return store;
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = app;
     #[cfg(all(feature = "keyring", desktop))]
     {
         let store = crate::keystore::KeyringStore::new("org.shoebox.desktop");
@@ -151,7 +170,7 @@ pub fn run() {
             }
             app.manage(lock);
             let opts = AppOptions {
-                secrets: Some(secret_store(&data_dir)),
+                secrets: Some(secret_store(app.handle(), &data_dir)),
                 ..AppOptions::default()
             };
             let core = tauri::async_runtime::block_on(AppCore::open(&data_dir, opts))?;

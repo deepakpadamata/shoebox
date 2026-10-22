@@ -42,6 +42,36 @@ impl FileStore {
     }
 }
 
+impl FileStore {
+    /// Overwrite and delete a stored secret.
+    pub fn wipe(&self, name: &str) -> Result<()> {
+        let path = self.path(name);
+        if path.exists() {
+            std::fs::write(&path, [0u8; 32])?;
+            std::fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+}
+
+/// Move a secret from the file store into a real keystore and wipe the file (a device that ran
+/// before the keystore existed keeps its identity). Never replaces a different key that is
+/// already in the keystore.
+pub fn migrate_from_files(files: &FileStore, to: &dyn SecretStore, name: &str) -> Result<bool> {
+    let Some(secret) = files.load(name)? else {
+        return Ok(false);
+    };
+    match to.load(name)? {
+        Some(existing) if existing != secret => {
+            bail!("the keystore already holds a different device key; not overwriting it")
+        }
+        Some(_) => {}
+        None => to.store(name, &secret)?,
+    }
+    files.wipe(name)?;
+    Ok(true)
+}
+
 impl SecretStore for FileStore {
     fn load(&self, name: &str) -> Result<Option<[u8; 32]>> {
         match std::fs::read(self.path(name)) {

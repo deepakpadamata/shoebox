@@ -140,13 +140,13 @@ async fn albums_are_shared_without_location_saved_and_followed() {
 
     // Ben saves one into his library; saving twice is harmless.
     assert_eq!(
-        b.shared_save(&album.id, &[stripped.id.clone()])
+        b.shared_save(&album.id, std::slice::from_ref(&stripped.id))
             .await
             .unwrap(),
         1
     );
     assert_eq!(
-        b.shared_save(&album.id, &[stripped.id.clone()])
+        b.shared_save(&album.id, std::slice::from_ref(&stripped.id))
             .await
             .unwrap(),
         1

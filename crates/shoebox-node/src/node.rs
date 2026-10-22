@@ -63,6 +63,11 @@ pub enum NodeEvent {
         peer: EndpointId,
         phase: crate::sync::SyncPhase,
     },
+    /// A device of the library came online or went offline (from the presence topic).
+    PresenceChanged {
+        device: shoebox_core::ids::EndpointId,
+        online: bool,
+    },
     /// Progress of an import run (counts of files processed so far, by outcome).
     ImportProgress {
         done: usize,

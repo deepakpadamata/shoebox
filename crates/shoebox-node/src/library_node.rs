@@ -29,7 +29,9 @@ pub(crate) struct Inner<L: LibraryStore> {
     pub peers: Mutex<HashMap<EndpointId, PeerState>>,
     pub nudge: mpsc::UnboundedSender<EndpointId>,
     pub sync_config: SyncConfig,
-    cap: Mutex<Option<LibraryCapability>>,
+    pub(crate) cap: Mutex<Option<LibraryCapability>>,
+    pub(crate) presence: Mutex<Option<crate::presence::PresenceState>>,
+    pub(crate) devices: Mutex<HashMap<EndpointId, crate::presence::DeviceRecord>>,
 }
 
 pub struct LibraryNode<L: LibraryStore> {
@@ -72,6 +74,8 @@ impl<L: LibraryStore> LibraryNode<L> {
                 nudge,
                 sync_config: sync,
                 cap: Mutex::new(None),
+                presence: Mutex::new(None),
+                devices: Mutex::new(HashMap::new()),
             }),
         };
         ln.start_sync_manager(nudge_rx);

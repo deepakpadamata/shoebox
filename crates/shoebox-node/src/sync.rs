@@ -86,6 +86,7 @@ impl<L: LibraryStore> LibraryNode<L> {
             .entry(id)
             .or_insert_with(|| PeerState::new(addr));
         let _ = self.inner.nudge.send(id);
+        self.presence_join(&id);
         Ok(())
     }
 

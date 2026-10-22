@@ -184,6 +184,10 @@ impl<L: LibraryStore> LibraryNode<L> {
             }
         }
         self.publish_holdings(held).await?;
+        if !report.imported.is_empty() {
+            // Best effort: peers also sync on their own schedule.
+            let _ = self.announce_new_items(report.imported.len() as u32).await;
+        }
         Ok(report)
     }
 

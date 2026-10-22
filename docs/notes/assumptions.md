@@ -151,3 +151,7 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   (private/link-local/loopback → LAN, other IPs → Direct, else Relay) and reports the last ping RTT and last connection time.
   mDNS between two nodes on this machine is tested; **not verified:** with the internet physically unplugged, and the manual
   "relay → direct after hole punching" check (needs two real networks).
+- **A-045 · M1-10** · Presence is per library: topic = blake3(library id ‖ root key), so read-only and write devices share it and other libraries
+  do not. Messages are unauthenticated in M1 (signed with device certs in M2). Defaults: heartbeat 10 s, offline after 35 s (the issue's
+  budget is 60 s). A `NewItems` nudge makes the receiver sync with the announcing device (only if it is a known library peer); imports announce
+  automatically. `start_presence` must be called explicitly after `with_capability`.

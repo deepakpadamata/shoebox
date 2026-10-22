@@ -7,6 +7,7 @@ mod import;
 mod keys;
 mod library_node;
 mod node;
+mod presence;
 mod sync;
 mod ticket;
 
@@ -19,5 +20,6 @@ pub use library_node::LibraryNode;
 pub use node::{
     classify_addrs, Node, NodeEvent, NodeEvents, PathKind, PeerAddr, PeerInfo, PING_ALPN,
 };
+pub use presence::{DeviceStatus, PresenceConfig};
 pub use sync::{SyncConfig, SyncPhase};
 pub use ticket::{LibraryTicket, TicketError};

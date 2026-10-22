@@ -68,11 +68,12 @@ pub(crate) fn core_hash(h: Hash) -> Blake3Hash {
 #[derive(Clone)]
 pub struct BlobStore {
     store: FsStore,
+    activity: crate::activity::Activity,
 }
 
 impl BlobStore {
-    pub(crate) fn new(store: FsStore) -> Self {
-        Self { store }
+    pub(crate) fn new(store: FsStore, activity: crate::activity::Activity) -> Self {
+        Self { store, activity }
     }
 
     /// The underlying iroh-blobs store (for protocols and low-level access).
@@ -94,6 +95,7 @@ impl BlobStore {
 
     /// Store `data` and protect it. Returns its BLAKE3 hash.
     pub async fn add_bytes(&self, data: impl Into<Bytes>, why: Protection) -> Result<Blake3Hash> {
+        self.activity.touch();
         let temp = self
             .store
             .blobs()
@@ -114,6 +116,7 @@ impl BlobStore {
         mode: ImportMode,
         why: Protection,
     ) -> Result<Blake3Hash> {
+        self.activity.touch();
         let path = std::path::absolute(path)?;
         if !path.is_file() {
             bail!("{} is not a file", path.display());
@@ -195,6 +198,24 @@ impl BlobStore {
             .await
             .map_err(|e| anyhow!("untagging {hash}: {e}"))?;
         Ok(())
+    }
+
+    /// Every blob this device holds on behalf of the library (those with a `lib/` protection).
+    pub async fn library_protected(&self) -> Result<Vec<Blake3Hash>> {
+        let mut out = vec![];
+        let mut tags = self.store.tags().list_prefix("lib/").await?;
+        while let Some(tag) = tags.next().await {
+            let tag = tag?;
+            let name = String::from_utf8_lossy(tag.name.as_ref()).to_string();
+            if let Some(hex) = name.strip_prefix("lib/") {
+                if let Ok(bytes) = ::hex::decode(hex) {
+                    if let Ok(arr) = <[u8; 32]>::try_from(bytes.as_slice()) {
+                        out.push(Blake3Hash(arr));
+                    }
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// Every protection currently holding `hash`, sorted (Library, Pin, then albums).

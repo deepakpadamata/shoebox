@@ -198,6 +198,8 @@ impl<L: LibraryStore> LibraryNode<L> {
         opts: &ImportOptions,
         held: &mut Vec<(Blake3Hash, BlobKind)>,
     ) -> Result<Outcome> {
+        // A blob is protected before its record exists; keep reconcile from releasing it meanwhile.
+        let _ingesting = self.inner.ingest.read().await;
         let blobs = self.node().blobs();
         let store = self.store();
         let id = r.hash;

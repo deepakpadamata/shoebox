@@ -266,6 +266,20 @@ async fn a_partly_downloaded_blob_resumes_without_refetching_what_it_has() {
     // Node 1 already has the first half (as if a transfer had been interrupted there).
     let ih = iroh_blobs::Hash::from_bytes(big_hash.0);
     let half = 16 * 1024 * 1024u64;
+    // An interrupted fetch leaves the partial blob protected (the fetcher does this itself after a
+    // failed attempt); hold it here too, since the testkit runs blob GC every 200 ms. Taken *before* the partial data
+    // exists so there is no window in which GC could remove it.
+    let _partial_protection = nodes[1]
+        .node()
+        .blobs()
+        .raw()
+        .tags()
+        .temp_tag(iroh_blobs::HashAndFormat {
+            hash: ih,
+            format: iroh_blobs::BlobFormat::Raw,
+        })
+        .await
+        .unwrap();
     let bao = nodes[0]
         .node()
         .blobs()

@@ -11,7 +11,9 @@ const WAIT: Duration = Duration::from_secs(20);
 
 async fn open(dir: &tempfile::TempDir, name: &str) -> Node {
     let cfg = NodeConfig::local_only(dir.path().join(name), name)
-        .with_gc_interval(Duration::from_millis(100));
+        .with_gc_interval(Duration::from_millis(100))
+        // GC steps aside while the node is busy; these tests add blobs and then wait for GC.
+        .with_gc_quiet(Duration::from_millis(150));
     Node::open(cfg).await.expect("node opens")
 }
 

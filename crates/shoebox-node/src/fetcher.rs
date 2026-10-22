@@ -22,6 +22,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Notify, Semaphore};
 use tracing::{debug, warn};
 
+/// How long a part-downloaded blob stays protected from GC while waiting for a retry.
+const PARTIAL_HOLD: Duration = Duration::from_secs(3600);
+
 /// Blobs fetched per batch before their holdings are published.
 const CHUNK: usize = 64;
 
@@ -58,6 +61,9 @@ pub(crate) struct FetcherState {
     pub running: AtomicBool,
     /// Blobs with a download in flight or cooling down after a failure.
     busy: Mutex<HashMap<Blake3Hash, Option<Instant>>>,
+    /// Temp tags on blobs whose download failed part-way, so blob GC does not discard the
+    /// progress before the retry (kept until the blob completes or [`PARTIAL_HOLD`] passes).
+    partials: Mutex<HashMap<Blake3Hash, (Instant, iroh_blobs::api::TempTag)>>,
 }
 
 fn path_quality(kind: &crate::node::PathKind) -> PathQuality {
@@ -178,6 +184,19 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 
     // ---------- fetching ----------
+
+    /// Keep a temp tag on `hash` so a part-downloaded blob survives GC until the retry.
+    async fn hold_partial(&self, hash: Blake3Hash) {
+        let hf = iroh_blobs::HashAndFormat {
+            hash: crate::blobs::iroh_hash(&hash),
+            format: iroh_blobs::BlobFormat::Raw,
+        };
+        if let Ok(tag) = self.node().blobs().raw().tags().temp_tag(hf).await {
+            let mut partials = self.inner.fetcher.partials.lock().unwrap();
+            partials.insert(hash, (Instant::now(), tag));
+            partials.retain(|_, (since, _)| since.elapsed() < PARTIAL_HOLD);
+        }
+    }
 
     /// Devices (other than this one) that hold `blob`, best first.
     async fn ranked_holders(&self, blob: &Blake3Hash) -> Result<Vec<EndpointId>> {
@@ -311,6 +330,7 @@ async fn fetch_loop<L: LibraryStore>(
                     match ln2.fetch_from_holders(&hash).await {
                         Ok(_) => {
                             ln2.inner.fetcher.busy.lock().unwrap().remove(&hash);
+                            ln2.inner.fetcher.partials.lock().unwrap().remove(&hash);
                             let pinned = ln2.node().config().pinned_originals;
                             if item.item.kind == BlobKind::Original
                                 && pinned.contains(&item.photo.to_string())
@@ -321,6 +341,7 @@ async fn fetch_loop<L: LibraryStore>(
                         }
                         Err(e) => {
                             debug!("fetch of {hash} failed: {e:#}");
+                            ln2.hold_partial(hash).await;
                             ln2.inner
                                 .fetcher
                                 .busy

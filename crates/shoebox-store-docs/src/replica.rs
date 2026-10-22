@@ -8,7 +8,7 @@ use iroh_docs::engine::LiveEvent;
 use iroh_docs::store::Query;
 use iroh_docs::AuthorId;
 use shoebox_node::Node;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
@@ -22,6 +22,8 @@ const CLOSE_PHASE_ERROR: &str = "Failed to close connection";
 
 /// Content that has been missing this long is fetched by us instead of waiting for iroh-docs.
 const FETCH_AFTER: Duration = Duration::from_millis(750);
+/// How long freshly written entry content stays protected from blob GC after the entry exists.
+const CONTENT_HOLD: Duration = Duration::from_secs(60);
 /// After a failed content fetch, wait this long before trying the same hash again.
 const FETCH_RETRY: Duration = Duration::from_secs(4);
 
@@ -39,6 +41,8 @@ pub struct Replica {
     fetching: Arc<Mutex<HashSet<Hash>>>,
     /// Signalled when something may have changed and a rescan is worthwhile.
     dirty: Arc<Notify>,
+    /// Temp tags protecting recently written entry content from blob GC (see [`Replica::put`]).
+    recent: VecDeque<(Instant, iroh_blobs::api::TempTag)>,
 }
 
 impl Replica {
@@ -52,6 +56,7 @@ impl Replica {
             missing_since: HashMap::new(),
             fetching: Default::default(),
             dirty: Arc::new(Notify::new()),
+            recent: VecDeque::new(),
         }
     }
 
@@ -76,6 +81,7 @@ impl Replica {
     /// Download content that iroh-docs failed to fetch (it tries once per sync run, and a later
     /// sync of an already-known entry does not ask again). Retries every few seconds.
     fn fetch_missing(&self, hashes: Vec<Hash>) {
+        self.node.note_activity();
         let peers: Vec<iroh::EndpointId> = self.peers.lock().unwrap().iter().copied().collect();
         if peers.is_empty() || hashes.is_empty() {
             return;
@@ -117,12 +123,38 @@ impl Replica {
     }
 
     /// Write `value` under `key` as this replica's author.
+    ///
+    /// The content blob is added by us and kept under a temp tag for [`CONTENT_HOLD`] after the
+    /// entry is inserted. Without that, blob GC can delete a just-written entry's content: GC
+    /// snapshots the hashes docs references, then sweeps, and an entry written in between is
+    /// neither in the snapshot nor tagged. (Reproduced with raw iroh-docs: ~0.3% of entries lost
+    /// their content on the writer under a 100 ms GC interval.)
     pub async fn put(&mut self, key: &str, value: Vec<u8>) -> Result<()> {
-        let hash = self
-            .doc
-            .set_bytes(self.author, key.as_bytes().to_vec(), value)
+        self.node.note_activity();
+        let len = value.len() as u64;
+        let tag = self
+            .node
+            .blobs()
+            .raw()
+            .blobs()
+            .add_bytes(value)
+            .temp_tag()
+            .await
+            .map_err(|e| anyhow!("storing content for {key}: {e}"))?;
+        let hash = tag.hash();
+        self.doc
+            .set_hash(self.author, key.as_bytes().to_vec(), hash, len)
             .await
             .map_err(|e| anyhow!("writing {key}: {e}"))?;
+        let now = Instant::now();
+        self.recent.push_back((now, tag));
+        while self
+            .recent
+            .front()
+            .is_some_and(|(t, _)| now.duration_since(*t) > CONTENT_HOLD)
+        {
+            self.recent.pop_front();
+        }
         self.known
             .insert((self.author, key.as_bytes().to_vec()), hash);
         Ok(())
@@ -130,6 +162,7 @@ impl Replica {
 
     /// Delete this author's entry for `key` (other authors' entries are untouched).
     pub async fn del(&mut self, key: &str) -> Result<()> {
+        self.node.note_activity();
         self.doc
             .del(self.author, key.as_bytes().to_vec())
             .await
@@ -142,6 +175,7 @@ impl Replica {
     /// already stored locally. Entries whose content has not arrived yet are returned by a later
     /// scan once it has.
     pub async fn scan(&mut self) -> Result<Scan> {
+        self.node.note_activity();
         let stream = self
             .doc
             .get_many(Query::all().build())

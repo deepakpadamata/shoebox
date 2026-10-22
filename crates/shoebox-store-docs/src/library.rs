@@ -311,6 +311,7 @@ impl LibraryStore for DocsLibrary {
         };
         // Do not hold the state lock while waiting on the network.
         let mut events = doc.subscribe().await.map_err(backend_err)?;
+        node.note_activity();
         crate::replica::sync_and_wait(&doc, &node, &mut events, target.clone())
             .await
             .map_err(|e| {

@@ -30,7 +30,11 @@ impl Cluster {
         let mut nodes = Vec::with_capacity(roles.len());
         for (i, role) in roles.iter().enumerate() {
             let mut cfg =
-                NodeConfig::local_only(dir.path().join(format!("node-{i}")), format!("node-{i}"));
+                NodeConfig::local_only(dir.path().join(format!("node-{i}")), format!("node-{i}"))
+                    // Tests need blob GC to happen within a test's lifetime.
+                    .with_gc_interval(std::time::Duration::from_millis(200))
+                    // ...but not while a node is busy (imports, fetches, syncs): see `Activity`.
+                    .with_gc_quiet(std::time::Duration::from_millis(400));
             cfg.role = *role;
             nodes.push(Node::open(cfg).await?);
         }

@@ -269,6 +269,7 @@ struct Inner {
     endpoint: Endpoint,
     router: Router,
     blobs: BlobStore,
+    activity: crate::activity::Activity,
     docs: Docs,
     gossip: Gossip,
     lookup: MemoryLookup,
@@ -329,7 +330,22 @@ impl Node {
             // GC reclaims every untagged blob; docs content hashes are protected through the
             // protect handler so metadata entries are never collected from under the library.
             let mut blob_opts = BlobOptions::new(&config.blobs_dir());
-            let (protect_handler, protect_cb) = ProtectCallbackHandler::new();
+            let (protect_handler, docs_cb) = ProtectCallbackHandler::new();
+            let activity = crate::activity::Activity::default();
+            // Skip a GC pass while the node is busy: GC can race with in-flight data.
+            let quiet = Duration::from_millis(config.gc_quiet_ms);
+            let guard_activity = activity.clone();
+            let protect_cb: iroh_blobs::store::ProtectCb = Arc::new(move |live| {
+                let docs_cb = docs_cb.clone();
+                let busy = guard_activity.busy_within(quiet);
+                Box::pin(async move {
+                    if busy {
+                        iroh_blobs::store::ProtectOutcome::Abort
+                    } else {
+                        docs_cb(live).await
+                    }
+                })
+            });
             blob_opts.gc = config.gc_interval_ms.map(|ms| GcConfig {
                 interval: Duration::from_millis(ms),
                 add_protected: Some(protect_cb),
@@ -337,7 +353,7 @@ impl Node {
             let raw_blobs = FsStore::load_with_opts(config.blobs_dir().join("blobs.db"), blob_opts)
                 .await
                 .map_err(|e| anyhow!("opening blob store: {e}"))?;
-            let blobs = BlobStore::new(raw_blobs);
+            let blobs = BlobStore::new(raw_blobs, activity.clone());
             let gossip = Gossip::builder().spawn(endpoint.clone());
             let docs_dir = config.store_dir().join("docs");
             std::fs::create_dir_all(&docs_dir)?;
@@ -365,6 +381,7 @@ impl Node {
                     endpoint,
                     router,
                     blobs,
+                    activity,
                     docs,
                     gossip,
                     lookup,
@@ -392,6 +409,11 @@ impl Node {
         let mut config = self.inner.config.lock().unwrap();
         f(&mut config);
         config.save()
+    }
+
+    /// Record that real work is happening, so blob GC steps aside (see [`crate::Activity`]).
+    pub fn note_activity(&self) {
+        self.inner.activity.touch();
     }
 
     pub(crate) fn emit(&self, event: NodeEvent) {
@@ -528,6 +550,7 @@ impl Node {
         hash: &Blake3Hash,
         why: Protection,
     ) -> Result<()> {
+        self.note_activity();
         if self.inner.blobs.has(hash).await? {
             self.inner.blobs.protect(hash, why).await?;
             return Ok(());
@@ -556,6 +579,7 @@ impl Node {
         while let Some(item) = futures::StreamExt::next(&mut progress).await {
             match item {
                 DownloadProgressItem::Progress(bytes) => {
+                    self.note_activity();
                     // Throttle: a large blob reports thousands of chunks; a UI wants a few updates.
                     if bytes >= last_reported + PROGRESS_STEP {
                         last_reported = bytes;

@@ -308,6 +308,7 @@ impl AlbumStore for DocsAlbum {
             (core.replica.doc.clone(), core.replica.node().clone())
         };
         let mut events = doc.subscribe().await.map_err(backend_err)?;
+        node.note_activity();
         crate::replica::sync_and_wait(&doc, &node, &mut events, target.clone())
             .await
             .map_err(|_| StoreError::Unreachable(peer.id))?;

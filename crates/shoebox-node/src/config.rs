@@ -29,6 +29,10 @@ pub struct NodeConfig {
     /// How often unprotected blobs are garbage-collected; `None` disables GC.
     #[serde(default = "default_gc_interval_ms")]
     pub gc_interval_ms: Option<u64>,
+    /// A GC pass is skipped if the node was busy (importing, fetching, syncing, writing) within
+    /// this many milliseconds, because blob GC can race with in-flight data.
+    #[serde(default = "default_gc_quiet_ms")]
+    pub gc_quiet_ms: u64,
     /// Folders imported automatically whenever files appear in them.
     #[serde(default)]
     pub watched_folders: Vec<PathBuf>,
@@ -39,6 +43,10 @@ pub struct NodeConfig {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_gc_quiet_ms() -> u64 {
+    30_000
 }
 
 fn default_gc_interval_ms() -> Option<u64> {
@@ -56,9 +64,16 @@ impl NodeConfig {
             // Off for tests and explicit local-only use: no multicast traffic, no cross-talk.
             mdns: false,
             gc_interval_ms: default_gc_interval_ms(),
+            gc_quiet_ms: default_gc_quiet_ms(),
             watched_folders: vec![],
             pinned_originals: vec![],
         }
+    }
+
+    /// How long the node must be idle before a GC pass is allowed to run.
+    pub fn with_gc_quiet(mut self, quiet: std::time::Duration) -> Self {
+        self.gc_quiet_ms = quiet.as_millis() as u64;
+        self
     }
 
     pub fn with_gc_interval(mut self, interval: std::time::Duration) -> Self {

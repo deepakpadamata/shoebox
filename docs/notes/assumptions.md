@@ -178,3 +178,19 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   "bytes available" (local + received) and requests only missing ranges, so resumption is verified by the first progress event starting at the
   already-held half (a 32 MB blob with its first 16 MB pre-imported). `missing_blobs` lists the whole library each pass (O(n) records cloned),
   fine for the prototype but a candidate for an incremental index at 100k+ photos (M1-15 will say).
+- **A-050 · M1-13** · Blob reclamation is *reconciliation*, not bookkeeping at purge time: a purge removes the record (on every device), so each device
+  independently releases its `lib/`+`pin/` protection on blobs that no live or soft-deleted record references and retracts the holdings; iroh-blobs'
+  periodic GC then deletes whatever has no protection left. This works however the record vanished (local purge, replicated purge marker, crash in
+  between) and leaves `album/<id>/<hash>` protections alone (the M5 shared-album hook; verified: an album-referenced preview survives the purge).
+  An `ingest` RwLock keeps a reconcile from releasing a blob whose record is not written yet. `start_maintenance` runs purge+reconcile hourly and
+  within a debounce (default 5 s) after any delete/purge change, on every device. A purge is performed by whichever device's clock passes the 30-day
+  mark first; markers are monotonic so concurrent purges agree.
+- **A-051 · M1-13** · Found while adding fast blob GC to the testkit: iroh-docs + iroh-blobs GC can delete a just-written entry's content on the
+  *writer* (raw iroh-docs, no networking, GC every 100 ms: 10 of 3000 entries lost their blob). The replica now writes content itself
+  (`add_bytes` + `set_hash`) and holds a temp tag for 60 s after the entry exists. The testkit clusters run GC every 200 ms, so every multi-node
+  test doubles as a regression test for this. Production GC defaults to every 5 min, which makes the race rarer but not impossible without the hold.
+- **A-052 · M1-13** · Blob GC is gated on node *activity*: the node records when it last imported, fetched, wrote blobs/docs entries or synced, and the
+  GC protect callback aborts a pass if that was within `gc_quiet_ms` (default 30 s; testkit 400 ms). iroh's snapshot-then-sweep GC can otherwise
+  delete blobs created or referenced mid-pass (reproduced as lost entry content and lost library records under a 200 ms GC). Also verified
+  experimentally: a *temp* tag keeps a **partial** blob alive through GC while held (a named tag does not), so a failed fetch now leaves a temp tag on
+  the partial blob for up to an hour to preserve progress for the retry (in-process only: after a restart GC discards partials).

@@ -22,9 +22,14 @@ tracing.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
 hex.workspace = true
+shoebox-media.workspace = true
+notify = "8"
 
 [dev-dependencies]
 tempfile.workspace = true
+shoebox-store-mem.workspace = true
+xtask = { path = "../../xtask" }
+serde_json = "1"
 
 [lints]
 workspace = true

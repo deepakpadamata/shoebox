@@ -13,6 +13,16 @@ pub struct Hlc {
     pub device: EndpointId,
 }
 
+impl Hlc {
+    /// Sorts before every real HLC. Initial register values of an imported photo use it so that
+    /// importing a file that another device already favorited or deleted never overrides those edits.
+    pub const GENESIS: Hlc = Hlc {
+        physical_ms: 0,
+        counter: 0,
+        device: EndpointId([0; 32]),
+    };
+}
+
 /// Per-device clock that issues strictly increasing [`Hlc`]s.
 #[derive(Clone, Debug)]
 pub struct HlcClock {

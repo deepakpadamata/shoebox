@@ -125,3 +125,14 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
 - **A-037 · infra** · The dev profile uses `debug = "line-tables-only"` (none for dependencies). Full debuginfo for the iroh stack
   grew `target/` to 13 GB and filled this machine's disk mid-session; the lean profile keeps it ≈2 GB. Reverse in the root `Cargo.toml`
   if you need full debuginfo for a dependency.
+- **A-038 · M1 ordering** · The dev CLI (M1-07) is implemented *after* M1-08…M1-13: its `join`, `peers`, `holdings` and `fetch`
+  commands and the demo script need sync, discovery, presence, holdings and the fetcher. Everything else follows the plan order.
+- **A-039 · M1-06** · The node-level orchestration lives in `shoebox_node::LibraryNode<L: LibraryStore>`, generic over the backend
+  (the docs backend depends on `shoebox-node`, so `Node` itself cannot own a store). Tests use the mem backend for speed.
+- **A-040 · M1-06** · Imported photos start with their `favorite`/`deleted_at` registers at `Hlc::GENESIS`, so importing a file another
+  device already favorited or deleted never overrides that edit. If a purge marker suppresses such a record, the import is retried
+  with fresh registers (a deliberate re-import of a purged photo). Videos use the original as preview/thumb until M3-10.
+  Analysis (hash + renditions) runs even for files already in the library, which keeps the pipeline simple but wastes work on
+  re-imports; a hash-only fast path is a possible optimisation. Hidden files and symlinks are skipped during folder walks.
+- **A-041 · M1-06** · Watched folders are debounced 400 ms after the last event, persisted in `config.toml` (kept across restarts even
+  when the caller passes a fresh `NodeConfig`), and rescanned on start so files that arrived while closed are imported.

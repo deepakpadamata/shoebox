@@ -24,6 +24,9 @@ pub struct NodeConfig {
     /// How often unprotected blobs are garbage-collected; `None` disables GC.
     #[serde(default = "default_gc_interval_ms")]
     pub gc_interval_ms: Option<u64>,
+    /// Folders imported automatically whenever files appear in them.
+    #[serde(default)]
+    pub watched_folders: Vec<PathBuf>,
 }
 
 fn default_gc_interval_ms() -> Option<u64> {
@@ -39,6 +42,7 @@ impl NodeConfig {
             role: Role::Keeper,
             relay: RelaySetting::Disabled,
             gc_interval_ms: default_gc_interval_ms(),
+            watched_folders: vec![],
         }
     }
 

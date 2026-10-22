@@ -57,6 +57,15 @@ pub enum NodeEvent {
         hash: Blake3Hash,
         from: EndpointId,
     },
+    /// Progress of an import run (counts of files processed so far, by outcome).
+    ImportProgress {
+        done: usize,
+        total: usize,
+        imported: usize,
+        duplicates: usize,
+        skipped: usize,
+        failed: usize,
+    },
 }
 
 /// A subscription to node events. A new subscriber always sees [`NodeEvent::Started`] first.
@@ -186,7 +195,7 @@ impl ProtocolHandler for Ping {
 }
 
 struct Inner {
-    config: NodeConfig,
+    config: Mutex<NodeConfig>,
     id: EndpointId,
     endpoint: Endpoint,
     router: Router,
@@ -206,8 +215,15 @@ pub struct Node {
 
 impl Node {
     /// Open (creating on first use) the node rooted at `config.data_dir`.
-    pub async fn open(config: NodeConfig) -> Result<Node> {
+    pub async fn open(mut config: NodeConfig) -> Result<Node> {
         config.ensure_dirs().context("creating data dir layout")?;
+        // Watched folders are state the app builds up at runtime, not something callers pass in:
+        // keep what an earlier run saved unless the caller supplied its own list.
+        if config.watched_folders.is_empty() {
+            if let Ok(saved) = NodeConfig::load(&config.data_dir) {
+                config.watched_folders = saved.watched_folders;
+            }
+        }
         config.save().context("writing config.toml")?;
         let secret = load_or_create_secret(&config.key_path())?;
         let id = secret.public();
@@ -258,7 +274,7 @@ impl Node {
             let _ = events.send(NodeEvent::Started { id });
             Ok(Node {
                 inner: Arc::new(Inner {
-                    config,
+                    config: Mutex::new(config),
                     id,
                     endpoint,
                     router,
@@ -279,8 +295,20 @@ impl Node {
         self.inner.id
     }
 
-    pub fn config(&self) -> &NodeConfig {
-        &self.inner.config
+    /// A snapshot of the current configuration.
+    pub fn config(&self) -> NodeConfig {
+        self.inner.config.lock().unwrap().clone()
+    }
+
+    /// Change the configuration and persist it to `config.toml`.
+    pub fn update_config(&self, f: impl FnOnce(&mut NodeConfig)) -> Result<()> {
+        let mut config = self.inner.config.lock().unwrap();
+        f(&mut config);
+        config.save()
+    }
+
+    pub(crate) fn emit(&self, event: NodeEvent) {
+        let _ = self.inner.events.send(event);
     }
 
     /// How other nodes can reach this one right now.

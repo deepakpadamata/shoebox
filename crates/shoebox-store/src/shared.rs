@@ -376,6 +376,7 @@ impl SharedAlbums {
             );
         }
         self.inner.present_invitation(&ticket).await?;
+        tracing::debug!("join: invitation accepted by the inviter");
         let album = self
             .inner
             .backend
@@ -388,7 +389,9 @@ impl SharedAlbums {
                 ),
                 other => anyhow!("{other}"),
             })?;
+        tracing::debug!("join: album opened");
         let _ = album.set_display_name(my_name).await;
+        tracing::debug!("join: name published");
         let id = album.meta().await?.id;
         let reg = Reg {
             album: id,

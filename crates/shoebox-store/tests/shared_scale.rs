@@ -12,6 +12,9 @@ use std::time::{Duration, Instant};
 #[ignore]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn album_sync_of_50k_items() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
     // Production-like nodes: blob GC every five minutes (the testkit's 200 ms GC walks every
     // docs record each time, which is not what a real device does).
     let dirs: Vec<_> = (0..2).map(|_| tempfile::tempdir().unwrap()).collect();

@@ -162,7 +162,7 @@ pub fn redact(line: &str, names: &[String]) -> String {
     for c in text.chars() {
         if is_sep(c) {
             if !tok.is_empty() {
-                out.push_str(&redact_token(&tok.trim_end_matches([':', '.']).to_string()));
+                out.push_str(&redact_token(tok.trim_end_matches([':', '.'])));
                 if tok.ends_with(':') {
                     out.push(':');
                 }

@@ -210,12 +210,15 @@ impl DocsBackend {
         let doc_ticket: DocTicket = postcard::from_bytes(&ticket.backend)
             .map_err(|e| StoreError::Invalid(format!("bad iroh-docs ticket: {e}")))?;
         let inviter = to_endpoint_addr(&ticket.inviter)?;
-        let (doc, mut events) = self
+        let (doc, events) = self
             .node
             .docs()
             .import_and_subscribe(doc_ticket)
             .await
             .map_err(|_| StoreError::Unreachable(ticket.inviter.id))?;
+        // Read events from the first moment: iroh-docs stops serving requests while a subscriber
+        // lets its queue fill, and a big album fills it at once.
+        let mut events = album::drained(events);
         // Only the album's own record is needed to open it: the photos stream in afterwards.
         replica::sync_until_key(
             &doc,
@@ -227,6 +230,7 @@ impl DocsBackend {
         )
         .await
         .map_err(|_| StoreError::Unreachable(ticket.inviter.id))?;
+        tracing::debug!("join: album record is here, reading the album");
         DocsAlbum::join(
             self.replica(doc).await?,
             ticket.role,

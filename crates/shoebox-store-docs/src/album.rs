@@ -152,7 +152,9 @@ impl DocsAlbum {
         inviter: EndpointId,
     ) -> Result<Self> {
         let events = drained(replica.doc.subscribe().await.map_err(backend_err)?);
+        tracing::debug!("join: first scan");
         let scanned = replica.scan().await.map_err(backend_err)?.entries;
+        tracing::debug!("join: first scan done with {} entries", scanned.len());
         let meta = scanned
             .iter()
             .find(|(k, _)| k == "meta")
@@ -333,7 +335,9 @@ impl DocsAlbum {
 /// stalls its whole engine when a subscriber stops reading, and the first scan of a big album
 /// (tens of thousands of entries arriving at once) takes long enough to fill them: the sync would
 /// wait on the scan and the scan on the sync.
-fn drained<S>(mut events: S) -> futures::channel::mpsc::UnboundedReceiver<anyhow::Result<LiveEvent>>
+pub(crate) fn drained<S>(
+    mut events: S,
+) -> futures::channel::mpsc::UnboundedReceiver<anyhow::Result<LiveEvent>>
 where
     S: futures::Stream<Item = anyhow::Result<LiveEvent>> + Unpin + Send + 'static,
 {

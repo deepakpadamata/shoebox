@@ -132,7 +132,7 @@ async fn dispatch(shared: &Arc<Shared>, cmd: &str, req: &Value) -> Result<Value>
             shared.save(&ticket)?;
             Ok(json!({ "library": hex::encode(grant.cap.library.0) }))
         }
-        "album" => crate::status::album(shared, &req).await,
+        "album" => crate::status::album(shared, req).await,
         "shutdown" => {
             let _ = shared.shutdown.send(true);
             Ok(json!({}))

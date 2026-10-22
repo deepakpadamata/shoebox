@@ -9,7 +9,7 @@ What has been measured, what has not, and what failed the acceptance criteria.
 | Library of 100,000 photos syncs to an empty device | 0.8 s (Loro); 500,000 in 6.8 s |
 | Disk for the library metadata | 60 MB at 100k, 303 MB at 500k per replica |
 | Timeline page / at-risk list at 100k | 22 µs / 16 ms |
-| Shared album of 50,000 photos | written in about a minute; a new member gets it through iroh-docs (see below) |
+| Shared album of 50,000 photos | written in about a minute; a new member has all 50,000 items 50 s after joining (see below) |
 | Interrupted download resumes | only the missing ranges are fetched again (`fetcher.rs: a_partly_downloaded_blob_resumes…`) |
 | Free-up, revocation, late keeper, disk full, clock skew | `failure-scenarios.md` |
 
@@ -40,4 +40,8 @@ What has been measured, what has not, and what failed the acceptance criteria.
 
 ## Album of 50,000 photos to a new member (M5-01 acceptance)
 
-`cargo test -p shoebox-store --test shared_scale -- --ignored --nocapture` (about three minutes).
+`cargo test -p shoebox-store --test shared_scale -- --ignored --nocapture` (about two minutes).
+
+Measured on the development laptop (loopback, release-like GC settings): the owner writes 50,000 items in
+about 55 s; a new member joins and holds all 50,000 items **50 s** after presenting the invitation
+(limit: 2 minutes). Most of that is waiting for the album's own record to arrive in iroh-docs' sync order.

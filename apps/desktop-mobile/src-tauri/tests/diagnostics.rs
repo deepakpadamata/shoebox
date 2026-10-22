@@ -13,7 +13,7 @@ async fn the_bundle_has_the_numbers_and_none_of_the_content() {
     core.create_library("Ana's laptop", "keeper").await.unwrap();
     let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/samples");
     let photo = samples.join("photo-gps.jpg").display().to_string();
-    core.import_paths(&[photo.clone()]).await.unwrap();
+    core.import_paths(std::slice::from_ref(&photo)).await.unwrap();
     core.create_album("Secret Party").await.unwrap();
     core.shared_create("Surprise Trip").await.unwrap();
     tracing::warn!(

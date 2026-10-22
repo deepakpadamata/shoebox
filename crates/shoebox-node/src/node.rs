@@ -748,9 +748,16 @@ impl Node {
         hash: &Blake3Hash,
         why: Protection,
     ) -> Result<()> {
+        self.download_blob(from, hash).await?;
+        self.inner.blobs.protect(hash, why).await?;
+        Ok(())
+    }
+
+    /// Download `hash` from `from` and verify it, without keeping it under any protection of its
+    /// own (for blobs something else already keeps alive, such as iroh-docs entry content).
+    pub async fn download_blob(&self, from: EndpointId, hash: &Blake3Hash) -> Result<()> {
         self.note_activity();
         if self.inner.blobs.has(hash).await? {
-            self.inner.blobs.protect(hash, why).await?;
             return Ok(());
         }
         // An in-flight download has no tag yet; hold a temp tag so GC cannot reap the partial or
@@ -809,7 +816,6 @@ impl Node {
                 from.fmt_short()
             );
         }
-        self.inner.blobs.protect(hash, why).await?;
         let _ = self
             .inner
             .events

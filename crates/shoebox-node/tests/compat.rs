@@ -11,7 +11,13 @@ use shoebox_node::{
 #[test]
 fn every_protocol_name_carries_a_version() {
     for alpn in [
-        LORO_ALPN, PAIR_ALPN, PING_ALPN, RECOVER_ALPN, ROTATE_ALPN, HAS_ALPN, ALBUM_ALPN,
+        LORO_ALPN,
+        PAIR_ALPN,
+        PING_ALPN,
+        RECOVER_ALPN,
+        ROTATE_ALPN,
+        HAS_ALPN,
+        ALBUM_ALPN,
         DOC_DIGEST_ALPN,
     ] {
         let s = std::str::from_utf8(alpn).unwrap();
@@ -25,12 +31,19 @@ fn every_protocol_name_carries_a_version() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_newer_protocol_version_is_refused_without_harm() {
     let dir = tempfile::tempdir().unwrap();
-    let a = Node::open(NodeConfig::local_only(dir.path().join("a"), "a")).await.unwrap();
-    let b = Node::open(NodeConfig::local_only(dir.path().join("b"), "b")).await.unwrap();
+    let a = Node::open(NodeConfig::local_only(dir.path().join("a"), "a"))
+        .await
+        .unwrap();
+    let b = Node::open(NodeConfig::local_only(dir.path().join("b"), "b"))
+        .await
+        .unwrap();
     b.add_peer_addr(a.addr());
     let to = a.addr();
     let newer = b.endpoint().connect(to.clone(), b"shoebox/loro/99").await;
-    assert!(newer.is_err(), "a protocol version nobody serves cannot be opened");
+    assert!(
+        newer.is_err(),
+        "a protocol version nobody serves cannot be opened"
+    );
     // The version we do serve still works afterwards.
     let ok = b.endpoint().connect(to, PING_ALPN).await;
     assert!(ok.is_ok(), "{:?}", ok.err());

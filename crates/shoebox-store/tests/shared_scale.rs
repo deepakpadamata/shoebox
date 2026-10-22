@@ -5,8 +5,8 @@ use shoebox_core::ids::Blake3Hash;
 use shoebox_core::model::*;
 use shoebox_core::store::*;
 use shoebox_core::Timestamp;
-use shoebox_store::SharedAlbums;
 use shoebox_node::{Node, NodeConfig};
+use shoebox_store::SharedAlbums;
 use std::time::{Duration, Instant};
 
 #[ignore]
@@ -15,12 +15,23 @@ async fn album_sync_of_50k_items() {
     // Production-like nodes: blob GC every five minutes (the testkit's 200 ms GC walks every
     // docs record each time, which is not what a real device does).
     let dirs: Vec<_> = (0..2).map(|_| tempfile::tempdir().unwrap()).collect();
-    let n0 = Node::open(NodeConfig::local_only(dirs[0].path().join("node"), "owner")).await.unwrap();
-    let n1 = Node::open(NodeConfig::local_only(dirs[1].path().join("node"), "friend")).await.unwrap();
+    let n0 = Node::open(NodeConfig::local_only(dirs[0].path().join("node"), "owner"))
+        .await
+        .unwrap();
+    let n1 = Node::open(NodeConfig::local_only(
+        dirs[1].path().join("node"),
+        "friend",
+    ))
+    .await
+    .unwrap();
     n0.add_peer_addr(n1.addr());
     n1.add_peer_addr(n0.addr());
-    let owner = SharedAlbums::open(n0.clone(), dirs[0].path(), false).await.unwrap();
-    let friend = SharedAlbums::open(n1.clone(), dirs[1].path(), false).await.unwrap();
+    let owner = SharedAlbums::open(n0.clone(), dirs[0].path(), false)
+        .await
+        .unwrap();
+    let friend = SharedAlbums::open(n1.clone(), dirs[1].path(), false)
+        .await
+        .unwrap();
     let id = owner.create("Big", "owner").await.unwrap();
     let items: Vec<SharedItem> = (0..50_000u32)
         .map(|n| {
@@ -52,7 +63,11 @@ async fn album_sync_of_50k_items() {
     friend.join(&text, "friend").await.unwrap();
     let album = friend.album(&id).unwrap();
     while album.item_count().await < 50_000 {
-        assert!(joined.elapsed() < Duration::from_secs(120), "{} items after 2 min", album.item_count().await);
+        assert!(
+            joined.elapsed() < Duration::from_secs(120),
+            "{} items after 2 min",
+            album.item_count().await
+        );
         friend.sync_now(&id).await.ok();
         tokio::time::sleep(Duration::from_millis(200)).await;
     }

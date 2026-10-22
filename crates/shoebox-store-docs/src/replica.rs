@@ -296,8 +296,17 @@ where
         .await
         .map_err(|e| anyhow!("starting sync: {e}"))?;
     let deadline = Instant::now() + timeout;
+    let mut asked = Instant::now();
     loop {
         node.note_activity();
+        // iroh-docs ignores a request while a sync with the same peer is running, and that sync
+        // may have started before the data we want existed: ask again now and then.
+        if asked.elapsed() >= Duration::from_secs(2) {
+            asked = Instant::now();
+            doc.start_sync(vec![peer.clone()])
+                .await
+                .map_err(|e| anyhow!("starting sync: {e}"))?;
+        }
         let stream = doc
             .get_many(Query::key_exact(key).build())
             .await
@@ -307,6 +316,12 @@ where
             let entry = entry.map_err(|e| anyhow!("reading entry: {e}"))?;
             let hash = shoebox_core::Blake3Hash(*entry.content_hash().as_bytes());
             if node.blobs().has(&hash).await? {
+                return Ok(());
+            }
+            // The entry came from some peer, but docs fetches its content only from the peers
+            // that announced it, and one of those may be a member that does not know us yet. The
+            // peer we are joining through does: ask it directly.
+            if node.download_blob(peer.id, &hash).await.is_ok() {
                 return Ok(());
             }
         }

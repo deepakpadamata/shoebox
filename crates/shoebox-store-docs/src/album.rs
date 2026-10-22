@@ -90,7 +90,7 @@ impl DocsAlbum {
         clock: Arc<dyn Clock>,
         node: shoebox_node::Node,
     ) -> Result<Self> {
-        let events = replica.doc.subscribe().await.map_err(backend_err)?;
+        let events = drained(replica.doc.subscribe().await.map_err(backend_err)?);
         let id = meta.id;
         let mut state = AlbumState::new(meta, device);
         state.install_member(MemberRole::Owner, clock.now_ms());
@@ -118,7 +118,7 @@ impl DocsAlbum {
         clock: Arc<dyn Clock>,
         node: shoebox_node::Node,
     ) -> Result<Self> {
-        let events = replica.doc.subscribe().await.map_err(backend_err)?;
+        let events = drained(replica.doc.subscribe().await.map_err(backend_err)?);
         let id = old.meta().id;
         let mut state = old.fork_for(device);
         state.drop_members(exclude);
@@ -151,7 +151,7 @@ impl DocsAlbum {
         node: shoebox_node::Node,
         inviter: EndpointId,
     ) -> Result<Self> {
-        let events = replica.doc.subscribe().await.map_err(backend_err)?;
+        let events = drained(replica.doc.subscribe().await.map_err(backend_err)?);
         let scanned = replica.scan().await.map_err(backend_err)?.entries;
         let meta = scanned
             .iter()
@@ -203,7 +203,7 @@ impl DocsAlbum {
         node: shoebox_node::Node,
         writable: bool,
     ) -> Result<Self> {
-        let events = replica.doc.subscribe().await.map_err(backend_err)?;
+        let events = drained(replica.doc.subscribe().await.map_err(backend_err)?);
         let scanned = replica.scan().await.map_err(backend_err)?.entries;
         let meta = scanned
             .iter()
@@ -327,6 +327,25 @@ impl DocsAlbum {
         spawn_watcher(&inner, events, dirty, peers);
         Self { inner }
     }
+}
+
+/// Start emptying `events` right away. iroh-docs hands events over through bounded channels and
+/// stalls its whole engine when a subscriber stops reading, and the first scan of a big album
+/// (tens of thousands of entries arriving at once) takes long enough to fill them: the sync would
+/// wait on the scan and the scan on the sync.
+fn drained<S>(mut events: S) -> futures::channel::mpsc::UnboundedReceiver<anyhow::Result<LiveEvent>>
+where
+    S: futures::Stream<Item = anyhow::Result<LiveEvent>> + Unpin + Send + 'static,
+{
+    let (tx, rx) = unbounded();
+    tokio::spawn(async move {
+        while let Some(event) = events.next().await {
+            if tx.unbounded_send(event).is_err() {
+                break;
+            }
+        }
+    });
+    rx
 }
 
 fn spawn_watcher<S>(

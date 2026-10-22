@@ -189,9 +189,15 @@ mod tests {
     fn a_fresh_directory_is_stamped_and_left_alone() {
         let d = tempfile::tempdir().unwrap();
         let r = ensure_format(d.path()).unwrap();
-        assert_eq!((r.from, r.to, r.backup), (CURRENT_FORMAT, CURRENT_FORMAT, None));
+        assert_eq!(
+            (r.from, r.to, r.backup),
+            (CURRENT_FORMAT, CURRENT_FORMAT, None)
+        );
         assert_eq!(read_marker(d.path()).unwrap(), Some(CURRENT_FORMAT));
-        assert!(ensure_format(d.path()).unwrap().steps.is_empty(), "idempotent");
+        assert!(
+            ensure_format(d.path()).unwrap().steps.is_empty(),
+            "idempotent"
+        );
     }
 
     #[test]
@@ -205,7 +211,10 @@ mod tests {
         let b = r.backup.expect("a backup was made");
         assert_eq!(std::fs::read(b.join("app.json")).unwrap(), b"{\"keep\":1}");
         assert!(!b.join("blobs").exists(), "blob stores are not copied");
-        assert_eq!(std::fs::read(d.path().join("app.json")).unwrap(), b"{\"keep\":1}");
+        assert_eq!(
+            std::fs::read(d.path().join("app.json")).unwrap(),
+            b"{\"keep\":1}"
+        );
     }
 
     #[test]
@@ -214,7 +223,10 @@ mod tests {
         stamp(d.path(), CURRENT_FORMAT + 1).unwrap();
         std::fs::write(d.path().join("app.json"), b"new").unwrap();
         let err = ensure_format(d.path()).unwrap_err().to_string();
-        assert!(err.contains("newer version") && err.contains("nothing was changed"), "{err}");
+        assert!(
+            err.contains("newer version") && err.contains("nothing was changed"),
+            "{err}"
+        );
         assert_eq!(read_marker(d.path()).unwrap(), Some(CURRENT_FORMAT + 1));
         assert!(!d.path().join("backups").exists());
     }
@@ -242,12 +254,21 @@ mod tests {
             step(2, "breaks", |_| bail!("disk on fire")),
         ];
         let err = format!("{:#}", ensure_format_with(d.path(), 3, &bad).unwrap_err());
-        assert!(err.contains("disk on fire") && err.contains("backups"), "{err}");
-        assert_eq!(read_marker(d.path()).unwrap(), Some(2), "resumes from the failed step");
+        assert!(
+            err.contains("disk on fire") && err.contains("backups"),
+            "{err}"
+        );
+        assert_eq!(
+            read_marker(d.path()).unwrap(),
+            Some(2),
+            "resumes from the failed step"
+        );
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("app.json"), b"v3").unwrap();
         stamp(d.path(), 3).unwrap();
-        let missing = ensure_format_with(d.path(), 5, &bad).unwrap_err().to_string();
+        let missing = ensure_format_with(d.path(), 5, &bad)
+            .unwrap_err()
+            .to_string();
         assert!(missing.contains("no migration from layout 3"), "{missing}");
     }
 }

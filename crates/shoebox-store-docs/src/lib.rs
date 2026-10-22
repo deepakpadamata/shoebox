@@ -15,7 +15,7 @@ pub use shoebox_node::{from_endpoint_addr, from_iroh_id, to_endpoint_addr, to_ir
 use async_trait::async_trait;
 use iroh_docs::api::protocol::{AddrInfoOptions, ShareMode};
 use iroh_docs::{Capability as DocsCapability, DocTicket};
-use replica::{sync_and_wait, Replica};
+use replica::Replica;
 use shoebox_core::clock::Clock;
 use shoebox_core::ids::EndpointId;
 use shoebox_core::store::*;

@@ -57,7 +57,9 @@ async fn all_copy_counts(nodes: &[&LibraryNode<Library>], ids: &[Blake3Hash]) ->
 /// A keeper that joins after the library has history gets all of it, and the counts agree.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_keeper_that_joins_late_catches_up_and_counts_are_truthful() {
-    let c = Cluster::with_roles(&[Role::Phone, Role::Phone, Role::Keeper]).await.unwrap();
+    let c = Cluster::with_roles(&[Role::Phone, Role::Phone, Role::Keeper])
+        .await
+        .unwrap();
     let nodes = library_nodes_auto(&c).await;
     c.take_offline(2);
     let report = nodes[0]
@@ -66,9 +68,11 @@ async fn a_keeper_that_joins_late_catches_up_and_counts_are_truthful() {
         .unwrap();
     let ids = report.imported.clone();
     assert_eq!(ids.len(), 3);
-    wait_until(Duration::from_secs(30), || async { photos_of(nodes[1].store().as_ref()).await.len() == 3 })
-        .await
-        .unwrap();
+    wait_until(Duration::from_secs(30), || async {
+        photos_of(nodes[1].store().as_ref()).await.len() == 3
+    })
+    .await
+    .unwrap();
     nodes[1].store().set_favorite(&ids[0], true).await.unwrap();
     nodes[1].store().mark_deleted(&ids[2]).await.unwrap();
     // Before the keeper is back, only the importer holds the originals: two copies are missing.
@@ -76,14 +80,22 @@ async fn a_keeper_that_joins_late_catches_up_and_counts_are_truthful() {
 
     c.bring_online(2);
     nodes[2].start_fetcher(fast_fetch());
-    wait_until(Duration::from_secs(60), || async { converged(&nodes).await })
-        .await
-        .expect("the late keeper converges with everyone");
+    wait_until(Duration::from_secs(60), || async {
+        converged(&nodes).await
+    })
+    .await
+    .expect("the late keeper converges with everyone");
     let live = [ids[0], ids[1]];
-    wait_until(Duration::from_secs(60), || async { originals_on(&nodes[2], &live).await == 2 })
-        .await
-        .expect("the keeper fetches the originals that are still wanted");
-    assert_eq!(originals_on(&nodes[0], &ids).await, 3, "the importer lost nothing");
+    wait_until(Duration::from_secs(60), || async {
+        originals_on(&nodes[2], &live).await == 2
+    })
+    .await
+    .expect("the keeper fetches the originals that are still wanted");
+    assert_eq!(
+        originals_on(&nodes[0], &ids).await,
+        3,
+        "the importer lost nothing"
+    );
     // Counts: every live photo is on the importer and the keeper, and everyone agrees.
     wait_until(Duration::from_secs(60), || async {
         let rows = all_copy_counts(&[&nodes[0], &nodes[1], &nodes[2]], &live).await;
@@ -91,7 +103,10 @@ async fn a_keeper_that_joins_late_catches_up_and_counts_are_truthful() {
     })
     .await
     .expect("every device reports two copies");
-    assert!(photos_of(nodes[2].store().as_ref()).await.iter().any(|p| p.id == ids[0] && p.favorite.value));
+    assert!(photos_of(nodes[2].store().as_ref())
+        .await
+        .iter()
+        .any(|p| p.id == ids[0] && p.favorite.value));
     c.shutdown().await;
 }
 
@@ -99,33 +114,49 @@ async fn a_keeper_that_joins_late_catches_up_and_counts_are_truthful() {
 /// device, and the blob stays until maintenance reclaims it (the 30-day window).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_delete_racing_a_favorite_converges_and_loses_no_original() {
-    let c = Cluster::with_roles(&[Role::Keeper, Role::Keeper]).await.unwrap();
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Keeper])
+        .await
+        .unwrap();
     let nodes = library_nodes_auto(&c).await;
     let report = nodes[0]
         .import_paths(&samples()[..1], ImportOptions::default())
         .await
         .unwrap();
     let id = report.imported[0];
-    wait_until(Duration::from_secs(30), || async { nodes[1].store().photo(&id).await.unwrap().is_some() })
-        .await
-        .unwrap();
+    wait_until(Duration::from_secs(30), || async {
+        nodes[1].store().photo(&id).await.unwrap().is_some()
+    })
+    .await
+    .unwrap();
     c.partition(0, 1);
     c.clock().advance(1_000);
     nodes[0].store().mark_deleted(&id).await.unwrap();
     nodes[1].store().set_favorite(&id, true).await.unwrap();
     c.heal();
     wait_until(Duration::from_secs(40), || async {
-        let (a, b) = (nodes[0].store().photo(&id).await.unwrap().unwrap(), nodes[1].store().photo(&id).await.unwrap().unwrap());
+        let (a, b) = (
+            nodes[0].store().photo(&id).await.unwrap().unwrap(),
+            nodes[1].store().photo(&id).await.unwrap().unwrap(),
+        );
         a == b && a.is_deleted() && a.favorite.value
     })
     .await
     .expect("both devices end with the photo deleted and favorited");
     let p = nodes[0].store().photo(&id).await.unwrap().unwrap();
-    assert!(nodes[0].node().blobs().has(&p.original.hash).await.unwrap(), "the original is still on disk");
+    assert!(
+        nodes[0].node().blobs().has(&p.original.hash).await.unwrap(),
+        "the original is still on disk"
+    );
     // Restoring brings it back everywhere.
     nodes[1].store().restore_photo(&id).await.unwrap();
     wait_until(Duration::from_secs(40), || async {
-        !nodes[0].store().photo(&id).await.unwrap().unwrap().is_deleted()
+        !nodes[0]
+            .store()
+            .photo(&id)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_deleted()
     })
     .await
     .unwrap();
@@ -150,22 +181,29 @@ async fn revoking_a_device_mid_transfer_keeps_every_original_and_stops_counting_
     nodes[1].start_fetcher(fast_fetch());
     nodes[2].start_fetcher(fast_fetch());
     // Let the second keeper get going, then cut the first one off (as an admin).
-    wait_until(Duration::from_secs(30), || async { photos_of(nodes[1].store().as_ref()).await.len() == 3 })
-        .await
-        .unwrap();
+    wait_until(Duration::from_secs(30), || async {
+        photos_of(nodes[1].store().as_ref()).await.len() == 3
+    })
+    .await
+    .unwrap();
     c.clock().advance(1_000);
     nodes[0]
         .revoke_device(&core_id(&c, 1))
         .await
         .expect("node 0 is an admin");
     // The other keeper still completes; the importer lost nothing.
-    wait_until(Duration::from_secs(90), || async { originals_on(&nodes[2], &ids).await == 3 })
-        .await
-        .expect("the remaining keeper gets every original");
+    wait_until(Duration::from_secs(90), || async {
+        originals_on(&nodes[2], &ids).await == 3
+    })
+    .await
+    .expect("the remaining keeper gets every original");
     assert_eq!(originals_on(&nodes[0], &ids).await, 3);
     // Truth in the counts: importer + remaining keeper = 2, the revoked device's copies are not counted.
     wait_until(Duration::from_secs(60), || async {
-        all_copy_counts(&[&nodes[0], &nodes[2]], &ids).await.iter().all(|r| r.iter().all(|n| *n == 2))
+        all_copy_counts(&[&nodes[0], &nodes[2]], &ids)
+            .await
+            .iter()
+            .all(|r| r.iter().all(|n| *n == 2))
     })
     .await
     .expect("two copies, not three");
@@ -178,16 +216,20 @@ async fn revoking_a_device_mid_transfer_keeps_every_original_and_stops_counting_
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_keeper_with_a_full_disk_reports_only_what_it_holds_and_recovers() {
     use std::os::unix::fs::PermissionsExt;
-    let c = Cluster::with_roles(&[Role::Phone, Role::Keeper]).await.unwrap();
+    let c = Cluster::with_roles(&[Role::Phone, Role::Keeper])
+        .await
+        .unwrap();
     let nodes = library_nodes_auto(&c).await;
     let report = nodes[0]
         .import_paths(&samples(), ImportOptions::default())
         .await
         .unwrap();
     let ids = report.imported.clone();
-    wait_until(Duration::from_secs(30), || async { photos_of(nodes[1].store().as_ref()).await.len() == 3 })
-        .await
-        .unwrap();
+    wait_until(Duration::from_secs(30), || async {
+        photos_of(nodes[1].store().as_ref()).await.len() == 3
+    })
+    .await
+    .unwrap();
 
     // "Disk full": the blob store directories stop accepting new files.
     fn walk(dir: &Path, mode: u32) {
@@ -210,15 +252,23 @@ async fn a_keeper_with_a_full_disk_reports_only_what_it_holds_and_recovers() {
         counts.iter().filter(|n| **n >= 2).count() <= during,
         "copies announced ({counts:?}) must not exceed originals really held ({during})"
     );
-    assert_eq!(originals_on(&nodes[0], &ids).await, 3, "the importer lost nothing");
+    assert_eq!(
+        originals_on(&nodes[0], &ids).await,
+        3,
+        "the importer lost nothing"
+    );
 
     // Space comes back: the keeper catches up on its own.
     walk(&blobs_dir, 0o755);
-    wait_until(Duration::from_secs(90), || async { originals_on(&nodes[1], &ids).await == 3 })
-        .await
-        .unwrap_or_else(|_| panic!("keeper never recovered (had {before}, then {during})"));
+    wait_until(Duration::from_secs(90), || async {
+        originals_on(&nodes[1], &ids).await == 3
+    })
+    .await
+    .unwrap_or_else(|_| panic!("keeper never recovered (had {before}, then {during})"));
     wait_until(Duration::from_secs(60), || async {
-        all_copy_counts(&[&nodes[0]], &ids).await[0].iter().all(|n| *n == 2)
+        all_copy_counts(&[&nodes[0]], &ids).await[0]
+            .iter()
+            .all(|n| *n == 2)
     })
     .await
     .expect("counts catch up once the originals are really there");
@@ -234,17 +284,36 @@ async fn a_clock_a_day_off_changes_who_wins_but_never_loses_anything() {
     let day = 86_400_000u64;
     let base = c.clock().now_ms() + 5 * day;
     let (ahead, behind) = (ManualClock::new(base + day), ManualClock::new(base - day));
-    let (rig, libs) = rig_with_clocks(&c, KeyPair::generate(), &[Role::Keeper; 2], &[ahead.clone(), behind.clone()]).await;
+    let (rig, libs) = rig_with_clocks(
+        &c,
+        KeyPair::generate(),
+        &[Role::Keeper; 2],
+        &[ahead.clone(), behind.clone()],
+    )
+    .await;
     let mut libs = libs.into_iter();
-    let n0 = LibraryNode::with_sync_config(c.node(0).clone(), std::sync::Arc::new(libs.next().unwrap()), ahead.clone(), fast()).with_capability(rig.cap.clone());
-    let n1 = LibraryNode::with_sync_config(c.node(1).clone(), std::sync::Arc::new(libs.next().unwrap()), behind.clone(), fast()).with_capability(rig.cap.clone());
+    let n0 = LibraryNode::with_sync_config(
+        c.node(0).clone(),
+        std::sync::Arc::new(libs.next().unwrap()),
+        ahead.clone(),
+        fast(),
+    )
+    .with_capability(rig.cap.clone());
+    let n1 = LibraryNode::with_sync_config(
+        c.node(1).clone(),
+        std::sync::Arc::new(libs.next().unwrap()),
+        behind.clone(),
+        fast(),
+    )
+    .with_capability(rig.cap.clone());
     n0.add_peer(peer_addr(&c, 1)).unwrap();
     n1.add_peer(peer_addr(&c, 0)).unwrap();
 
     n1.store().upsert_photo(photo(1, 5)).await.unwrap();
     n0.store().upsert_photo(photo(2, 6)).await.unwrap();
     wait_until(Duration::from_secs(30), || async {
-        photos_of(n0.store().as_ref()).await.len() == 2 && photos_of(n1.store().as_ref()).await.len() == 2
+        photos_of(n0.store().as_ref()).await.len() == 2
+            && photos_of(n1.store().as_ref()).await.len() == 2
     })
     .await
     .expect("photos from both clocks arrive on both devices");
@@ -253,20 +322,35 @@ async fn a_clock_a_day_off_changes_who_wins_but_never_loses_anything() {
     behind.advance(60_000);
     n1.store().set_favorite(&hash(1), false).await.unwrap();
     wait_until(Duration::from_secs(30), || async {
-        let (a, b) = (n0.store().photo(&hash(1)).await.unwrap().unwrap(), n1.store().photo(&hash(1)).await.unwrap().unwrap());
+        let (a, b) = (
+            n0.store().photo(&hash(1)).await.unwrap().unwrap(),
+            n1.store().photo(&hash(1)).await.unwrap().unwrap(),
+        );
         a.favorite.value == b.favorite.value
     })
     .await
     .expect("both agree");
     assert!(
-        n1.store().photo(&hash(1)).await.unwrap().unwrap().favorite.value,
+        n1.store()
+            .photo(&hash(1))
+            .await
+            .unwrap()
+            .unwrap()
+            .favorite
+            .value,
         "the clock that is ahead wins until the other catches up (documented trade-off)"
     );
     // Later, once the slow clock has passed, its edits win again.
     behind.advance(2 * day + 1_000);
     n1.store().set_favorite(&hash(1), false).await.unwrap();
     wait_until(Duration::from_secs(30), || async {
-        !n0.store().photo(&hash(1)).await.unwrap().unwrap().favorite.value
+        !n0.store()
+            .photo(&hash(1))
+            .await
+            .unwrap()
+            .unwrap()
+            .favorite
+            .value
     })
     .await
     .expect("edits made after the clocks agree again win");

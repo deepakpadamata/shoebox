@@ -57,6 +57,9 @@ async fn item(node: &Node, seed: u8) -> SharedItem {
 }
 
 async fn open(c: &Cluster, i: usize, dir: &std::path::Path, bg: bool) -> SharedAlbums {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
     SharedAlbums::open(c.node(i).clone(), dir, bg)
         .await
         .unwrap()

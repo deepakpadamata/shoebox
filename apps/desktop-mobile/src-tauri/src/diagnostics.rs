@@ -72,9 +72,9 @@ pub fn init_logging() {
 }
 
 const FILE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "heic", "heif", "avif", "gif", "webp", "tif", "tiff", "dng", "cr2", "cr3",
-    "nef", "arw", "raf", "orf", "rw2", "mov", "mp4", "m4v", "avi", "mkv", "3gp", "pdf", "txt",
-    "json", "zip",
+    "jpg", "jpeg", "png", "heic", "heif", "avif", "gif", "webp", "tif", "tiff", "dng", "cr2",
+    "cr3", "nef", "arw", "raf", "orf", "rw2", "mov", "mp4", "m4v", "avi", "mkv", "3gp", "pdf",
+    "txt", "json", "zip",
 ];
 
 fn is_coordinate(tok: &str) -> bool {
@@ -93,7 +93,10 @@ fn is_coordinate(tok: &str) -> bool {
 
 fn redact_token(tok: &str) -> String {
     let lower = tok.to_ascii_lowercase();
-    if lower.starts_with("shoebox-") || lower.contains("shoebox-pair") || lower.contains("shoebox-album") {
+    if lower.starts_with("shoebox-")
+        || lower.contains("shoebox-pair")
+        || lower.contains("shoebox-album")
+    {
         return "<ticket>".into();
     }
     if tok.contains('@') {
@@ -101,8 +104,10 @@ fn redact_token(tok: &str) -> String {
     }
     // A path: several segments, a home shortcut, or a drive letter.
     let segments = tok.split(['/', '\\']).filter(|s| !s.is_empty()).count();
-    let drive = tok.len() > 2 && tok.as_bytes()[1] == b':' && matches!(tok.as_bytes()[2], b'\\' | b'/');
-    if (tok.contains('/') || tok.contains('\\')) && (segments >= 2 || tok.starts_with('/') || tok.starts_with('~'))
+    let drive =
+        tok.len() > 2 && tok.as_bytes()[1] == b':' && matches!(tok.as_bytes()[2], b'\\' | b'/');
+    if (tok.contains('/') || tok.contains('\\'))
+        && (segments >= 2 || tok.starts_with('/') || tok.starts_with('~'))
         || drive
         || tok.starts_with('~')
     {
@@ -147,7 +152,13 @@ pub fn redact(line: &str, names: &[String]) -> String {
     // Then token by token, keeping the punctuation that separates tokens.
     let mut out = String::new();
     let mut tok = String::new();
-    let is_sep = |c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | '=' | '<' | '>');
+    let is_sep = |c: char| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | '=' | '<' | '>'
+            )
+    };
     for c in text.chars() {
         if is_sep(c) {
             if !tok.is_empty() {
@@ -182,7 +193,10 @@ impl AppCore {
             .map(|d| d.as_secs())
             .unwrap_or(0);
         let _ = writeln!(out, "Shoebox diagnostics");
-        let _ = writeln!(out, "No photos, names, places or file names are in this report.\n");
+        let _ = writeln!(
+            out,
+            "No photos, names, places or file names are in this report.\n"
+        );
         let _ = writeln!(out, "generated (unix seconds): {now}");
         let _ = writeln!(
             out,
@@ -218,10 +232,16 @@ impl AppCore {
                     d.role,
                     d.online,
                     d.path,
-                    d.latency_ms.map(|l| l.to_string()).unwrap_or_else(|| "-".into()),
+                    d.latency_ms
+                        .map(|l| l.to_string())
+                        .unwrap_or_else(|| "-".into()),
                     d.admin,
                     d.revoked,
-                    if d.is_this_device { " (this device)" } else { "" }
+                    if d.is_this_device {
+                        " (this device)"
+                    } else {
+                        ""
+                    }
                 );
             }
             for a in self.albums().await? {
@@ -281,16 +301,40 @@ mod tests {
     #[test]
     fn paths_files_coordinates_names_and_tickets_are_removed() {
         let cases = [
-            ("imported /Users/ana/Pictures/Lisbon/IMG_0042.jpg ok", "imported <path> ok"),
-            ("failed to read C:\\Users\\Ana\\Pictures\\a.heic: denied", "failed to read <path>: denied"),
-            ("skipping IMG_0042.JPG (unsupported)", "skipping <file> (unsupported)"),
-            ("exif gps=38.7223,-9.1393 found", "exif gps=<coordinate>,<coordinate> found"),
-            ("lat 38.722300 lon -9.139300", "lat <coordinate> lon <coordinate>"),
-            ("device Ana's laptop joined album Lisbon trip", "device <name> joined album <name>"),
-            ("invite SHOEBOX-ALBUM1-BBM3QE3R7FMA3 used", "invite <ticket> used"),
+            (
+                "imported /Users/ana/Pictures/Lisbon/IMG_0042.jpg ok",
+                "imported <path> ok",
+            ),
+            (
+                "failed to read C:\\Users\\Ana\\Pictures\\a.heic: denied",
+                "failed to read <path>: denied",
+            ),
+            (
+                "skipping IMG_0042.JPG (unsupported)",
+                "skipping <file> (unsupported)",
+            ),
+            (
+                "exif gps=38.7223,-9.1393 found",
+                "exif gps=<coordinate>,<coordinate> found",
+            ),
+            (
+                "lat 38.722300 lon -9.139300",
+                "lat <coordinate> lon <coordinate>",
+            ),
+            (
+                "device Ana's laptop joined album Lisbon trip",
+                "device <name> joined album <name>",
+            ),
+            (
+                "invite SHOEBOX-ALBUM1-BBM3QE3R7FMA3 used",
+                "invite <ticket> used",
+            ),
             ("pair shoebox-pair1abcdef", "pair <ticket>"),
             ("mail ana@example.org sent", "mail <email> sent"),
-            ("peer 316ed71554316ed71554316ed71554316ed71554316ed71554316ed715543210 up", "peer 316ed715… up"),
+            (
+                "peer 316ed71554316ed71554316ed71554316ed71554316ed71554316ed715543210 up",
+                "peer 316ed715… up",
+            ),
         ];
         for (input, want) in cases {
             assert_eq!(redact(input, &names()), want, "from `{input}`");
@@ -301,14 +345,19 @@ mod tests {
     fn ordinary_diagnostic_text_survives() {
         let line = "sync with 316ed715 finished in 0.0123s (3 changes, version 1.2.3)";
         assert_eq!(redact(line, &names()), line);
-        assert_eq!(redact("2 photos at risk, retry in 10s", &names()), "2 photos at risk, retry in 10s");
+        assert_eq!(
+            redact("2 photos at risk, retry in 10s", &names()),
+            "2 photos at risk, retry in 10s"
+        );
     }
 
     #[test]
     fn a_hostile_log_line_comes_out_clean() {
         let line = r#"error: open("/home/ben/photos/2024/birthday party.mov") at 51.501364, -0.141890 for Ben <ben@x.io> album=Lisbon trip token=shoebox-pair1deadbeef"#;
         let clean = redact(line, &names());
-        for leak in ["/home", "birthday", ".mov", "51.50", "0.1418", "Ben", "ben@", "Lisbon", "deadbeef"] {
+        for leak in [
+            "/home", "birthday", ".mov", "51.50", "0.1418", "Ben", "ben@", "Lisbon", "deadbeef",
+        ] {
             assert!(!clean.contains(leak), "`{leak}` leaked: {clean}");
         }
     }

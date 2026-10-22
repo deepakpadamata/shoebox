@@ -53,6 +53,10 @@ struct Reg {
     /// Devices that joined as viewers (they cannot write their own membership entry).
     #[serde(default)]
     viewers: Vec<EndpointId>,
+    /// Devices that presented one of our invitations, whatever role: peers to sync with even
+    /// before their own membership entry has reached us.
+    #[serde(default)]
+    joined: Vec<EndpointId>,
     /// After the album moved to a new space (a member was removed): who has not yet been told
     /// where it went, and whether they may write.
     #[serde(default)]
@@ -307,6 +311,7 @@ impl SharedAlbums {
             location: "ask".into(),
             seen_ms: self.inner.clock.now_ms(),
             viewers: vec![],
+            joined: vec![],
             pending_moves: vec![],
         };
         self.install(Arc::new(album), reg);
@@ -393,6 +398,7 @@ impl SharedAlbums {
             location: "ask".into(),
             seen_ms: self.inner.clock.now_ms(),
             viewers: vec![],
+            joined: vec![],
             pending_moves: vec![],
         };
         self.install(Arc::new(album), reg);
@@ -423,6 +429,7 @@ impl SharedAlbums {
         let mut reg = e.reg.lock().unwrap().clone();
         reg.capability = moved.capability().await?;
         reg.viewers.retain(|v| v != member);
+        reg.joined.retain(|v| v != member);
         reg.pending_moves = members
             .iter()
             .filter(|m| m.member.key != me && m.member.key != *member)
@@ -645,7 +652,9 @@ impl Inner {
     /// Everyone this album knows: members that wrote their own entry, and viewers.
     fn member_ids(e: &Entry) -> Vec<EndpointId> {
         let mut ids = e.album.known_member_ids();
-        ids.extend(e.reg.lock().unwrap().viewers.iter().copied());
+        let reg = e.reg.lock().unwrap();
+        ids.extend(reg.viewers.iter().copied());
+        ids.extend(reg.joined.iter().copied());
         ids
     }
 
@@ -727,14 +736,15 @@ impl Inner {
             inv.used = true;
             (inv.album, inv.role)
         };
-        if role == MemberRole::Viewer {
+        if let Some(e) = self.entries.lock().unwrap().get(&album) {
+            let who = shoebox_node::from_iroh_id(&from);
+            let mut reg = e.reg.lock().unwrap();
+            if !reg.joined.contains(&who) {
+                reg.joined.push(who);
+            }
             // A viewer cannot write its own membership entry: remember who it is.
-            if let Some(e) = self.entries.lock().unwrap().get(&album) {
-                let who = shoebox_node::from_iroh_id(&from);
-                let mut reg = e.reg.lock().unwrap();
-                if !reg.viewers.contains(&who) {
-                    reg.viewers.push(who);
-                }
+            if role == MemberRole::Viewer && !reg.viewers.contains(&who) {
+                reg.viewers.push(who);
             }
         }
         self.guests
@@ -770,6 +780,7 @@ impl Inner {
         reg.inviter = Some(moved.owner);
         reg.pending_moves = vec![];
         reg.viewers = vec![];
+        reg.joined = vec![];
         let shared = SharedAlbums {
             inner: self.clone(),
         };
@@ -841,7 +852,10 @@ impl Inner {
             .collect();
         let invites = self.invites.lock().unwrap().clone();
         let tmp = self.path.with_extension("json.tmp");
-        write_private(&tmp, &serde_json::to_vec_pretty(&RegFile { albums, invites })?)?;
+        write_private(
+            &tmp,
+            &serde_json::to_vec_pretty(&RegFile { albums, invites })?,
+        )?;
         std::fs::rename(tmp, &self.path)?;
         Ok(())
     }

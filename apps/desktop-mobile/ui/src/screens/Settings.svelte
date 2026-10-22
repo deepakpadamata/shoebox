@@ -151,8 +151,10 @@
     </div>
 
     <div class="section">Recovery</div>
-    <div class="card pad small">
+    <div class="card pad small stack">
       {#if app.state?.recovery_kit_saved}✓ You confirmed the recovery kit is saved.{:else}The recovery kit has not been confirmed as saved.{/if}
+      <div class="muted">If every other device is lost, a new device recovers the library with the 24 words plus this device's link.</div>
+      <div><Button size="sm" onclick={async () => { try { const l = await api.deviceLink(); await navigator.clipboard.writeText(l); toast('This device’s link was copied'); } catch (e) { fail(e); } }}>Copy this device’s link</Button></div>
     </div>
   {:else}
     <span class="muted">Loading…</span>

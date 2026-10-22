@@ -130,3 +130,26 @@ fn migrating_from_the_file_store_keeps_the_identity_and_wipes_the_file() {
     );
     assert_eq!(keystore.load("endpoint-key").unwrap(), Some(secret));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_device_with_a_library_does_not_quietly_become_a_new_device_when_its_key_is_missing() {
+    use desktop_mobile::keystore::FileStore;
+    use desktop_mobile::{AppCore, AppOptions};
+    let dir = tempfile::tempdir().unwrap();
+    let opts = || AppOptions {
+        secrets: Some(std::sync::Arc::new(FileStore::new(dir.path().join("secrets")))),
+        ..AppOptions::local_only()
+    };
+    let core = AppCore::open(dir.path(), opts()).await.unwrap();
+    core.create_library("Mac", "keeper").await.unwrap();
+    let id = core.app_state().await.unwrap().device_id;
+    core.shutdown().await.unwrap();
+    // Same key: same device.
+    let again = AppCore::open(dir.path(), opts()).await.unwrap();
+    assert_eq!(again.app_state().await.unwrap().device_id, id);
+    again.shutdown().await.unwrap();
+    // Key gone: refuse, with a way forward, instead of inventing another identity.
+    std::fs::remove_dir_all(dir.path().join("secrets")).unwrap();
+    let err = AppCore::open(dir.path(), opts()).await.err().expect("refused");
+    assert!(err.to_string().contains("recovery phrase"), "{err}");
+}

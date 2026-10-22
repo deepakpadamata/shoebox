@@ -200,6 +200,14 @@ impl AppCore {
         config.mdns = opts.mdns;
         let node = match &opts.secrets {
             Some(store) => {
+                // A device that already belongs to a library must keep its identity: a missing
+                // key is an error to explain, not a reason to make a new device.
+                if file.ticket.is_some() && store.load("endpoint-key")?.is_none() {
+                    bail!(
+                        "This device's key is missing, so it cannot rejoin its library as the same device. \
+                         Restore it with the recovery phrase (\"I lost my devices\" when starting fresh)."
+                    );
+                }
                 let secret = store.load_or_create("endpoint-key")?;
                 Node::open_with_secret(config, secret).await?
             }
@@ -261,6 +269,11 @@ impl AppCore {
         *self.shared.write().await = None;
         *self.library.write().await = None;
         self.node.shutdown().await
+    }
+
+    /// The link another device needs to recover through this one (`shoebox-peer1…`).
+    pub fn device_link(&self) -> String {
+        shoebox_node::PeerLink(shoebox_node::from_endpoint_addr(&self.node.addr())).to_string()
     }
 
     pub(crate) fn device_name(&self) -> String {

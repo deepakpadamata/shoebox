@@ -127,13 +127,23 @@ impl KeyringStore {
         keyring::Entry::new(&self.service, name).context("opening the keystore entry")
     }
     /// Whether the keystore works here (it may not, for example, on a headless Linux box).
+    ///
+    /// It must really *keep* things: a value written through one handle has to be readable
+    /// through a fresh one (a mock or broken backend fails this), otherwise the device key would
+    /// change on every start and the device would lose its place in the library.
     pub fn available(&self) -> bool {
-        self.entry("probe")
-            .and_then(|e| match e.get_password() {
-                Ok(_) | Err(keyring::Error::NoEntry) => Ok(()),
-                Err(e) => Err(anyhow!("{e}")),
-            })
-            .is_ok()
+        let probe = || -> Result<bool> {
+            let secret = hex::encode(random());
+            let writer = self.entry("probe")?;
+            writer.set_password(&secret).map_err(|e| anyhow!("{e}"))?;
+            let same = match self.entry("probe")?.get_password() {
+                Ok(read) => read == secret,
+                Err(_) => false,
+            };
+            let _ = writer.delete_credential();
+            Ok(same)
+        };
+        probe().unwrap_or(false)
     }
 }
 

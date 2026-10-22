@@ -146,6 +146,7 @@ export const api = {
   sharedSeen: (album: string) => call<{}>('shared_seen', { album }),
   sharedFetch: (album: string, id: string, kind: BlobKind) => call<{}>('shared_fetch', { album, id, kind }),
   sharedRemoveMember: (album: string, member: string) => call<{}>('shared_remove_member', { album, member }),
+  deviceLink: () => call<string>('device_link'),
   diagnostics: () => call<DiagnosticsBundle>('diagnostics'),
   exportLibrary: (dest: string) => call<ExportReport>('export_library', { dest }),
   watchFolder: (dir: string) => call<{}>('watch_folder', { dir }),

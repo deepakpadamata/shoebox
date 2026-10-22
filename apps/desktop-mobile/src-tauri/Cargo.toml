@@ -51,10 +51,22 @@ axum = { version = "0.8", optional = true }
 tokio-stream = { version = "0.1", optional = true }
 tower-http = { version = "0.6", features = ["fs"], optional = true }
 tauri = { version = "2", optional = true, features = ["tray-icon"] }
+# keyring 3 has no backend unless one is chosen per platform: without one it silently uses an
+# in-memory mock and the device key would be new on every start.
 keyring = { version = "3", optional = true }
+
 getrandom = "0.3"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"], optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"], optional = true }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-dialog = "2"

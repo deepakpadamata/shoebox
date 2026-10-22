@@ -37,6 +37,8 @@ const PROGRESS_STEP: u64 = 256 * 1024;
 pub const PING_ALPN: &[u8] = b"shoebox/ping/0";
 /// ALPN of the pairing protocol (M2-04). Open to devices that are not in the device list yet.
 pub const PAIR_ALPN: &[u8] = b"shoebox/pair/0";
+/// ALPN of the "do you hold these blobs?" probe used before freeing space (M2-08).
+pub const HAS_ALPN: &[u8] = b"shoebox/has/0";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NodeEvent {
@@ -421,6 +423,12 @@ impl Node {
                 .accept(GOSSIP_ALPN, gossip.clone())
                 .accept(DOCS_ALPN, docs.clone())
                 .accept(PING_ALPN, Ping)
+                .accept(
+                    HAS_ALPN,
+                    crate::freeup::HasProtocol {
+                        blobs: blobs.clone(),
+                    },
+                )
                 .accept(PAIR_ALPN, crate::pairing::PairProtocol(pair_slot.clone()))
                 .accept(
                     crate::doc_digest::DOC_DIGEST_ALPN,

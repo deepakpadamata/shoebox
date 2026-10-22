@@ -255,3 +255,13 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   `status` computes `held_originals` by probing the blob store per photo (fine for tens of thousands; should become an index if status is polled on very large libraries). Service files:
   systemd user unit (default) or system unit (+ optional dedicated `User=`), launchd plist in `~/Library/LaunchAgents`; `service install` writes the file and prints the
   enable command rather than invoking `systemctl`/`launchctl` itself (not verifiable here). **Unverified:** the acceptance test "fresh Raspberry Pi OS: install → reboot → syncing" (no Pi, no systemd on this Mac).
+- **A-064 · M2-08** · "≥ target copies elsewhere" is implemented literally: other devices' *originals* (replicated holdings, excluding this device) must number at least the redundancy target
+  (default 2, so a phone + one keeper frees nothing until the target is lowered or a third copy exists) **and** at least one of those holders answered a `shoebox/has/0` probe for
+  that blob within 7 days (confirmations persist in `holder-confirmations.json`; a holder that denies a hash is forgotten for it). Free-up probes holders itself, in dry runs too,
+  so both runs agree. Pinned originals, blobs a shared album still references, and keepers (error) are excluded. A real run releases the library/pin protection and retracts holdings; the
+  bytes disappear when the blob store's GC runs (reported bytes = sizes of the blobs released). A phone does not re-fetch freed originals only because its fetcher policy wants originals
+  of pinned or own below-target photos, and freed photos have enough other copies; revisit if a pin/own policy ever overrides that.
+- **A-065 · M2-09** · Release automation is written but never ran: `release.yml` (tag `keeper-v*`; musl x86_64 natively, aarch64 through `cross`, macOS universal via `lipo`; SHA256SUMS signed
+  with minisign from repo secrets) and `scripts/install-keeper.sh` (verifies the *signature of SHA256SUMS* then the tarball checksum; refuses to install without `minisign`). The
+  project public key is a placeholder (`MINISIGN_PUBKEY`) and the repo/owner is `OWNER/shoebox` until a remote and key exist. Not verified: musl/cross builds of the iroh stack, the macOS lipo
+  step, real minisign verification, the Debian/Raspberry Pi OS install runs. `scripts/test-install-keeper.sh` covers the script's control flow with a fake minisign (CI runs it).

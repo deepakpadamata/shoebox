@@ -28,12 +28,12 @@ getrandom = "0.3"
 postcard.workspace = true
 shoebox-media.workspace = true
 notify = "8"
+serde_json = "1"
 
 [dev-dependencies]
 tempfile.workspace = true
 shoebox-store-mem.workspace = true
 xtask = { path = "../../xtask" }
-serde_json = "1"
 
 [lints]
 workspace = true

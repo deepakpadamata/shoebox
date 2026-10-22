@@ -1,6 +1,6 @@
 # Planning · Shoebox MVP
 
-The executable plan: 8 milestones, **82 issues**, in strict execution order for a **solo developer** (decision #20).
+The executable plan: 8 milestones, **83 issues**, in strict execution order for a **solo developer** (decision #20).
 The product and technical context is in `docs/`. Read [`05-prototype-plan.md`](../docs/05-prototype-plan.md) first.
 
 ```
@@ -21,13 +21,13 @@ interruptions, review and unknowns.
 |---|---|---|---|---|
 | M0 · Foundations | 8 | 9.5 | 2.3 | 2 |
 | M1 · Sync core | 16 | 48.5 | 11.6 | 14 |
-| M2 · Identity, pairing & keeper | 9 | 19.5 | 4.7 | 19 |
+| M2 · Identity, pairing & keeper | 10 | 23.5 | 5.6 | 19 |
 | M3 · Desktop app | 17 | 40 | 9.6 | 28 |
 | M4 · Mobile apps | 12 | 33.5 | 8.0 | 36 |
 | M5 · Shared albums | 8 | 20.5 | 4.9 | 41 |
 | M6 · Hardening & beta | 8 | 19 | 4.6 | 46 |
 | M7 · MVP release | 4 | 6.5 | 1.6 | 47 |
-| **Total** | **82** | **197** | **47** | |
+| **Total** | **83** | **201** | **47** | |
 
 That's roughly **10 months** to MVP for one person, plus the beta's calendar time
 (3–4 weeks, overlapping M7) and app-store review.
@@ -99,6 +99,7 @@ Re-runs are safe: created issue numbers are stored in `planning/scripts/github-m
 | M2-01 | [Identity: root key, admin certs, signed device list](issues/M2-01-identity-root-key-admin-certs-signed-device-list.md) | 3 | M1-15 |
 | M2-02 | [Recovery kit export and restore](issues/M2-02-recovery-kit-export-and-restore.md) | 2 | M2-01 |
 | M2-03 | [Enforce device list and revocation](issues/M2-03-enforce-device-list-and-revocation.md) | 3 | M2-01 |
+| M2-03b | [Rotate the library capability on revocation](issues/M2-03b-capability-rotation-on-revocation.md) | 4 | M2-03, M2-04 |
 | M2-04 | [Pairing protocol shoebox/pair/0](issues/M2-04-pairing-protocol-shoebox-pair-0.md) | 3 | M2-01, M1-09 |
 | M2-05 | [Keeper daemon and control socket](issues/M2-05-keeper-daemon-and-control-socket.md) | 2 | M1-12, M2-04 |
 | M2-06 | [Keeper CLI commands](issues/M2-06-keeper-cli-commands.md) | 2 | M2-05 |

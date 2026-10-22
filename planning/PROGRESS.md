@@ -37,4 +37,19 @@ Implementation status per issue. Assumptions made along the way are logged in
 | M1-15 Store benchmark and decision | ✅ | Loro wins; iroh-docs fails at 100k. Decision to review: `docs/notes/store-benchmark.md` |
 | M1-16 Switch library backend to Loro | ⬜ | new, 16 d; pending review of the decision |
 
-## Next: M2 · Identity, pairing & keeper
+## M2 · Identity, pairing & keeper — done except M2-03b (split off) and unverifiable acceptance checks
+
+| Issue | Status | Notes |
+|---|---|---|
+| M2-01 Identity | ✅ | root → admin → device certs, verified in all backends (A-056/057) |
+| M2-02 Recovery kit | ✅ | 24-word phrase + printable text; **gap:** a device that lost everything still needs a root-proof capability handoff (A-060) |
+| M2-03 Enforce device list and revocation | ◐ | connection gating + `Removed` state done and tested; **rotation split into M2-03b** (A-061) |
+| M2-03b Rotate capability on revocation | ⬜ | new, 4 d |
+| M2-04 Pairing protocol | ✅ | tested on loopback; relay path **not verified** (A-062) |
+| M2-05 Keeper daemon & control socket | ✅ | lock file, 0600 socket, resumes after restart |
+| M2-06 Keeper CLI | ✅ | `docs/keeper-cli.md` (mockups 5g/5i are not in the repo, A-063) |
+| M2-07 Service install | ✅ | unit/plist generation tested; real Raspberry Pi reboot test **not verified** |
+| M2-08 Safe free-up-space | ✅ | has-probe ALPN, 7-day confirmation, literal "≥ target other copies" (A-064) |
+| M2-09 Release builds | ◐ | workflow + verifying install script written; install script control flow tested with a fake minisign; **no tag was built, no real signature checked** (A-065) |
+
+## Next: M3 · Desktop app

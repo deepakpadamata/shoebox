@@ -1,0 +1,89 @@
+name: Release keeper
+
+# Tagging `keeper-vX.Y.Z` builds static Linux (x86_64, aarch64) and a macOS universal binary,
+# writes SHA256SUMS, signs it with minisign and publishes everything on the GitHub release.
+# One-time setup: generate a key with `minisign -G`, put the public key in scripts/install-keeper.sh
+# (MINISIGN_PUBKEY) and store the secret key + password as the repository secrets
+# MINISIGN_SECRET_KEY and MINISIGN_PASSWORD.
+
+on:
+  push:
+    tags: ["keeper-v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-latest, target: x86_64-unknown-linux-musl, cross: false }
+          - { name: linux-aarch64, os: ubuntu-latest, target: aarch64-unknown-linux-musl, cross: true }
+          - { name: macos-universal, os: macos-latest, target: universal-apple-darwin, cross: false }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target == 'universal-apple-darwin' && 'x86_64-apple-darwin,aarch64-apple-darwin' || matrix.target }}
+      - name: Install musl tools
+        if: matrix.os == 'ubuntu-latest' && !matrix.cross
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --locked
+      - name: Build (Linux, native musl)
+        if: matrix.os == 'ubuntu-latest' && !matrix.cross
+        run: cargo build --release -p keeper --target ${{ matrix.target }}
+      - name: Build (Linux, cross)
+        if: matrix.cross
+        run: cross build --release -p keeper --target ${{ matrix.target }}
+      - name: Build (macOS universal)
+        if: matrix.target == 'universal-apple-darwin'
+        run: |
+          cargo build --release -p keeper --target x86_64-apple-darwin
+          cargo build --release -p keeper --target aarch64-apple-darwin
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create -output target/universal-apple-darwin/release/shoebox-keeper \
+            target/x86_64-apple-darwin/release/shoebox-keeper \
+            target/aarch64-apple-darwin/release/shoebox-keeper
+      - name: Package
+        run: |
+          mkdir dist
+          tar -C target/${{ matrix.target }}/release -czf dist/shoebox-keeper-${{ matrix.name }}.tar.gz shoebox-keeper
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keeper-${{ matrix.name }}
+          path: dist/*.tar.gz
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum *.tar.gz > SHA256SUMS
+      - name: Sign
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y minisign
+          printf '%s' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
+          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s /tmp/minisign.key -m dist/SHA256SUMS
+          rm /tmp/minisign.key
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            dist/SHA256SUMS.minisig
+            scripts/install-keeper.sh

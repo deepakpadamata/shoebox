@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "What the main window may do: call the app core and listen to its events.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "barcode-scanner:default"]
 }

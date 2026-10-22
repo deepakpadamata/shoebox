@@ -228,7 +228,9 @@ fn run(
         Err(std::fs::TryLockError::WouldBlock) => {
             return Ok(json!({ "skipped": "the app is running" }));
         }
-        Err(std::fs::TryLockError::Error(e)) => bail!("cannot lock {}: {e}", dir.join("app.lock").display()),
+        Err(std::fs::TryLockError::Error(e)) => {
+            bail!("cannot lock {}: {e}", dir.join("app.lock").display())
+        }
     }
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)

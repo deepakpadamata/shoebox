@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"What the main window may do: call the app core and listen to its events.","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"What the main window may do: call the app core and listen to its events.","local":true,"windows":["main"],"permissions":["core:default","barcode-scanner:default"]}}

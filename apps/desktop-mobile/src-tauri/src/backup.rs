@@ -20,17 +20,6 @@ use std::time::Duration;
 const BATCH: usize = 24;
 const TICK: Duration = Duration::from_secs(30);
 
-impl Default for BackupReport {
-    fn default() -> Self {
-        Self {
-            imported: 0,
-            duplicates: 0,
-            pending: 0,
-            failed: vec![],
-        }
-    }
-}
-
 impl Default for BackupPolicy {
     fn default() -> Self {
         Self {

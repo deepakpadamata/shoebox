@@ -203,6 +203,7 @@ ts_type! {
 }
 
 ts_type! {
+    #[derive(Default)]
     pub struct BackupReport {
         pub imported: u32,
         pub duplicates: u32,

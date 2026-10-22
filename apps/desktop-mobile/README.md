@@ -52,4 +52,6 @@ cargo tauri android build --debug --apk --target aarch64 --features tauri-app --
 adb install -r gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
 ```
 The app core (iroh node, Loro store) runs inside the Android process and the UI renders in the system WebView.
-The layout is still the desktop one (M4-01 adds the mobile layout).
+The UI switches to the phone layout on narrow screens. Background backup runs through WorkManager; with the debug build you can trigger it by hand:
+`adb shell am broadcast -n org.shoebox.desktop/.BurstNow -a org.shoebox.desktop.BURST_NOW` (watch `adb logcat -s ShoeboxBurst`).
+iOS is not built: it needs Xcode (`cargo tauri ios init`), see `planning/PROGRESS.md`.

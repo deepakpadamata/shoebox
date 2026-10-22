@@ -4,6 +4,7 @@
   import { app, fail, refreshState } from '../lib/store.svelte';
   import Button from '../components/Button.svelte';
   import Segmented from '../components/Segmented.svelte';
+  import { canScan, scanQr } from '../lib/scan';
   import RecoveryKit from './RecoveryKit.svelte';
 
   type Step = 'welcome' | 'create' | 'kit' | 'join' | 'code' | 'recover';
@@ -40,6 +41,15 @@
       step = 'join';
     } finally {
       busy = false;
+    }
+  }
+
+  async function scan() {
+    try {
+      const text = await scanQr();
+      if (text) ticket = text.trim();
+    } catch (e) {
+      app.pairingError = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -98,6 +108,7 @@
       <p class="muted small">On a device that is already in the library, open <b>Devices → Add a device</b> and paste the code it shows.</p>
       <div class="stack">
         <input class="input" placeholder="Name this device" bind:value={name} />
+        {#if canScan()}<Button block onclick={scan}>Scan the QR code</Button>{/if}
         <textarea class="input mono" rows="3" placeholder="shoebox-pair1…" bind:value={ticket}></textarea>
         {#if app.pairingError}<div class="err small">{app.pairingError}</div>{/if}
         <Button kind="primary" block disabled={busy || !ticket.trim()} onclick={join}>Connect</Button>

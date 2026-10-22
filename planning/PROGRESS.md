@@ -73,4 +73,18 @@ Implementation status per issue. Assumptions made along the way are logged in
 | M3-16 Sync status, tray, banners | ◐ | status chip and banners checked in the browser; tray icon compiled only |
 | M3-17 Packaging, auto-update | ⬜ | release workflow and bundle config written, **never run** (needs signing keys and certificates); updater plugin not added |
 
-## Next: M4 · Mobile apps
+## M4 · Mobile apps — Android built and checked on an emulator; iOS blocked on Xcode
+
+| Issue | Status | Notes |
+|---|---|---|
+| M4-01 Mobile layout | ✅ | bottom tabs, safe-area insets, one `ui` for desktop and phone |
+| M4-02 Keystore | ◐ | Android Keystore AES-GCM wrapping with migration of earlier keys (emulator); iOS Keychain ⬜ |
+| M4-03 iOS shell | ⬜ | needs Xcode (not installed) |
+| M4-04/05/06 Camera-roll backup | ✅ Android | MediaStore generation scan, partial photo access, Wi-Fi/charging/battery rules, duplicates, retries (12 photos imported on emulator) |
+| M4-07 Join on a phone | ◐ | paste or **QR scan** (barcode-scanner plugin; builds and launches, the scan itself not exercised: emulator camera) |
+| M4-08 iOS background | ⬜ | needs Xcode |
+| M4-09 Android background | ✅ | WorkManager → JNI → app core; headless backup + sync burst verified (new photos imported with the app force-stopped); no foreground service yet |
+| M4-10 Notifications, banners | ◐ | rules unit-tested, banners and keep-awake in the UI; posting a notification not seen on a device (needs a reachable peer) |
+| M4-11 Gestures, memory | ◐ | swipe, pinch zoom, pull-down close, pinch grid, long-press drag select; no 100k-on-4-GB memory budget (about 7 KB per photo per replica today) |
+| M4-12 Packaging | ⬜ | release signing, Play and TestFlight not done |
+

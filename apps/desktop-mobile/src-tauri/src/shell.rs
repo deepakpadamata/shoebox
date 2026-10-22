@@ -150,6 +150,9 @@ pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(target_os = "android")]
     let builder = builder.plugin(crate::android_photos::init());
+    // QR scanning when joining a library from a phone (M4-07).
+    #[cfg(mobile)]
+    let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
     let app = builder
         .invoke_handler(tauri::generate_handler![command])
         .register_asynchronous_uri_scheme_protocol("shoebox", |ctx, request, responder| {

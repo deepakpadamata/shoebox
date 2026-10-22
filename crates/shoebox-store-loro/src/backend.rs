@@ -115,13 +115,7 @@ impl LoroBackend {
     fn library(&self, id: LibraryId, root: RootPublicKey, mode: Capability) -> Result<LoroLibrary> {
         let make = || -> Result<Arc<LibraryShared>> {
             let dir = self.data_dir.as_ref().map(|d| d.join(hex::encode(id.0)));
-            Ok(Arc::new(LibraryShared::new(
-                self.device,
-                root,
-                id,
-                self.signer.clone(),
-                dir.as_deref(),
-            )?))
+            LibraryShared::new(self.device, root, id, self.signer.clone(), dir.as_deref())
         };
         let shared = match &self.transport {
             Transport::InProcess(network) => {

@@ -56,7 +56,7 @@ impl LibraryShared {
         library: LibraryId,
         signer: Option<KeyPair>,
         dir: Option<&Path>,
-    ) -> Result<Self> {
+    ) -> Result<Arc<Self>> {
         let doc = LoroDoc::new();
         // A stable Loro peer id per device keeps its operations in one lane.
         let peer = u64::from_le_bytes(device.0[..8].try_into().expect("8 bytes"));
@@ -86,10 +86,25 @@ impl LibraryShared {
             inner.persist = Some(persist);
             inner.fold_all();
         }
-        Ok(Self {
+        let has_log = inner.persist.is_some();
+        let shared = Arc::new(Self {
             inner: Mutex::new(inner),
             subs: Mutex::new(vec![]),
-        })
+        });
+        if has_log {
+            // Flush the update log periodically (see `Persist::append`); ends with the library.
+            let weak = Arc::downgrade(&shared);
+            std::thread::spawn(move || {
+                while let Some(shared) = weak.upgrade() {
+                    if let Some(p) = shared.inner.lock().unwrap().persist.as_mut() {
+                        let _ = p.flush();
+                    }
+                    drop(shared);
+                    std::thread::sleep(crate::persist::FLUSH_INTERVAL);
+                }
+            });
+        }
+        Ok(shared)
     }
 
     fn emit(&self, changes: Vec<Change>) {
@@ -214,34 +229,73 @@ impl Inner {
     }
 
     /// Fold the records stored under `keys`. Certificates go first so that records in the same
-    /// batch can already be judged.
-    fn fold_keys(&mut self, mut keys: Vec<String>) -> Vec<Change> {
-        let rank = |k: &str| match k.split_once('/').map(|(_, r)| r) {
-            Some(r) if r.starts_with("devices/") || r.starts_with("admins/") => 0,
-            _ => 1,
+    /// batch can already be judged; the (signature-checking) judging of a large batch of other
+    /// records then runs on all cores before the results are applied in order.
+    fn fold_keys(&mut self, keys: Vec<String>) -> Vec<Change> {
+        let is_cert = |k: &str| match k.split_once('/').map(|(_, r)| r) {
+            Some(r) => r.starts_with("devices/") || r.starts_with("admins/"),
+            None => false,
         };
-        keys.sort_by_key(|k| rank(k));
+        let (certs, rest): (Vec<String>, Vec<String>) = keys.into_iter().partition(|k| is_cert(k));
         let map = self.doc.get_map(ENTRIES);
+        let value_of = |key: &str| match map.get(key) {
+            Some(loro::ValueOrContainer::Value(LoroValue::Binary(v))) => Some(v.to_vec()),
+            _ => None,
+        };
         let mut changes = vec![];
-        for key in keys {
-            let Some(loro::ValueOrContainer::Value(LoroValue::Binary(value))) = map.get(&key)
-            else {
-                continue;
-            };
-            self.admit(&key, &value, &mut changes);
+        for key in certs {
+            if let Some(value) = value_of(&key) {
+                let judged = judge(
+                    &self.state,
+                    self.library,
+                    self.signer.is_some(),
+                    &key,
+                    &value,
+                );
+                self.admit(&key, &value, judged, &mut changes);
+            }
+        }
+        let batch: Vec<(String, Vec<u8>)> = rest
+            .into_iter()
+            .filter_map(|k| value_of(&k).map(|v| (k, v)))
+            .collect();
+        let (state, library, strict) = (&self.state, self.library, self.signer.is_some());
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+        let judged: Vec<Judged> = if batch.len() < 2_000 || threads < 2 {
+            batch
+                .iter()
+                .map(|(k, v)| judge(state, library, strict, k, v))
+                .collect()
+        } else {
+            let chunk = batch.len().div_ceil(threads);
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = batch
+                    .chunks(chunk)
+                    .map(|part| {
+                        scope.spawn(move || {
+                            part.iter()
+                                .map(|(k, v)| judge(state, library, strict, k, v))
+                                .collect::<Vec<Judged>>()
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .flat_map(|h| h.join().expect("judging thread"))
+                    .collect()
+            })
+        };
+        for ((key, value), judged) in batch.into_iter().zip(judged) {
+            self.admit(&key, &value, judged, &mut changes);
         }
         changes
     }
 
-    /// Judge one stored record and, if it passes, merge it into the state.
-    fn admit(&mut self, key: &str, value: &[u8], changes: &mut Vec<Change>) {
-        match self.judge(key, value) {
+    /// Merge one judged record into the state (or park / drop it).
+    fn admit(&mut self, key: &str, value: &[u8], judged: Judged, changes: &mut Vec<Change>) {
+        match judged.verdict {
             Verdict::Accept => {
-                let payload = auth::open(value).map(|o| o.payload).unwrap_or_default();
-                let Some((_, record_key)) = key.split_once('/') else {
-                    return;
-                };
-                if let Ok(entry) = decode_library_entry(record_key, payload) {
+                if let Some(entry) = judged.entry {
                     let effect = self.state.apply_entry(&entry);
                     let devices_changed = effect
                         .changes
@@ -269,69 +323,96 @@ impl Inner {
     fn retry_pending(&mut self, changes: &mut Vec<Change>) {
         let waiting: Vec<(String, Vec<u8>)> = self.pending.drain().collect();
         for (key, value) in waiting {
-            // `admit` re-queues what is still undecided; guard against unbounded recursion by
-            // only retrying once per device-list change.
-            match self.judge(&key, &value) {
+            let judged = judge(
+                &self.state,
+                self.library,
+                self.signer.is_some(),
+                &key,
+                &value,
+            );
+            match judged.verdict {
                 Verdict::Pending => {
                     self.pending.insert(key, value);
                 }
-                _ => self.admit(&key, &value, changes),
+                _ => self.admit(&key, &value, judged, changes),
             }
         }
     }
+}
 
-    fn judge(&self, key: &str, value: &[u8]) -> Verdict {
-        let Some((prefix, record_key)) = key.split_once('/') else {
-            return Verdict::Reject("malformed key");
+struct Judged {
+    verdict: Verdict,
+    entry: Option<StateEntry>,
+}
+
+fn rejected(why: &'static str) -> Judged {
+    Judged {
+        verdict: Verdict::Reject(why),
+        entry: None,
+    }
+}
+
+/// Decide whether a stored record may enter the state: decodes it, checks the author's
+/// signature against the certified devices and applies the role rules.
+fn judge(
+    state: &LibraryState,
+    library: LibraryId,
+    strict: bool,
+    key: &str,
+    value: &[u8],
+) -> Judged {
+    let Some((prefix, record_key)) = key.split_once('/') else {
+        return rejected("malformed key");
+    };
+    let Some(opened) = auth::open(value) else {
+        return rejected("malformed value");
+    };
+    let Ok(entry) = decode_library_entry(record_key, opened.payload) else {
+        return rejected("undecodable record");
+    };
+    let accept = |entry| Judged {
+        verdict: Verdict::Accept,
+        entry: Some(entry),
+    };
+    // Certificates are judged by the certificate chain itself, whoever carries them.
+    if matches!(entry, StateEntry::Device(_) | StateEntry::Admin(_)) {
+        return accept(entry);
+    }
+    let Ok(prefix_bytes) = hex::decode(prefix) else {
+        return rejected("malformed author");
+    };
+    if opened.signature.is_none() {
+        // Replicas without a signing key (in-process tests) never enforce signatures.
+        return if strict && state.is_armed() {
+            rejected("unsigned record in a library with certified devices")
+        } else {
+            accept(entry)
         };
-        let Some(opened) = auth::open(value) else {
-            return Verdict::Reject("malformed value");
+    }
+    let candidates = state.certified_with_prefix(&prefix_bytes);
+    if candidates.is_empty() {
+        return Judged {
+            verdict: Verdict::Pending,
+            entry: None,
         };
-        let Ok(entry) = decode_library_entry(record_key, opened.payload) else {
-            return Verdict::Reject("undecodable record");
-        };
-        // Certificates are judged by the certificate chain itself, whoever carries them.
-        if matches!(entry, StateEntry::Device(_) | StateEntry::Admin(_)) {
-            return Verdict::Accept;
-        }
-        let Ok(prefix_bytes) = hex::decode(prefix) else {
-            return Verdict::Reject("malformed author");
-        };
-        if opened.signature.is_none() {
-            // Replicas without a signing key (in-process tests) never enforce signatures.
-            return if self.signer.is_some() && self.state.is_armed() {
-                Verdict::Reject("unsigned record in a library with certified devices")
+    }
+    let Some((author, role)) = candidates
+        .into_iter()
+        .find(|(id, _)| auth::verify(&id.0, library, key, &opened))
+    else {
+        return rejected("bad signature");
+    };
+    match &entry {
+        // A device may only publish its own holdings.
+        StateEntry::Holding { device, .. } => {
+            if *device == author {
+                accept(entry)
             } else {
-                Verdict::Accept
-            };
-        }
-        let candidates = self.state.certified_with_prefix(&prefix_bytes);
-        if candidates.is_empty() {
-            return Verdict::Pending;
-        }
-        let Some((author, role)) = candidates
-            .into_iter()
-            .find(|(id, _)| auth::verify(&id.0, self.library, key, &opened))
-        else {
-            return Verdict::Reject("bad signature");
-        };
-        match &entry {
-            // A device may only publish its own holdings.
-            StateEntry::Holding { device, .. } => {
-                if *device == author {
-                    Verdict::Accept
-                } else {
-                    Verdict::Reject("holdings of another device")
-                }
-            }
-            _ => {
-                if role == Role::Viewer {
-                    Verdict::Reject("a viewer cannot publish library records")
-                } else {
-                    Verdict::Accept
-                }
+                rejected("holdings of another device")
             }
         }
+        _ if role == Role::Viewer => rejected("a viewer cannot publish library records"),
+        _ => accept(entry),
     }
 }
 

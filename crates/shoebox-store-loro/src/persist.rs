@@ -16,6 +16,8 @@ const SNAPSHOT: &str = "snapshot.loro";
 const LOG: &str = "updates.log";
 /// Compact when the log exceeds this and is bigger than the snapshot.
 const COMPACT_MIN_LOG: u64 = 8 * 1024 * 1024;
+/// Longest a logged update may wait for its `fsync`.
+pub(crate) const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// What opening a store yields: the store, its snapshot (if any) and the logged updates.
 pub(crate) type Opened = (Persist, Option<Vec<u8>>, Vec<Vec<u8>>);
@@ -25,6 +27,9 @@ pub(crate) struct Persist {
     log: File,
     log_len: u64,
     snapshot_len: u64,
+    /// Bytes were appended since the last `fsync`.
+    unsynced: bool,
+    last_sync: std::time::Instant,
 }
 
 fn frame_sum(bytes: &[u8]) -> [u8; 8] {
@@ -73,6 +78,8 @@ impl Persist {
                 log,
                 log_len: at as u64,
                 snapshot_len,
+                unsynced: false,
+                last_sync: std::time::Instant::now(),
             },
             snapshot,
             updates,
@@ -85,8 +92,23 @@ impl Persist {
         frame.extend_from_slice(&frame_sum(update));
         frame.extend_from_slice(update);
         self.log.write_all(&frame)?;
-        self.log.sync_data()?;
         self.log_len += frame.len() as u64;
+        self.unsynced = true;
+        // Group commit: a burst of writes shares one fsync. The library's flusher thread syncs
+        // what is left within `FLUSH_INTERVAL`, so a crash loses at most that much local work.
+        if self.last_sync.elapsed() >= FLUSH_INTERVAL {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    /// Make everything appended so far durable.
+    pub(crate) fn flush(&mut self) -> io::Result<()> {
+        if self.unsynced {
+            self.log.sync_data()?;
+            self.unsynced = false;
+        }
+        self.last_sync = std::time::Instant::now();
         Ok(())
     }
 
@@ -108,6 +130,7 @@ impl Persist {
         }
         self.log.set_len(0)?;
         self.log.sync_all()?;
+        self.unsynced = false;
         self.log_len = 0;
         self.snapshot_len = snapshot.len() as u64;
         Ok(())
@@ -115,5 +138,11 @@ impl Persist {
 
     pub(crate) fn sizes(&self) -> (u64, u64) {
         (self.snapshot_len, self.log_len)
+    }
+}
+
+impl Drop for Persist {
+    fn drop(&mut self) {
+        let _ = self.flush();
     }
 }

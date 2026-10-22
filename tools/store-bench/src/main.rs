@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 #[derive(Parser)]
 struct Args {
-    /// docs | loro | mem
+    /// docs | loro | loro-net | mem
     #[arg(long, default_value = "docs")]
     backend: String,
     #[arg(long, default_value_t = 100_000)]
@@ -343,6 +343,62 @@ async fn main() -> Result<()> {
             };
             measure(&args, pair, rss).await?
         }
+        "loro-net" => {
+            // The production configuration: real iroh nodes, signed records, replicas on disk.
+            use shoebox_core::identity::{issue_admin_cert, issue_device_cert, KeyPair};
+            let dir = tempfile::tempdir()?;
+            let mk = |name: &str| {
+                let mut cfg = shoebox_node::NodeConfig::local_only(dir.path().join(name), name);
+                cfg.gc_interval_ms = None;
+                cfg
+            };
+            let (na, nb) = (
+                shoebox_node::Node::open(mk("a")).await?,
+                shoebox_node::Node::open(mk("b")).await?,
+            );
+            na.add_peer_addr(nb.addr());
+            nb.add_peer_addr(na.addr());
+            let ba = shoebox_store_loro::LoroBackend::for_node(na.clone(), ManualClock::new(1_000));
+            let bb = shoebox_store_loro::LoroBackend::for_node(nb.clone(), ManualClock::new(1_000));
+            let root = KeyPair::generate();
+            let (a, cap) = ba.create_library(&root.root_public()).await?;
+            let dev_a = ba.device();
+            let dev_b = bb.device();
+            let hlc = Hlc {
+                physical_ms: 1,
+                counter: 0,
+                device: dev_a,
+            };
+            a.apply_device_change(SignedDeviceChange::Admin(issue_admin_cert(
+                &root,
+                cap.library,
+                dev_a,
+                hlc,
+                None,
+            )))
+            .await?;
+            for (d, name) in [(dev_a, "a"), (dev_b, "b")] {
+                let cert = issue_device_cert(&root, cap.library, d, Role::Keeper, name, hlc, false);
+                a.apply_device_change(SignedDeviceChange::Device(cert))
+                    .await?;
+            }
+            let b = bb.open_library(&cap).await?;
+            let a_addr = shoebox_node::from_endpoint_addr(&na.addr());
+            b.sync_with(&a_addr).await?; // the device list first, so signed records can be judged
+            let (pa, pb): (PathBuf, PathBuf) =
+                (dir.path().join("a/loro"), dir.path().join("b/loro"));
+            let pair = Pair {
+                a,
+                b,
+                a_addr,
+                a_device: dev_a,
+                disk: Box::new(move |_, _| (dir_size(&pa), dir_size(&pb))),
+            };
+            let out = measure(&args, pair, rss).await;
+            na.shutdown().await.ok();
+            nb.shutdown().await.ok();
+            out?
+        }
         "docs" => {
             let dir = tempfile::tempdir()?;
             let mk = |name: &str| {
@@ -373,7 +429,7 @@ async fn main() -> Result<()> {
             nb.shutdown().await.ok();
             out?
         }
-        other => anyhow::bail!("unknown backend `{other}` (docs | loro | mem)"),
+        other => anyhow::bail!("unknown backend `{other}` (docs | loro | loro-net | mem)"),
     };
     println!("{result}");
     eprintln!("{}", serde_json::to_string_pretty(&result)?);

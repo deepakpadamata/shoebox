@@ -186,3 +186,13 @@ Re-runs are safe: created issue numbers are stored in `planning/scripts/github-m
 - [v1.x backlog](epics/V1X-backlog.md): Live Photos/RAW pairs, hidden album, Takeout import, smart albums, one-off send, comments, integrity check.
 - v2 epics: [self-hosted web viewer](epics/V2-01-self-hosted-web-viewer.md), [hosted gateway](epics/V2-02-hosted-gateway-relay-view.md),
   [zero-knowledge backup](epics/V2-03-hosted-zero-knowledge-backup.md), [own relays](epics/V2-04-own-relay-infrastructure.md).
+
+## Re-estimate after M1-16 (recorded)
+
+M1-16 landed (promoted `shoebox-store-loro`, added `shoebox-store`'s `HybridBackend`, kept iroh-docs for albums). Effects on the later milestones:
+
+- Everything that used `DocsBackend` for the personal library (keeper, dev CLI, node tests) now runs on the hybrid store; shared albums (M5) keep the docs backend, so M5's
+  estimates stand.
+- New cost for **M2-03b** (+4 d, already counted): with Loro there is no bearer secret to rotate, so rotation means a new library id and a re-keyed device list rather than a new
+  namespace; the shared-album side still has a real capability to rotate.
+- **M4 (mobile)** must budget memory work on `LibraryState` (about 7 KB per photo per replica today) before 100k-photo libraries are comfortable on phones: +3 d, not yet scheduled.

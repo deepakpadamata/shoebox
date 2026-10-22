@@ -16,7 +16,7 @@ Implementation status per issue. Assumptions made along the way are logged in
 | M0-07 Store conformance suite | ✅ | 12 scenarios; `shoebox-store-mem` passes |
 | M0-08 Fixture photo corpus | ✅ | `cargo xtask fixtures`; RAW sample is a synthetic stand-in (see A-023) |
 
-## M1 · Sync core — done except M1-16 (decision pending review)
+## M1 · Sync core — done
 
 | Issue | Status | Notes |
 |---|---|---|
@@ -35,7 +35,7 @@ Implementation status per issue. Assumptions made along the way are logged in
 | M1-13 Delete, Recently Deleted and blob GC | ✅ | GC hardened (activity-gated, temp-tag holds) |
 | M1-14 Loro backend spike | ✅ | `docs/notes/loro-spike.md` |
 | M1-15 Store benchmark and decision | ✅ | Loro wins; iroh-docs fails at 100k. Decision to review: `docs/notes/store-benchmark.md` |
-| M1-16 Switch library backend to Loro | ⬜ | new, 16 d; pending review of the decision |
+| M1-16 Switch library backend to Loro | ✅ | production Loro backend + `HybridBackend` (Loro library, docs albums); acceptance numbers in `docs/notes/store-benchmark.md`; memory work for phones not done (A-066) |
 
 ## M2 · Identity, pairing & keeper — done except M2-03b (split off) and unverifiable acceptance checks
 

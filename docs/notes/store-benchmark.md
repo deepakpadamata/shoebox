@@ -69,3 +69,19 @@ does not reach the 100k-photo target.** The decision gate therefore triggers. Re
 This is a large decision (re-estimate: **+16 dev-days**, see M1-16) made on a benchmark with the caveats above. It should be
 reviewed before M1-16 starts; if you prefer to stay on iroh-docs, the alternative is to batch records into per-month entries
 (≈100× fewer entries and blobs) at the price of write amplification and a coarser merge unit, which needs its own spike.
+
+## M1-16 follow-up: the production Loro backend (`loro-net`)
+
+Measured with `store-bench --backend loro-net` (release build; two real iroh nodes on loopback in one process, records signed and
+verified, replicas persisted to disk; the first line is before group-commit and parallel verification were added):
+
+| photos | populate | initial sync (empty replica catches up) | replica on disk | peak RSS (both replicas) | incremental sync (100 edits) |
+|---|---|---|---|---|---|
+| 100k (first run) | 487 s | 8.8 s | 87 MB | 1.2 GB | 25 ms |
+| 100k | 25.5 s | **4.0 s** | **87 MB** | 1.55 GB | 9.6 ms |
+| 500k | 130 s | 28.8 s | 440 MB | 3.3 GB | 14 ms |
+
+Acceptance (100k < 10 s and < 100 MB on disk; 500k completes) is met. Two optimisations made the difference: group commit of the update log
+(one `fsync` per burst instead of per write: populate 487 s → 25 s) and signature verification spread over all cores (initial sync 8.8 → 4.0 s).
+Not measured: a phone-class device (none available here). Memory per photo is still ~7 KB per replica (both replicas share this process's RSS),
+which will matter on phones; interning strings in `LibraryState` is the obvious next step and is **not done**.

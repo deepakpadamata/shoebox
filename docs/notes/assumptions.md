@@ -265,3 +265,15 @@ Each entry: **ID** · issue · assumption · why · how to reverse.
   with minisign from repo secrets) and `scripts/install-keeper.sh` (verifies the *signature of SHA256SUMS* then the tarball checksum; refuses to install without `minisign`). The
   project public key is a placeholder (`MINISIGN_PUBKEY`) and the repo/owner is `OWNER/shoebox` until a remote and key exist. Not verified: musl/cross builds of the iroh stack, the macOS lipo
   step, real minisign verification, the Debian/Raspberry Pi OS install runs. `scripts/test-install-keeper.sh` covers the script's control flow with a fake minisign (CI runs it).
+- **A-066 · M1-16** · Loro production backend decisions: (1) *Access control* is the signed-record model: every value carries an ed25519 signature by its author (map-key prefix = first 8 bytes of the
+  author's id), importers accept a record only if its author holds a certificate and the role allows that kind of record (viewers may only publish their own holdings); certificate entries are
+  self-authenticating through the chain. Residual risk, documented not fixed: a peer can still overwrite another author's *Loro map key* with a bad value (the importer rejects it, but Loro's
+  document now holds the bad value, so a restart from disk would lose that record until a good copy re-syncs). (2) The library is "armed" once any device is certified: from then on unsigned
+  records are refused by signing replicas; before that, signed records from not-yet-certified authors wait (bounded at 50k) until the certificate arrives, so an uncertified library does not
+  converge — creating a library must go through `create_identity`/pairing (the dev tool does). Revoked devices' *existing* records stay accepted (history); only new connections are refused (M2-03).
+  (3) Persistence = snapshot + framed update log with group commit (fsync at most every 200 ms; a crash can lose that much *local* work, never remote data) and torn-tail truncation;
+  compaction rewrites a full snapshot (history is not trimmed: Loro keeps overwritten values, so the file grows with edit churn — shallow snapshots were not used because peers that lack older
+  history could no longer import updates). (4) Transport = one `shoebox/loro/0` stream, version vectors both ways, repeated up to 4 rounds until the vectors match; local writes are pushed by
+  the node's sync manager (new `LibraryStore::replicates_by_push`, with a per-peer dirty flag so nudges inside the debounce window are not lost). (5) `LoroBackend::new` (in-process, unsigned)
+  remains for conformance and benchmarks; the conformance suite passes on it, and fetcher/holdings/revocation/pairing/free-up/keeper tests now run on `HybridBackend`.
+  (6) Not done: phone-class memory work (A-066 note in `store-benchmark.md`), publishing holdings for originals only (the fetcher still publishes thumbs/previews too).

@@ -41,3 +41,15 @@ so devices keep syncing; choose *Quit Shoebox* in the tray menu to exit.
 The Tauri window itself (rendering, tray, keystore prompts, single-instance behaviour) has only been
 **compiled** here; the UI was exercised in a browser against the dev bridge. Installers, signing and auto-update
 (`.github/workflows/desktop-release.yml`) have never run: they need signing keys and certificates.
+
+## Android (verified on an emulator)
+
+```bash
+brew install openjdk@17 && cargo install tauri-cli --version '^2' --locked
+export ANDROID_HOME=~/Library/Android/sdk NDK_HOME=$ANDROID_HOME/ndk/<version> JAVA_HOME=/opt/homebrew/opt/openjdk@17
+cd apps/desktop-mobile/ui && npm install && npm run build && cd ../src-tauri
+cargo tauri android build --debug --apk --target aarch64 --features tauri-app --config '{"build":{"beforeBuildCommand":""}}'
+adb install -r gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+```
+The app core (iroh node, Loro store) runs inside the Android process and the UI renders in the system WebView.
+The layout is still the desktop one (M4-01 adds the mobile layout).

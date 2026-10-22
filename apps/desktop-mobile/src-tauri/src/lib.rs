@@ -13,4 +13,7 @@ pub mod types;
 #[cfg(feature = "http")]
 pub mod http;
 
+#[cfg(feature = "tauri-app")]
+pub mod shell;
+
 pub use crate::core::{AppCore, AppOptions};

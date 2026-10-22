@@ -11,6 +11,7 @@ build = "build.rs"
 [lib]
 name = "desktop_mobile"
 path = "src/lib.rs"
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
 name = "desktop-dev-server"
@@ -62,7 +63,7 @@ tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 
 [build-dependencies]
-tauri-build = { version = "2", optional = true }
+tauri-build = { version = "2", optional = true , features = [] }
 
 [lints]
 workspace = true

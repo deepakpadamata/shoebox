@@ -12,6 +12,7 @@ mod freeup;
 mod holdings;
 mod identity;
 mod import;
+mod in_place;
 mod keys;
 mod library_node;
 mod limit;

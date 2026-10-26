@@ -2,10 +2,12 @@ package org.shoebox.desktop
 
 import android.Manifest
 import android.content.ContentUris
+import android.provider.DocumentsContract
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.database.Cursor
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -54,7 +56,7 @@ class PhotoBackend(private val context: Context) {
         val genCol = if (useGeneration) MediaStore.MediaColumns.GENERATION_MODIFIED else MediaStore.MediaColumns.DATE_MODIFIED
         val projection = arrayOf(
             MediaStore.MediaColumns._ID, MediaStore.MediaColumns.MIME_TYPE, MediaStore.MediaColumns.SIZE,
-            MediaStore.MediaColumns.DATE_MODIFIED, genCol,
+            MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.DATA, genCol,
         )
         val selection = "(${MediaStore.Files.FileColumns.MEDIA_TYPE} = ? OR ${MediaStore.Files.FileColumns.MEDIA_TYPE} = ?) AND $genCol > ?"
         val args = arrayOf(
@@ -69,33 +71,89 @@ class PhotoBackend(private val context: Context) {
             val mime = c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
             val size = c.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
             val mod = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
+            val data = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA)
             val gen = c.getColumnIndexOrThrow(genCol)
             while (c.moveToNext()) {
-                assets.put(
-                    JSONObject()
-                        .put("id", c.getLong(id).toString())
-                        .put("modified_ms", c.getLong(mod) * 1000)
-                        .put("size", c.getLong(size))
-                        .put("mime", c.getString(mime) ?: "application/octet-stream")
-                )
+                assets.put(assetJson(c, id, mime, size, mod, data))
                 newest = maxOf(newest, c.getLong(gen))
             }
         }
         return JSONObject().put("assets", assets).put("removed", JSONArray()).put("token", newest.toString()).toString()
     }
 
-    /** Copy the original (with GPS when allowed) to the cache and return its path. */
-    fun readOriginal(id: String): String {
-        val assetId = id.toLongOrNull() ?: throw IllegalArgumentException("bad asset id")
-        var uri = ContentUris.withAppendedId(filesUri, assetId)
-        if (Build.VERSION.SDK_INT >= 29 && granted(Manifest.permission.ACCESS_MEDIA_LOCATION)) {
-            try { uri = MediaStore.setRequireOriginal(uri) } catch (_: Exception) {}
+    /** One asset as the Rust side reads it. `path` only when the file can be read where it is:
+     *  the library references gallery files and never copies them (A-092). Read through the file
+     *  path, a photo keeps its location when ACCESS_MEDIA_LOCATION is granted. */
+    private fun assetJson(c: Cursor, id: Int, mime: Int, size: Int, mod: Int, data: Int): JSONObject {
+        val o = JSONObject()
+            .put("id", c.getLong(id).toString())
+            .put("modified_ms", c.getLong(mod) * 1000)
+            .put("size", c.getLong(size))
+            .put("mime", c.getString(mime) ?: "application/octet-stream")
+        val path = c.getString(data)
+        if (path != null && File(path).canRead()) o.put("path", path)
+        return o
+    }
+
+    /** The gallery asset `mediaId`, or null when MediaStore does not show it to this app. */
+    private fun assetById(mediaId: Long): JSONObject? {
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID, MediaStore.MediaColumns.MIME_TYPE, MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.DATA,
+        )
+        context.contentResolver.query(filesUri, projection, "${MediaStore.MediaColumns._ID} = ?", arrayOf(mediaId.toString()), null)?.use { c ->
+            if (!c.moveToFirst()) return null
+            return assetJson(
+                c,
+                c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID),
+                c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE),
+                c.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE),
+                c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED),
+                c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA),
+            )
         }
-        val dir = File(context.cacheDir, "backup").apply { mkdirs() }
-        val out = File(dir, "asset-$id")
-        val input = context.contentResolver.openInputStream(uri) ?: throw IllegalStateException("cannot open asset $id")
-        input.use { i -> out.outputStream().use { o -> i.copyTo(o) } }
-        return out.absolutePath
+        return null
+    }
+
+    private fun displayName(uri: Uri): String? = try {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    } catch (_: Exception) {
+        null
+    }
+
+    /** The gallery (MediaStore) id behind a picked URI, if it is a gallery item on this phone. */
+    private fun mediaIdOf(uri: Uri): Long? {
+        val segments = uri.pathSegments
+        if (uri.authority == MediaStore.AUTHORITY && segments.firstOrNull()?.startsWith("picker") == true) {
+            // The photo picker: content://media/picker/<user>/<provider>/media/<id>. Items from
+            // this phone (the local provider) carry their MediaStore id; cloud items do not.
+            if (segments.none { it.endsWith(".photopicker") || it.endsWith(".media") }) return null
+            return uri.lastPathSegment?.toLongOrNull()
+        }
+        if (Build.VERSION.SDK_INT >= 29 && DocumentsContract.isDocumentUri(context, uri)) {
+            return try { MediaStore.getMediaUri(context, uri)?.let { ContentUris.parseId(it) } } catch (_: Exception) { null }
+        }
+        if (uri.authority == MediaStore.AUTHORITY) return try { ContentUris.parseId(uri) } catch (_: Exception) { null }
+        return null
+    }
+
+    /** What a picked URI is to the library: a gallery photo read in place, a gallery photo this app
+     *  may not read in place (not added: it would be a second copy), or a file from elsewhere to
+     *  copy (the phone keeps no other copy of it). */
+    fun resolvePicked(uri: Uri): JSONObject {
+        val name = displayName(uri) ?: "a photo"
+        val mediaId = mediaIdOf(uri)
+        if (mediaId != null) {
+            val asset = assetById(mediaId)
+            // The same file, checked by name: the picker's ids are not a documented promise.
+            val sameName = asset != null && asset.optString("path").substringAfterLast('/') == name
+            if (asset != null && asset.has("path") && (sameName || !uri.toString().contains("picker"))) {
+                return JSONObject().put("in_place", asset)
+            }
+            return JSONObject().put("unreadable", name)
+        }
+        return JSONObject().put("copy", uri.toString())
     }
 
     /** The system photo picker: any album, and no media permission needed. Falls back to the
@@ -118,17 +176,16 @@ class PhotoBackend(private val context: Context) {
             .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
 
     /** The content URIs a picker returned (one, or several in the clip data). */
-    fun pickedUris(data: Intent?): List<String> {
-        val clip = data?.clipData ?: return listOfNotNull(data?.data?.toString())
-        return (0 until clip.itemCount).map { clip.getItemAt(it).uri.toString() }
+    fun pickedUris(data: Intent?): List<Uri> {
+        val clip = data?.clipData ?: return listOfNotNull(data?.data)
+        return (0 until clip.itemCount).map { clip.getItemAt(it).uri }
     }
 
-    /** Copy a picked file to the cache, keeping its name (the import looks at the extension), and
-     *  return the path. The caller deletes it. */
+    /** Copy a picked file from elsewhere (see [resolvePicked]) to the cache, keeping its name (the
+     *  import looks at the extension), and return the path. The caller deletes it. */
     fun readPicked(uri: String): String {
         val u = Uri.parse(uri)
-        val name = context.contentResolver.query(u, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: "picked"
+        val name = displayName(u) ?: "picked"
         val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "_").takeLast(80)
         val dir = File(context.cacheDir, "picked").apply { mkdirs() }
         val out = File.createTempFile("p", "-$safe", dir)

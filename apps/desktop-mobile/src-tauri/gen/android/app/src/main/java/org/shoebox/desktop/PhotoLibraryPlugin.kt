@@ -67,13 +67,6 @@ class PhotoLibraryPlugin(private val activity: Activity) : Plugin(activity) {
     fun scan(invoke: Invoke) = guarded(invoke, "could not read the camera roll") { json(backend.scanJson(invoke.getArgs().getString("token"))) }
 
     @Command
-    fun readOriginal(invoke: Invoke) = guarded(invoke, "cannot read asset") {
-        JSObject().put("path", backend.readOriginal(invoke.getArgs().getString("id") ?: throw IllegalArgumentException("missing id")))
-    }
-
-    /** Let the user choose photos and videos: `source` "gallery" (the photo picker) or "files"
-     *  (the document picker). Resolves with the chosen content URIs, none when cancelled. */
-    @Command
     fun pickMedia(invoke: Invoke) {
         val files = invoke.getArgs().getString("source") == "files"
         try {
@@ -85,11 +78,19 @@ class PhotoLibraryPlugin(private val activity: Activity) : Plugin(activity) {
 
     @ActivityCallback
     fun picked(invoke: Invoke, result: ActivityResult) {
-        val uris = JSArray()
-        if (result.resultCode == Activity.RESULT_OK) backend.pickedUris(result.data).forEach { uris.put(it) }
-        val out = JSObject()
-        out.put("uris", uris)
-        invoke.resolve(out)
+        val uris = if (result.resultCode == Activity.RESULT_OK) backend.pickedUris(result.data) else emptyList()
+        // Looking each one up reads MediaStore: off the main thread.
+        Thread {
+            try {
+                val items = JSArray()
+                uris.forEach { items.put(backend.resolvePicked(it)) }
+                val out = JSObject()
+                out.put("items", items)
+                invoke.resolve(out)
+            } catch (e: Exception) {
+                invoke.reject("cannot read what was chosen: ${e.message}")
+            }
+        }.start()
     }
 
     @Command

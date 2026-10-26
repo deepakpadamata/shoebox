@@ -9,6 +9,7 @@
 //! | `lib/<hash>` | referenced by the library (an original, preview or thumb of a photo) |
 //! | `pin/<hash>` | the user pinned this original on this device |
 //! | `album/<album>/<hash>` | a shared album references it (M5 hooks in here) |
+//! | `place/<hash>` | the original is a file outside the store, read where it is (a phone's gallery photo): never freed, and released when that file goes |
 //!
 //! A blob is collected only once all its tags are gone, so a shared-album reference blocks the
 //! GC of a blob even after the library purges the photo.
@@ -31,6 +32,8 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 pub enum Protection {
     Library,
     Pin,
+    /// The original is a file outside the store, referenced where it is (a phone's gallery).
+    InPlace,
     Album(AlbumId),
 }
 
@@ -52,6 +55,7 @@ impl Protection {
         match self {
             Protection::Library => format!("lib/{}", hex(h)),
             Protection::Pin => format!("pin/{}", hex(h)),
+            Protection::InPlace => format!("place/{}", hex(h)),
             Protection::Album(a) => format!("album/{}/{}", ::hex::encode(a.0), hex(h)),
         }
     }
@@ -218,10 +222,10 @@ impl BlobStore {
         Ok(out)
     }
 
-    /// Every protection currently holding `hash`, sorted (Library, Pin, then albums).
+    /// Every protection currently holding `hash`, sorted (Library, Pin, InPlace, then albums).
     pub async fn protections(&self, hash: &Blake3Hash) -> Result<Vec<Protection>> {
         let mut out = vec![];
-        for p in [Protection::Library, Protection::Pin] {
+        for p in [Protection::Library, Protection::Pin, Protection::InPlace] {
             if self.store.tags().get(p.tag_name(hash)).await?.is_some() {
                 out.push(p);
             }
@@ -249,6 +253,7 @@ impl BlobStore {
     /// Album references stay: a shared album may still need the blob. GC reclaims it afterwards.
     pub async fn remove(&self, hash: &Blake3Hash) -> Result<()> {
         self.unprotect(hash, Protection::Library).await?;
-        self.unprotect(hash, Protection::Pin).await
+        self.unprotect(hash, Protection::Pin).await?;
+        self.unprotect(hash, Protection::InPlace).await
     }
 }

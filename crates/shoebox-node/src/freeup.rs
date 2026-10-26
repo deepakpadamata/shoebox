@@ -235,6 +235,9 @@ impl<L: LibraryStore> LibraryNode<L> {
             {
                 continue; // a shared album still needs this blob here
             }
+            if protections.contains(&Protection::InPlace) {
+                continue; // a gallery file: freeing would only drop the reference, not the file
+            }
             let others: Vec<EndpointId> = self
                 .store()
                 .holders(&hash)

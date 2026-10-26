@@ -287,29 +287,44 @@ Behaviour that will come back as features or needs a decision.
   member answers with its current epoch). `shoebox-keeper recover` is the CLI entry.
 - **A-083 · M5 not done** · Shared albums need a library on the device (no "shared albums only" mode, M5-02). No gossip presence, nudges or avatars (names are shared, M5-06). The accept-invitation screen has no storage-cost line. The UI loads an album page by page (500) but not virtualised. Notification posting when someone adds photos is not wired.
 
-- **A-090 · adding photos on a phone (2026-10-27)** · The phone's Library has a ＋ button: *From the gallery* opens the
-  system photo picker (`MediaStore.ACTION_PICK_IMAGES`, any album, no media permission needed; it falls back to the document
-  picker on phones without it), *From files* the document picker (Downloads, cloud drives, USB). Each pick is copied to the
-  cache 20 files at a time, imported like any other file and the copy deleted after its batch (`AppCore::import_picked`), so a
-  large pick needs little more room than the library's own copy; progress reads as one run. Limits: the photo picker returns
-  at most `getPickImagesMaxLimit()` items per pick (100 on most phones); it strips GPS from what it hands over, so picked
-  photos have no location (the document picker may keep it). A picked photo that camera backup later sees is a duplicate and
-  is skipped. Verified with a fake photo source and on the S25 build only as far as it installs; the pickers themselves
-  need a person.
+- **A-090 · adding photos on a phone (2026-10-27)** · The phone's Library has a ＋ button. *From the gallery*: with access to
+  every photo it opens the system photo picker (`MediaStore.ACTION_PICK_IMAGES`) and adds the chosen photos in place, like
+  the camera roll (`PhotoBackend.resolvePicked` maps a picker item to its MediaStore row and checks the file name, since
+  the picker's ids are not a documented promise); with access to only some photos it asks Android to share more and adds
+  what it then sees. *From files* opens the document picker: a gallery file found through it (`MediaStore.getMediaUri`)
+  is added in place; anything else (a cloud drive, a USB stick) is copied, 20 at a time with the copies deleted after each
+  batch, since the phone keeps no other copy of it. A gallery photo the app may not read in place is refused with a
+  message, never copied. The photo picker returns at most `getPickImagesMaxLimit()` items per pick (100 on most phones).
+  Verified with a fake photo source; the pickers need a person on the S25.
 - **A-091 · storage per device (2026-10-27)** · *Devices → Storage* shows, per device, the originals it holds and their size
   plus its previews and thumbnails, from the replicated holdings (`LibraryNode::storage_by_device`): what that device last
-  said it holds, not a disk measurement, and nothing outside Shoebox. Recently Deleted photos count until purged. It walks
-  every photo's holders, so it is loaded after the device list rather than with it; fine for tens of thousands of photos,
-  revisit with a per-device total in the store if it gets slow.
-- **A-092 · a backed-up phone photo takes room twice (open, 2026-10-27)** · Every import copies the file into the blob store
-  (`ImportMode::Copy`; the app never uses `Reference`). On Android the camera-roll original stays in the gallery, so a photo
-  backed up from the phone exists twice on it until *Free up space*, and freeing space only removes Shoebox's copy: the
-  gallery original is untouched, so it reclaims only the duplicate. The plan said "referenced in place where possible"
-  (docs/05-prototype-plan.md §3); MediaStore files are content URIs the app cannot reference by path, and a gallery file
-  can be edited or deleted under the library. Options: keep originals out of the phone's store once a keeper or two
-  devices confirm them (the app would then serve the gallery file while it exists), or have *Free up space* delete gallery
-  originals (needs `MediaStore.createDeleteRequest`, one system confirmation per batch). Desktop imports copy too; a
-  by-reference import for folders the person promises not to change is possible (`ImportMode::Reference`, A-028).
+  said it holds, not a disk measurement, and nothing outside Shoebox. On a phone the originals are its gallery files.
+  Recently Deleted photos count until purged. It walks every photo's holders, so it is loaded after the device list rather
+  than with it; fine for tens of thousands of photos, revisit with a per-device total in the store if it gets slow.
+- **A-092 · the gallery owns its photos (decided 2026-10-27)** · Owner's rule: a phone never keeps two copies of a
+  photo, and a deletion in the gallery is respected without a second deletion in the app. So:
+  - Camera-roll originals are referenced where they are (`ImportMode::Reference`, iroh-blobs `TryReference`) and tagged
+    `place/<hash>`; only previews and thumbnails are stored. iroh-blobs never deletes a referenced file (its delete path
+    skips `DataLocation::External`). Files of 16 KiB or less are inlined by iroh-blobs (a copy, but negligible).
+  - The scan reports each file's path (MediaStore `DATA`) when it is readable in place; a photo without one is not added
+    (reported, retried), never copied. Read by path, a photo keeps its GPS when `ACCESS_MEDIA_LOCATION` is granted.
+  - `backup.json` tracks asset id → photo, path and modified time. A tracked file that is gone while its storage
+    (`/storage/emulated/<n>`, `/storage/<card>`) is still there was deleted: the photo is deleted from the library
+    (Recently Deleted for 30 days on every device, then purged everywhere, keeper copies included), and this phone's
+    holding is retracted at once. Same content still in the gallery under another file keeps the photo. An edit (same
+    asset, new content) adds the new version and deletes the old one. Only with access to every photo: with some shared,
+    a missing file may just be one no longer shared. A card that is not mounted is not a deletion.
+  - More than 50 gone at once and more than a quarter of the tracked photos waits for the person (banner: delete them
+    too, or keep them in the library; kept ones are no longer held by this phone).
+  - Free-up never counts `place/` originals: the file is the gallery's. Free-up on a phone only frees originals it
+    fetched or copied in.
+  - Upgrading: a phone whose `backup.json` predates this looks at the whole roll again; each photo comes back as a
+    duplicate, and a stored copy is released and re-referenced once the store's collection has removed it (`moving`;
+    up to one GC interval, 5 minutes).
+  - Desktop imports still copy (a folder on a computer is not a gallery that deletes on its own); a by-reference import
+    for folders the person promises not to change remains possible (A-028).
+  - Not handled: a shared album that references a deleted gallery photo keeps a dangling reference on this phone until
+    the photo is purged (the album's other members have their own copies). iOS (PhotoKit) is not built.
 
 ### Rules for future changes
 

@@ -56,6 +56,8 @@ pub struct ImportReport {
     pub skipped: Vec<PathBuf>,
     /// Files that look like media but could not be read or decoded, with the reason.
     pub failed: Vec<(PathBuf, String)>,
+    /// Every file that is in the library after this run (imported or a duplicate), with its photo.
+    pub by_path: Vec<(PathBuf, PhotoId)>,
 }
 
 /// Every regular, non-hidden file under `paths` (directories are walked recursively), sorted.
@@ -164,8 +166,14 @@ impl<L: LibraryStore> LibraryNode<L> {
                 Ok(Err(AnalyzeError::Unsupported(_))) => report.skipped.push(path),
                 Ok(Err(e)) => report.failed.push((path, e.to_string())),
                 Ok(Ok(result)) => match self.ingest(&path, &result, &opts, &mut held).await {
-                    Ok(Outcome::Imported(id)) => report.imported.push(id),
-                    Ok(Outcome::Duplicate(id)) => report.duplicates.push(id),
+                    Ok(Outcome::Imported(id)) => {
+                        report.imported.push(id);
+                        report.by_path.push((path, id));
+                    }
+                    Ok(Outcome::Duplicate(id)) => {
+                        report.duplicates.push(id);
+                        report.by_path.push((path, id));
+                    }
                     Err(e) => report.failed.push((path, format!("{e:#}"))),
                 },
             }
@@ -214,6 +222,9 @@ impl<L: LibraryStore> LibraryNode<L> {
                     "{} changed while it was being imported",
                     path.display()
                 );
+                if opts.mode == ImportMode::Reference {
+                    blobs.protect(&id, Protection::InPlace).await?;
+                }
                 held.push((id, BlobKind::Original));
             }
             return Ok(Outcome::Duplicate(id));
@@ -225,6 +236,9 @@ impl<L: LibraryStore> LibraryNode<L> {
             "{} changed while it was being imported",
             path.display()
         );
+        if opts.mode == ImportMode::Reference {
+            blobs.protect(&id, Protection::InPlace).await?;
+        }
         let original_ref = BlobRef {
             hash: id,
             size: r.size,

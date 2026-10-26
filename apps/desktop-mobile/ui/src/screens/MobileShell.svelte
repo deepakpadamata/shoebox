@@ -3,7 +3,7 @@
   // Devices), and Settings from the avatar. Screens are the same ones the desktop uses.
   import { api } from '../lib/api';
   import { go, param, section } from '../lib/route.svelte';
-  import { app, fail, toast } from '../lib/store.svelte';
+  import { app, fail, refreshState, toast } from '../lib/store.svelte';
   import { plural } from '../lib/format';
   import Avatar from '../components/Avatar.svelte';
   import Banner from '../components/Banner.svelte';
@@ -36,13 +36,24 @@
   // A phone with a camera roll can also add photos the backup does not see: other albums when
   // only some photos are shared with the app, Downloads, a cloud drive, a USB stick.
   const canAdd = $derived(!!app.backup && app.backup.permission !== 'unavailable' && app.state?.role !== 'viewer');
+  async function answerHeld(del: boolean) {
+    try {
+      await api.answerGalleryDeletions(del);
+      if (app.backup) app.backup = { ...app.backup, gallery_deletions_held: 0 };
+      toast(del ? 'Deleted from your library (Recently Deleted for 30 days)' : 'Kept in your library');
+    } catch (e) {
+      fail(e);
+    }
+  }
   async function addPhotos(files: boolean) {
     adding = true;
     try {
       const r = await api.importPicked(files);
       addOpen = false;
+      refreshState().catch(() => {});
       const n = r.imported + r.duplicates + r.skipped + r.failed.length;
-      if (n > 0) toast(`Added ${plural(r.imported, 'photo')}${r.duplicates ? `, ${r.duplicates} already in the library` : ''}${r.skipped ? `, ${plural(r.skipped, 'file')} not a photo or video` : ''}${r.failed.length ? `, ${r.failed.length} failed` : ''}`);
+      if (r.failed.length) fail(new Error(r.failed[0]));
+      else if (n > 0) toast(`Added ${plural(r.imported, 'photo')}${r.duplicates ? `, ${r.duplicates} already in the library` : ''}${r.skipped ? `, ${plural(r.skipped, 'file')} not a photo or video` : ''}${r.failed.length ? `, ${r.failed.length} failed` : ''}`);
     } catch (e) {
       fail(e);
     } finally {
@@ -76,6 +87,18 @@
       {#if atRisk > 0}<span class="badge"></span>{/if}
     </button>
   </header>
+
+  {#if (app.backup?.gallery_deletions_held ?? 0) > 0}
+    <div class="banners">
+      <Banner tone="warn" icon="🗑">
+        <b>{plural(app.backup?.gallery_deletions_held ?? 0, 'photo')}</b> disappeared from this phone's gallery at once. Delete them from your library on every device too?
+        <div class="row-flex held">
+          <button class="choice small-choice" onclick={() => answerHeld(true)}>Delete them</button>
+          <button class="choice small-choice" onclick={() => answerHeld(false)}>Keep them in the library</button>
+        </div>
+      </Banner>
+    </div>
+  {/if}
 
   {#if app.removed || app.state?.membership === 'removed'}
     <div class="banners"><Banner tone="risk" icon="⛔">This device was removed from the library.</Banner></div>
@@ -126,9 +149,9 @@
 
 <Sheet open={addOpen} title="Add photos" onclose={() => { if (!adding) addOpen = false; }}>
   <div class="add">
-    <p class="small muted">Add photos and videos the backup does not see on its own. They are copied into your library and backed up like the rest.</p>
-    <button class="choice" disabled={adding} onclick={() => addPhotos(false)}><b>{adding ? 'Adding…' : 'From the gallery'}</b><span class="small muted">Any album on this phone</span></button>
-    <button class="choice" disabled={adding} onclick={() => addPhotos(true)}><b>From files</b><span class="small muted">Downloads, a cloud drive, a USB stick…</span></button>
+    <p class="small muted">Photos from this phone's gallery stay where they are: Shoebox never keeps a second copy, and deleting one in the gallery deletes it here too.</p>
+    <button class="choice" disabled={adding} onclick={() => addPhotos(false)}><b>{adding ? 'Adding…' : 'From the gallery'}</b><span class="small muted">{app.backup?.permission === 'granted' ? 'Any album on this phone' : 'Choose which photos Shoebox may see'}</span></button>
+    <button class="choice" disabled={adding} onclick={() => addPhotos(true)}><b>From files</b><span class="small muted">A cloud drive, a USB stick… (copied in: the phone has no other copy)</span></button>
     {#if app.importProgress}<ProgressBar total={app.importProgress.total} segments={[{ value: app.importProgress.done, tone: 'info' }]} label="Adding" />{/if}
   </div>
 </Sheet>
@@ -146,6 +169,8 @@
   .add { display: flex; flex-direction: column; gap: 10px; }
   .choice { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
   .choice:disabled { opacity: .6; }
+  .held { gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .small-choice { padding: 6px 10px; font-size: 13px; }
   .avatar-btn { position: relative; background: none; border: 0; padding: 0; cursor: pointer; }
   .badge { position: absolute; right: -1px; top: -1px; width: 10px; height: 10px; border-radius: 50%; background: var(--risk); border: 2px solid var(--surface); }
   .banners { padding: 0 16px 8px; }

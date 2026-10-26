@@ -29,7 +29,8 @@ how many photos are in that state and when they will be safe.
 
 **Photos are only ever deleted by you.** *Delete* moves a photo to Recently Deleted for 30 days on every
 device. Freeing space on a phone removes only originals that a keeper, or at least two other devices, confirmed holding
-in the last week: the same rule as "backed up".
+in the last week: the same rule as "backed up". Photos from the phone's own gallery are not freed this way: Shoebox
+keeps no copy of them, only the gallery does.
 
 ## First run
 
@@ -42,8 +43,10 @@ in the last week: the same rule as "backed up".
    do not match*: someone is in the middle.
 4. **Bring photos in.** On a computer: *Import* a folder (the app can also watch a folder). On a phone: turn
    on camera backup in Settings; it uploads new photos to your other devices when conditions allow
-   (Wi-Fi only, charging only and battery limits are yours to choose). To add photos the backup does not see
-   (other albums, Downloads, a cloud drive), tap **＋** in the Library.
+   (Wi-Fi only, charging only and battery limits are yours to choose). Shoebox reads gallery photos where they are
+   and keeps no second copy on the phone; delete a photo in the gallery and it is deleted from your library too
+   (Recently Deleted, on every device). To add photos the backup does not see (albums you have not shared, a cloud
+   drive), tap **＋** in the Library.
 
 ## Sharing an album
 

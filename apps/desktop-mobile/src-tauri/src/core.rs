@@ -38,6 +38,9 @@ pub struct AppOptions {
     /// Where to look for a newer release (R1-07): the site's `release.json`. The placeholder (the
     /// default until the site exists, or `SHOEBOX_UPDATE_FEED`) is never contacted.
     pub update_feed: String,
+    /// How often the blob store collects unprotected blobs (`None`: the node's default). Tests
+    /// shorten it.
+    pub gc_interval: Option<Duration>,
 }
 
 fn default_update_feed() -> String {
@@ -56,6 +59,7 @@ impl Default for AppOptions {
             secrets: None,
             background: true,
             update_feed: default_update_feed(),
+            gc_interval: None,
         }
     }
 }
@@ -69,6 +73,7 @@ impl AppOptions {
             secrets: None,
             background: true,
             update_feed: shoebox_node::update::PLACEHOLDER_FEED.to_string(),
+            gc_interval: None,
         }
     }
 }
@@ -108,7 +113,7 @@ fn role_name(r: Role) -> &'static str {
     }
 }
 
-fn parse_hash(s: &str) -> Result<Blake3Hash> {
+pub(crate) fn parse_hash(s: &str) -> Result<Blake3Hash> {
     let bytes: [u8; 32] = hex::decode(s.trim())
         .ok()
         .and_then(|b| b.try_into().ok())
@@ -200,7 +205,7 @@ pub struct AppCore {
     pub(crate) photo_source: Mutex<Option<Arc<dyn crate::photos_source::PhotoSource>>>,
     /// While a picked import runs in batches: (files done in earlier batches, total), so the
     /// node's per-batch progress reads as one run.
-    import_batches: Mutex<Option<(u32, u32)>>,
+    pub(crate) import_batches: Mutex<Option<(u32, u32)>>,
     pub(crate) backup: tokio::sync::Mutex<crate::backup::BackupState>,
     pub(crate) backup_running: tokio::sync::Mutex<()>,
 }
@@ -234,6 +239,9 @@ impl AppCore {
             .map(relay_setting)
             .unwrap_or_else(|| opts.relay.clone());
         config.mdns = opts.mdns;
+        if let Some(every) = opts.gc_interval {
+            config = config.with_gc_interval(every);
+        }
         let node = match &opts.secrets {
             Some(store) => {
                 // A device that already belongs to a library must keep its identity: a missing
@@ -1123,64 +1131,6 @@ impl AppCore {
                 .map(|(p, why)| format!("{}: {why}", p.display()))
                 .collect(),
         })
-    }
-
-    /// "Add photos" on a phone: the person chooses photos and videos (the gallery picker, or
-    /// files from anywhere) and they are imported like any other. Each is copied out of the
-    /// system a batch at a time and the copy deleted after its batch, so a large pick never needs
-    /// much more room than the library's own copy. Cancelling imports nothing.
-    pub async fn import_picked(&self, files: bool) -> Result<ImportSummary> {
-        const BATCH: usize = 20;
-        let ln = self.ln().await?;
-        let source = self
-            .photo_source
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| anyhow!("choosing photos is not available on this device"))?;
-        let picked = source.pick(files).await?;
-        let mut summary = ImportSummary {
-            imported: 0,
-            duplicates: 0,
-            skipped: 0,
-            failed: vec![],
-        };
-        let total = picked.len() as u32;
-        let mut done = 0u32;
-        for batch in picked.chunks(BATCH) {
-            let mut paths = vec![];
-            for handle in batch {
-                match source.read_picked(handle).await {
-                    Ok(p) => paths.push(p),
-                    Err(e) => summary.failed.push(format!("{e:#}")),
-                }
-            }
-            *self.import_batches.lock().unwrap() =
-                Some((done + batch.len() as u32 - paths.len() as u32, total));
-            let result = ln.import_paths(&paths, ImportOptions::default()).await;
-            for p in &paths {
-                let _ = std::fs::remove_file(p);
-            }
-            let report = match result {
-                Ok(r) => r,
-                Err(e) => {
-                    *self.import_batches.lock().unwrap() = None;
-                    return Err(e);
-                }
-            };
-            summary.imported += report.imported.len() as u32;
-            summary.duplicates += report.duplicates.len() as u32;
-            summary.skipped += report.skipped.len() as u32;
-            summary.failed.extend(
-                report
-                    .failed
-                    .iter()
-                    .map(|(p, why)| format!("{}: {why}", p.display())),
-            );
-            done += batch.len() as u32;
-        }
-        *self.import_batches.lock().unwrap() = None;
-        Ok(summary)
     }
 
     pub async fn pin_original(&self, id: &str, pin: bool) -> Result<()> {

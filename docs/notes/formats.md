@@ -75,7 +75,7 @@ App data dir:
 | `format.json` | layout marker |
 | `app.json` | device name, role, library ticket, relay, unacknowledged security alerts |
 | `app.lock` | one app per data dir |
-| `backup.json` | camera-roll backup state (phones) |
+| `backup.json` | camera-roll backup state (phones): policy, change token, waiting assets, `tracked` (asset id → photo, path, modified time), `moving`, `held_deletions`; an older file with only `imported` is read and replaced |
 | `shared-albums.json` | shared-album registry (`0600`: holds album capabilities) |
 | `secrets/` | file keystore (dev, tests); real builds use the OS keystore |
 | `posters/` | device-local video poster frames |
@@ -88,7 +88,7 @@ Node data dir (the keeper storage dir is one, plus `keeper.json`, `keeper.lock`,
 |---|---|
 | `config.toml` | node settings, watched folders, pinned originals |
 | `keys/` | endpoint key file (when no OS keystore) |
-| `blobs/` | iroh-blobs store |
+| `blobs/` | iroh-blobs store; tags `lib/<hash>`, `pin/<hash>`, `album/<album>/<hash>`, `place/<hash>` (an original referenced in place, a phone's gallery file) |
 | `store/docs/` | iroh-docs store (shared albums) |
 | `loro/<epoch>/` | the library: `snapshot.loro`, `updates.log` |
 | `holder-confirmations.json` | who confirmed holding which original (free-up) |

@@ -113,6 +113,8 @@ function handle(e: AppEvent) {
       const { done, total } = e.BackupProgress;
       app.backupProgress = done >= total ? null : { done, total };
       app.version++;
+    } else if ('GalleryDeletionsHeld' in e) {
+      if (app.backup) app.backup = { ...app.backup, gallery_deletions_held: e.GalleryDeletionsHeld.count };
     } else if ('BackupPaused' in e) {
       if (app.backup) app.backup = { ...app.backup, paused: e.BackupPaused.reason };
     } else if ('Sync' in e) {

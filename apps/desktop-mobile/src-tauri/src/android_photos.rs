@@ -1,7 +1,7 @@
 //! The Android camera roll as a [`PhotoSource`]: a thin client of the Kotlin `PhotoLibraryPlugin`
 //! (MediaStore, permissions, battery and network state).
 
-use crate::photos_source::{Asset, Conditions, Permission, PhotoSource, Scan};
+use crate::photos_source::{Asset, Conditions, Permission, PhotoSource, Picked, Scan};
 use anyhow::{anyhow, Result};
 use futures::future::BoxFuture;
 use serde::Deserialize;
@@ -46,7 +46,7 @@ struct PathReply {
 
 #[derive(Deserialize)]
 struct PickReply {
-    uris: Vec<String>,
+    items: Vec<Picked>,
 }
 
 #[derive(Deserialize)]
@@ -153,18 +153,11 @@ impl PhotoSource for AndroidPhotoSource {
             })
         })
     }
-    fn read_original(&self, id: &str) -> BoxFuture<'_, Result<PathBuf>> {
-        let id = id.to_string();
-        Box::pin(async move {
-            let r: PathReply = self.call("readOriginal", json!({ "id": id })).await?;
-            Ok(PathBuf::from(r.path))
-        })
-    }
-    fn pick(&self, files: bool) -> BoxFuture<'_, Result<Vec<String>>> {
+    fn pick(&self, files: bool) -> BoxFuture<'_, Result<Vec<Picked>>> {
         Box::pin(async move {
             let source = if files { "files" } else { "gallery" };
             let r: PickReply = self.call("pickMedia", json!({ "source": source })).await?;
-            Ok(r.uris)
+            Ok(r.items)
         })
     }
     fn read_picked(&self, handle: &str) -> BoxFuture<'_, Result<PathBuf>> {

@@ -45,6 +45,7 @@ pub const COMMANDS: &[&str] = &[
     "recently_deleted",
     "import_paths",
     "import_picked",
+    "answer_gallery_deletions",
     "pin_original",
     "fetch_now",
     "albums",
@@ -159,6 +160,10 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             .import_paths(&arg::<Vec<String>>(&args, "paths")?)
             .await?),
         "import_picked" => out(core.import_picked(arg(&args, "files")?).await?),
+        "answer_gallery_deletions" => {
+            core.answer_gallery_deletions(arg(&args, "delete")?).await?;
+            Ok(json!({}))
+        }
         "pin_original" => {
             core.pin_original(&arg::<String>(&args, "id")?, arg(&args, "pin")?)
                 .await?;

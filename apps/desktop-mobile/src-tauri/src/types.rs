@@ -269,6 +269,9 @@ ts_type! {
         pub paused: Option<String>,
         pub last_scan_ms: f64,
         pub last_error: Option<String>,
+        /// Photos gone from the gallery all at once, waiting for the person to say whether
+        /// to delete them from the library too.
+        pub gallery_deletions_held: u32,
     }
 }
 
@@ -356,6 +359,8 @@ ts_type! {
         SecurityChanged,
         BackupProgress { done: u32, total: u32 },
         BackupPaused { reason: Option<String> },
+        /// Many photos left the gallery at once; `count` wait for an answer (0: answered).
+        GalleryDeletionsHeld { count: u32 },
         /// Something changed in a shared album (new photos, members, downloads).
         SharedChanged { album: String },
     }

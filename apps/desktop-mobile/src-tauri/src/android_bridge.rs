@@ -132,21 +132,6 @@ impl PhotoSource for JniPhotoSource {
         })
     }
 
-    fn read_original(&self, id: &str) -> BoxFuture<'_, Result<PathBuf>> {
-        let (b, id) = (self.0.clone(), id.to_string());
-        Box::pin(async move {
-            let path = blocking(move || {
-                b.string_call(
-                    "readOriginal",
-                    "(Ljava/lang/String;)Ljava/lang/String;",
-                    Some(&id),
-                )
-            })
-            .await?;
-            Ok(PathBuf::from(path))
-        })
-    }
-
     fn conditions(&self) -> BoxFuture<'_, Result<Conditions>> {
         let b = self.0.clone();
         Box::pin(async move {

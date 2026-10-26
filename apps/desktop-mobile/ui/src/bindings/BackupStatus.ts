@@ -9,4 +9,9 @@ permission: string, imported: number, pending: number,
 /**
  * Why it is waiting right now, if it is.
  */
-paused: string | null, last_scan_ms: number, last_error: string | null, };
+paused: string | null, last_scan_ms: number, last_error: string | null, 
+/**
+ * Photos gone from the gallery all at once, waiting for the person to say whether
+ * to delete them from the library too.
+ */
+gallery_deletions_held: number, };

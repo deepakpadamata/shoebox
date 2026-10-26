@@ -126,6 +126,8 @@ export const api = {
   importPaths: (paths: string[]) => call<ImportSummary>('import_paths', { paths }),
   /** Phone: the person chooses photos (`files`: from anywhere, else the gallery) and they are imported. */
   importPicked: (files: boolean) => call<ImportSummary>('import_picked', { files }),
+  /** Many photos left the gallery at once: delete them from the library too, or keep them. */
+  answerGalleryDeletions: (del: boolean) => call<void>('answer_gallery_deletions', { delete: del }),
   pinOriginal: (id: string, pin: boolean) => call<{}>('pin_original', { id, pin }),
   fetchNow: (id: string, kind: BlobKind) => call<{}>('fetch_now', { id, kind }),
   albums: () => call<AlbumInfo[]>('albums'),

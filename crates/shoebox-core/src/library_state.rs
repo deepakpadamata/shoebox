@@ -98,7 +98,9 @@ impl Effect {
 fn identity_err(e: IdentityError) -> StoreError {
     match e {
         IdentityError::BadSignature => StoreError::BadSignature,
-        IdentityError::SignerNotAdmin | IdentityError::Expired => StoreError::NotAuthorized,
+        IdentityError::SignerNotAdmin | IdentityError::Expired | IdentityError::RootRequired => {
+            StoreError::NotAuthorized
+        }
     }
 }
 

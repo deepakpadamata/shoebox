@@ -1034,10 +1034,20 @@ impl AppCore {
         Ok(out)
     }
 
-    /// Revoke a device and move the library to a new epoch (this device must be an admin).
-    pub async fn revoke_device(&self, id: &str) -> Result<()> {
+    /// Revoke a device and move the library to a new epoch. Without a recovery phrase this
+    /// device must be an admin and the other device must not be one; with the phrase any device
+    /// can remove any other (A-085).
+    pub async fn revoke_device(&self, id: &str, phrase: Option<&str>) -> Result<()> {
         let ln = self.ln().await?;
-        ln.revoke_and_rotate(&parse_device(id)?).await?;
+        let device = parse_device(id)?;
+        match phrase.map(str::trim).filter(|p| !p.is_empty()) {
+            Some(phrase) => {
+                ln.revoke_and_rotate_with_phrase(phrase, &device).await?;
+            }
+            None => {
+                ln.revoke_and_rotate(&device).await?;
+            }
+        }
         Ok(())
     }
 

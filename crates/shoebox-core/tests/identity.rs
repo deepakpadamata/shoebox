@@ -362,7 +362,7 @@ fn a_revoked_admin_loses_the_right_to_certify_from_then_on() {
         hlc(10, 0, 1),
         None,
     ));
-    // Certified while still an admin: stays valid.
+    // Certified while still an admin.
     let early = issue_device_cert(
         &admin,
         LIB,
@@ -373,6 +373,8 @@ fn a_revoked_admin_loses_the_right_to_certify_from_then_on() {
         false,
     );
     c.add_device(early.clone());
+    // What the root re-signs when it removes the admin (A-085): its certs that are current.
+    assert_eq!(c.certs_signed_by(&admin.endpoint_id()), vec![early.clone()]);
     // The root revokes the admin device at 30.
     c.add_device(issue_device_cert(
         &root,
@@ -399,15 +401,128 @@ fn a_revoked_admin_loses_the_right_to_certify_from_then_on() {
     );
     c.add_device(late);
     let v = c.validate();
-    assert!(
-        v.is_member(&phone.endpoint_id()),
-        "certified before the revocation"
-    );
-    assert!(
-        !v.is_member(&laptop.endpoint_id()),
-        "certified after the revocation"
-    );
+    // Its earlier certs no longer count either: a removed admin could have backdated them.
+    assert!(!v.is_member(&phone.endpoint_id()), "not re-signed yet");
+    assert!(!v.is_member(&laptop.endpoint_id()));
     assert!(!v.is_member(&admin.endpoint_id()));
+    assert!(
+        v.admins.iter().all(|a| a.admin != admin.endpoint_id()),
+        "a revoked device is no admin"
+    );
+
+    // The root re-signs the phone's cert in the same step: it stays.
+    c.add_device(issue_device_cert(
+        &root,
+        LIB,
+        phone.endpoint_id(),
+        early.role,
+        &early.name,
+        hlc(30, 1, 1),
+        false,
+    ));
+    assert!(c.validate().is_member(&phone.endpoint_id()));
+}
+
+/// A-085: a stolen admin device picks its certs' dates, so the rules that stop it must not
+/// depend on dates.
+#[test]
+fn a_stolen_admin_cannot_backdate_its_way_back() {
+    let (root, real, thief, phone, extra) = (key(1), key(2), key(3), key(4), key(5));
+    let mut c = chain(&root);
+    for (k, t) in [(&real, 10), (&thief, 11)] {
+        c.add_admin(issue_admin_cert(
+            &root,
+            LIB,
+            k.endpoint_id(),
+            hlc(t, 0, 1),
+            None,
+        ));
+        c.add_device(issue_device_cert(
+            &root,
+            LIB,
+            k.endpoint_id(),
+            Role::Phone,
+            "admin",
+            hlc(t, 1, 1),
+            false,
+        ));
+    }
+    c.add_device(issue_device_cert(
+        &real,
+        LIB,
+        phone.endpoint_id(),
+        Role::Phone,
+        "p",
+        hlc(15, 0, 2),
+        false,
+    ));
+
+    // An admin cannot remove another admin device, whatever date it writes.
+    let coup = issue_device_cert(
+        &thief,
+        LIB,
+        real.endpoint_id(),
+        Role::Phone,
+        "admin",
+        hlc(12, 0, 3),
+        true,
+    );
+    assert_eq!(c.check_device_cert(&coup), Err(IdentityError::RootRequired));
+    c.add_device(coup);
+    assert!(c.validate().is_member(&real.endpoint_id()));
+    // An admin can still remove an ordinary device.
+    let lost = issue_device_cert(
+        &real,
+        LIB,
+        phone.endpoint_id(),
+        Role::Phone,
+        "p",
+        hlc(16, 0, 2),
+        true,
+    );
+    assert_eq!(c.check_device_cert(&lost), Ok(()));
+
+    // The root removes the thief at 50.
+    c.add_device(issue_device_cert(
+        &root,
+        LIB,
+        thief.endpoint_id(),
+        Role::Phone,
+        "admin",
+        hlc(50, 0, 1),
+        true,
+    ));
+    // A cert dated before that still does not count...
+    let backdated = issue_device_cert(
+        &thief,
+        LIB,
+        extra.endpoint_id(),
+        Role::Keeper,
+        "x",
+        hlc(20, 0, 3),
+        false,
+    );
+    c.add_device(backdated);
+    // ...and no admin can bring the thief back; only the root could.
+    let revived = issue_device_cert(
+        &real,
+        LIB,
+        thief.endpoint_id(),
+        Role::Phone,
+        "admin",
+        hlc(60, 0, 2),
+        false,
+    );
+    assert_eq!(
+        c.check_device_cert(&revived),
+        Err(IdentityError::RootRequired)
+    );
+    c.add_device(revived);
+    let v = c.validate();
+    assert!(!v.is_member(&extra.endpoint_id()), "backdated cert ignored");
+    assert!(!v.is_member(&thief.endpoint_id()), "stays removed");
+    assert!(v.is_member(&real.endpoint_id()));
+    assert!(v.is_member(&phone.endpoint_id()));
 }
 
 #[test]

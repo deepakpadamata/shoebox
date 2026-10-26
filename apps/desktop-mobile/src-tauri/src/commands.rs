@@ -183,7 +183,9 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             .await?),
         "devices" => out(core.devices().await?),
         "revoke_device" => {
-            core.revoke_device(&arg::<String>(&args, "id")?).await?;
+            let phrase = opt::<String>(&args, "phrase")?;
+            core.revoke_device(&arg::<String>(&args, "id")?, phrase.as_deref())
+                .await?;
             Ok(json!({}))
         }
         "health" => out(core.health().await?),

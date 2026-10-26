@@ -179,17 +179,23 @@ Accepted for now; for the external review and the beta.
 - **A-078 · M5 trust model** · A shared album is an iroh-docs namespace; its capability is the key. A *viewer* gets the read capability, so viewers truly cannot write. *Owner* and *contributor* both receive the write capability, so on every replica they are told apart only by the membership entries, which any writer could forge: a hostile contributor could rename the album, add a fake owner or delete entries. The product assumes people you invite to contribute are not hostile (the same as handing someone a shared folder with write access). Removing a member (A-081) is the repair; a fake owner entry cannot be used to move the album away (members follow only the inviter they joined through, since 2026-10-26). Invitations are enforced at the inviter: each has its own random secret, used once and for its expiry (`shared-albums.json` keeps them); a joiner that was refused cannot fetch the album's content from the inviter, but the namespace capability inside the ticket is itself a bearer secret, so an interceptor who is *faster* than the intended person still wins. Expiry is also checked by the joiner.
 - **A-079 · M5 connection gate** · A device with a library accepts only device-list peers (M2-03). Shared albums need strangers, so the gate lets three things through for anyone: pairing/recovery (as before), iroh-docs sync and gossip (guarded by the namespace capability, and the library itself no longer lives in docs), and the new `shoebox/album/0` handshake. Blob transfer (`/iroh-bytes`) is open only to *album peers*: members of an album this device is in, plus a joiner that presented a valid invitation in the last 30 minutes (until 2026-10-26 such a joiner kept blob access for good, even if it never became a member; now only members with an entry and recorded viewers count after the window, and the owner can remove a joiner that never wrote an entry). An album peer can fetch any blob whose hash it knows (hashes are unguessable and only appear in albums it can read), not just album blobs. When someone leaves the albums their open blob connections are closed. Docs sync also fetches entry content over the blob protocol, which is why a joiner needs the guest window.
 
-- **A-085 · security review 2026-10-26 · open** · **A stolen admin device can outlast its revocation.** A device cert is judged
-  "at its own HLC time" (A-056), and the signer chooses that HLC, so it can backdate. A thief holding an admin device can sync with a member
-  that has not heard of the revocation yet (that member's gate still admits it) and write a revocation of the real admin dated just before
-  the real admin revoked the thief. On replay every replica then finds the real admin revoked first, so the thief's revocation is invalid:
-  the thief is back in and the real admin is out. `adopt_rotation` carries the device list into a new epoch, so it survives rotation. The
-  same backdating lets a revoked or expired admin keep adding devices. Related: a rotation notice signed by such an admin is accepted by a
-  member that has not heard of its revocation, and once a member has followed one notice it refuses the real one ("another epoch").
-  Partly closed: a member that knows the admin is revoked, or that its admin rights expired by its own clock, now refuses its notices
-  (`accept_notice`). Fixing the rest needs a design choice, for example: only the root (the recovery phrase) may revoke a device that holds
-  an admin cert, and a revocation of an admin lists which of its certs stay valid, so nothing it signs later, whatever date it claims, counts.
-  The cost is that removing a stolen *admin* phone needs the recovery phrase.
+- **A-085 · security review 2026-10-26** · **A stolen admin device could outlast its revocation; closed by rules that do not depend on
+  dates.** A device cert is judged at its own HLC time (A-056) and the signer picks that HLC, so a stolen admin could backdate: write a
+  revocation of the real admin dated before its own revocation (undoing it on every replica, through rotations too), or keep adding devices
+  after it was removed. Now (`TrustChain::rules`): **only the root may revoke a device that holds an admin cert, or bring back one the root
+  revoked**, and **once the root has revoked an admin device, none of the certs it signed count**, whatever date they claim. The "list of
+  what stays valid" is carried as root re-signatures: in the same step the root re-signs the current cert of every device whose cert that
+  admin signed (`revoke_device_with_root`, re-signed before the revocation so nobody drops out in between). That needs no new record type in
+  the three stores. The root comes from the recovery phrase (`revoke_and_rotate_with_phrase`); if the device doing it is no admin, the root
+  makes it one so it can sign the rotation. In the app, removing an admin device, or removing any device from a device that is no admin,
+  asks for the phrase; an admin removing an ordinary device does not. A member that already followed the thief's rotation switches to the
+  real one when that notice revokes, with the root key, the admin whose notice it followed (`accept_notice`); members that know an admin is
+  revoked or expired refuse its notices. Costs and limits: removing a stolen *admin* phone needs the recovery phrase (the first phone and the
+  first desktop are admins). Devices an admin had certified briefly have no valid cert on a member that took the thief's epoch, until it
+  syncs the root's re-signed certs from the real admin. An admin whose admin cert *expired* can still backdate certs to before the expiry
+  (no flow sets `expires_at` today). Data written before this change in which an admin revoked another admin now reads as not revoked
+  (nothing has been released). Tested: `identity.rs::a_stolen_admin_cannot_backdate_its_way_back`, and
+  `rotation.rs::a_stolen_admin_is_removed_with_the_recovery_phrase` end to end (fails without the epoch switch).
 
 ### Product gaps and open decisions
 

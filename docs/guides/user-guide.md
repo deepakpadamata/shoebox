@@ -57,7 +57,9 @@ device. Freeing space on a phone removes only originals that at least two other 
 ## When something goes wrong
 
 * **A device was lost or stolen.** On another device: *Devices → Remove* next to it. The remaining devices
-  move to a new library space the lost device cannot read.
+  move to a new library space the lost device cannot read. If the lost device was an **admin** (the first
+  phone and the first computer are), or you remove it from a device that is not one, you are asked for your
+  24-word recovery phrase: that way a thief holding an admin device cannot remove you instead.
 * **All devices were lost.** Install Shoebox, choose *I lost my devices*, enter the 24 words and the link of
   any device that still has the library. (A keeper prints its link with `shoebox-keeper address`.)
 * **Photos show "not backed up".** You need another device online. Add a keeper, or open the app on your

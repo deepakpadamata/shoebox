@@ -20,8 +20,12 @@
   let role = $state('phone');
   let pair = $state<PairStart | null>(null);
   let revoking = $state<DeviceInfo | null>(null);
+  let phrase = $state('');
   let busy = $state(false);
   const me = $derived(devices.find((d) => d.is_this_device));
+  // Admins remove ordinary devices on their own; an admin device, or a removal from a device
+  // that is no admin, needs the recovery phrase.
+  const needsPhrase = $derived(!!revoking && (revoking.admin || !me?.admin));
 
   async function load() {
     devices = await api.devices();
@@ -71,9 +75,10 @@
   async function revoke() {
     if (!revoking) return;
     try {
-      await api.revokeDevice(revoking.id);
+      await api.revokeDevice(revoking.id, needsPhrase ? phrase : undefined);
       toast(`${revoking.name} was removed from the library`);
       revoking = null;
+      phrase = '';
       await load();
     } catch (e) {
       fail(e);
@@ -106,7 +111,7 @@
           <span class="row-flex">
             {#if !d.is_this_device}<Pill tone={pathTone(d)}>{pathLabel(d)}</Pill>{/if}
             <span class="dot" class:on={d.online} class:relay={d.path === 'relay'} title={d.online ? 'online' : 'offline'}></span>
-            {#if !d.is_this_device && me?.admin}<Button size="sm" kind="ghost" onclick={() => (revoking = d)}>Remove</Button>{/if}
+            {#if !d.is_this_device}<Button size="sm" kind="ghost" onclick={() => { revoking = d; phrase = ''; }}>Remove</Button>{/if}
           </span>
         {/snippet}
       </Row>
@@ -150,12 +155,16 @@
   {/if}
 </Sheet>
 
-<Sheet open={!!revoking} title="Remove this device?" onclose={() => (revoking = null)} width={400}>
+<Sheet open={!!revoking} title="Remove this device?" onclose={() => { revoking = null; phrase = ''; }} width={400}>
   {#if revoking}
     <div class="stack">
       <p class="small">{revoking.name} will lose access to the library. Photos already on it stay there until someone deletes them, but it can no longer sync. Everyone else keeps working without interruption.</p>
-      <Button kind="danger" block onclick={revoke}>Remove {revoking.name}</Button>
-      <Button block onclick={() => (revoking = null)}>Cancel</Button>
+      {#if needsPhrase}
+        <p class="small">{revoking.admin ? `${revoking.name} is an admin device, so removing it` : 'This device is not an admin, so removing a device from here'} needs your recovery phrase. That way a stolen admin device cannot remove you instead.</p>
+        <textarea class="input" rows="3" placeholder="24-word recovery phrase" autocomplete="off" spellcheck="false" bind:value={phrase}></textarea>
+      {/if}
+      <Button kind="danger" block disabled={needsPhrase && !phrase.trim()} onclick={revoke}>Remove {revoking.name}</Button>
+      <Button block onclick={() => { revoking = null; phrase = ''; }}>Cancel</Button>
     </div>
   {/if}
 </Sheet>

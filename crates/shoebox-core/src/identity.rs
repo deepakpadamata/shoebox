@@ -4,6 +4,12 @@
 //! [`AdminCert`]s delegating to admin devices, and the root or an admin signs a [`DeviceCert`] per
 //! device (revocation is a newer cert with `revoked = true`). [`TrustChain::validate`] replays
 //! the certs in HLC order, so the outcome never depends on the order they arrived in.
+//!
+//! A signer picks its certs' HLCs, so a stolen admin device could backdate them (A-085). Two
+//! rules do not depend on dates: only the root may revoke (or bring back) a device that holds an
+//! admin cert, and once the root has revoked an admin device none of the certs it signed count,
+//! whatever date they claim. The root re-signs the certs of that admin that should stay valid in
+//! the same step ([`TrustChain::certs_signed_by`]).
 
 use crate::ids::{EndpointId, Timestamp};
 use crate::model::{AdminCert, DeviceCert, Role};
@@ -11,7 +17,7 @@ use crate::store::{LibraryId, RootPublicKey};
 use crate::Hlc;
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum IdentityError {
@@ -21,6 +27,8 @@ pub enum IdentityError {
     SignerNotAdmin,
     #[error("the signer's admin delegation had expired")]
     Expired,
+    #[error("only the recovery phrase can remove an admin device")]
+    RootRequired,
 }
 
 /// An ed25519 key pair (a device key, or the library root key).
@@ -213,17 +221,68 @@ impl TrustChain {
 
     /// Would `cert` be accepted given the certs stored now (those older than it)?
     pub fn check_device_cert(&self, cert: &DeviceCert) -> Result<(), IdentityError> {
-        let accepted = self.replay(Some(&cert.hlc));
-        self.authorise(cert, &accepted)
+        let rules = self.rules();
+        let accepted = self.replay(Some(&cert.hlc), &rules);
+        self.authorise(cert, &accepted, &rules)
+    }
+
+    /// The certs `admin` signed that are the current cert of some other device: what the root
+    /// re-signs when it removes that admin, so those devices keep their state (A-085).
+    pub fn certs_signed_by(&self, admin: &EndpointId) -> Vec<DeviceCert> {
+        self.validate()
+            .devices
+            .into_iter()
+            .filter(|c| c.added_by == *admin && c.device != *admin)
+            .collect()
+    }
+
+    fn is_root(&self, id: &EndpointId) -> bool {
+        id.0 == self.root.0
+    }
+
+    /// What does not depend on dates: who holds an admin cert, and which of those the root has
+    /// removed (its latest root-signed cert for the device says `revoked`).
+    fn rules(&self) -> Rules {
+        let admin_holders: HashSet<EndpointId> = self
+            .admins
+            .iter()
+            .filter(|a| self.check_admin(a).is_ok())
+            .map(|a| a.admin)
+            .collect();
+        let mut latest_by_root: BTreeMap<EndpointId, &DeviceCert> = BTreeMap::new();
+        for c in self
+            .devices
+            .iter()
+            .filter(|c| self.is_root(&c.added_by) && self.signature_ok(c))
+        {
+            match latest_by_root.get(&c.device) {
+                Some(e) if (e.hlc, &e.signature) >= (c.hlc, &c.signature) => {}
+                _ => {
+                    latest_by_root.insert(c.device, c);
+                }
+            }
+        }
+        let removed = latest_by_root
+            .values()
+            .filter(|c| c.revoked && admin_holders.contains(&c.device))
+            .map(|c| c.device)
+            .collect();
+        Rules {
+            admin_holders,
+            removed,
+        }
     }
 
     /// Replay every cert in HLC order and keep the ones that were valid when issued.
     pub fn validate(&self) -> ValidChain {
-        let accepted = self.replay(None);
+        let rules = self.rules();
+        let accepted = self.replay(None, &rules);
+        // A revoked device is no admin any more, whatever its admin cert says.
         let mut admins: Vec<AdminCert> = self
             .admins
             .iter()
             .filter(|a| self.check_admin(a).is_ok())
+            .filter(|a| !accepted.get(&a.admin).is_some_and(|c| c.revoked))
             .cloned()
             .collect();
         admins.sort_by_key(|a| (a.admin, a.hlc));
@@ -233,7 +292,7 @@ impl TrustChain {
         }
     }
 
-    fn replay(&self, before: Option<&Hlc>) -> BTreeMap<EndpointId, DeviceCert> {
+    fn replay(&self, before: Option<&Hlc>, rules: &Rules) -> BTreeMap<EndpointId, DeviceCert> {
         let mut certs: Vec<&DeviceCert> = self
             .devices
             .iter()
@@ -249,7 +308,7 @@ impl TrustChain {
         });
         let mut accepted: BTreeMap<EndpointId, DeviceCert> = BTreeMap::new();
         for cert in certs {
-            if self.authorise(cert, &accepted).is_ok() {
+            if self.authorise(cert, &accepted, rules).is_ok() {
                 accepted.insert(cert.device, cert.clone());
             }
         }
@@ -260,13 +319,23 @@ impl TrustChain {
         &self,
         cert: &DeviceCert,
         accepted: &BTreeMap<EndpointId, DeviceCert>,
+        rules: &Rules,
     ) -> Result<(), IdentityError> {
         let msg = device_bytes(self.library, cert);
         if !verify_signature(&cert.added_by.0, &msg, &cert.signature) {
             return Err(IdentityError::BadSignature);
         }
-        if cert.added_by.0 == self.root.0 {
+        if self.is_root(&cert.added_by) {
             return Ok(());
+        }
+        // Rules a backdated cert cannot get around (A-085).
+        if rules.removed.contains(&cert.added_by) {
+            return Err(IdentityError::SignerNotAdmin);
+        }
+        if rules.admin_holders.contains(&cert.device)
+            && (cert.revoked || rules.removed.contains(&cert.device))
+        {
+            return Err(IdentityError::RootRequired);
         }
         // A delegated signer must hold a root-signed, currently valid admin cert and must not
         // have been revoked before this cert was issued.
@@ -293,6 +362,14 @@ impl TrustChain {
             Err(IdentityError::SignerNotAdmin)
         }
     }
+}
+
+/// The parts of the chain that do not depend on HLC order (see the module docs).
+struct Rules {
+    /// Devices with a root-signed admin cert (at any time).
+    admin_holders: HashSet<EndpointId>,
+    /// Admin devices the root has revoked.
+    removed: HashSet<EndpointId>,
 }
 
 /// Announces that a library moved to a new epoch after `revocation` (M2-03b). Anyone holding

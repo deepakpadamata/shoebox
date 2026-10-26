@@ -119,7 +119,8 @@ export const api = {
   albumRemove: (album: string, ids: string[]) => call<{}>('album_remove', { album, ids }),
   albumPage: (album: string, cursor: PageCursor | null, limit = 500) => call<PhotoPage>('album_page', { album, cursor, limit }),
   devices: () => call<DeviceInfo[]>('devices'),
-  revokeDevice: (id: string) => call<{}>('revoke_device', { id }),
+  /** `phrase`: the recovery phrase, needed to remove an admin device or when this device is no admin. */
+  revokeDevice: (id: string, phrase?: string) => call<{}>('revoke_device', { id, phrase: phrase ?? null }),
   health: () => call<Health>('health'),
   freeUpSpace: (dry_run: boolean) => call<FreeUpReport>('free_up_space', { dry_run }),
   settings: () => call<Settings>('settings'),

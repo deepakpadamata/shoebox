@@ -14,7 +14,7 @@ use crate::LibraryNode;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use futures::future::BoxFuture;
 use iroh::endpoint::Connection;
-use shoebox_core::identity::{issue_rotation_notice, RotationNotice};
+use shoebox_core::identity::{issue_rotation_notice, KeyPair, RotationNotice};
 use shoebox_core::ids::EndpointId;
 use shoebox_core::store::{LibraryStore, SignedDeviceChange};
 use std::path::Path;
@@ -117,6 +117,33 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// they next connect otherwise.
     pub async fn revoke_and_rotate(&self, device: &EndpointId) -> Result<RotationNotice> {
         self.revoke_device(device).await?;
+        self.rotate_after_revocation(device).await
+    }
+
+    /// [`LibraryNode::revoke_and_rotate`] with the library's root key (from the recovery phrase):
+    /// needed to remove an admin device (A-085).
+    pub async fn revoke_and_rotate_with_root(
+        &self,
+        root: &KeyPair,
+        device: &EndpointId,
+    ) -> Result<RotationNotice> {
+        self.revoke_device_with_root(root, device).await?;
+        self.rotate_after_revocation(device).await
+    }
+
+    /// [`LibraryNode::revoke_and_rotate_with_root`] with the root key taken from the recovery
+    /// phrase (checked against this library's root before anything is written).
+    pub async fn revoke_and_rotate_with_phrase(
+        &self,
+        phrase: &str,
+        device: &EndpointId,
+    ) -> Result<RotationNotice> {
+        let root =
+            shoebox_core::recovery::RecoveryKit::key_from_phrase(phrase, &self.capability()?.root)?;
+        self.revoke_and_rotate_with_root(&root, device).await
+    }
+
+    async fn rotate_after_revocation(&self, device: &EndpointId) -> Result<RotationNotice> {
         let old = self.capability()?;
         let new = self.store().begin_rotation().await?;
         let list = self.store().device_list().await?;
@@ -217,8 +244,17 @@ impl<L: LibraryStore> LibraryNode<L> {
         if notice.new_cap.library == cap.library {
             return Ok(false); // already there
         }
+        // Normally a notice moves us on from the epoch we are in. One exception: we followed an
+        // admin's notice, and this one, from the epoch we left, removes that admin with the root
+        // key. The admin was stolen; its move must not keep us from the real one (A-085).
+        let followed_a_removed_admin = self.rotation_notice().is_some_and(|ours| {
+            ours.new_cap.library == cap.library
+                && ours.old == notice.old
+                && notice.revocation.device == ours.admin.admin
+                && notice.revocation.added_by.0 == cap.root.0
+        });
         ensure!(
-            notice.old == cap.library,
+            notice.old == cap.library || followed_a_removed_admin,
             "the notice is for another epoch of this library"
         );
         notice

@@ -142,6 +142,10 @@ impl<L: LibraryStore> LibraryNode<L> {
             .find(|d| d.device == *device)
             .ok_or_else(|| anyhow::anyhow!("no such device in this library"))?;
         anyhow::ensure!(!current.revoked, "that device is already revoked");
+        anyhow::ensure!(
+            !list.admins.iter().any(|a| a.admin == *device),
+            "that device is an admin: removing it needs the recovery phrase"
+        );
         let cert = shoebox_core::identity::issue_device_cert(
             &self.node().device_key(),
             cap.identity_id(),
@@ -153,6 +157,77 @@ impl<L: LibraryStore> LibraryNode<L> {
         );
         self.store()
             .apply_device_change(SignedDeviceChange::Device(cert))
+            .await?;
+        Ok(())
+    }
+
+    /// Revoke `device` with the library's root key (from the recovery phrase): the only way to
+    /// remove an admin device, and it works for any device (A-085). In the same step the root
+    /// re-signs every cert `device` signed that is still some device's current cert, because once
+    /// the root has removed an admin none of its own signatures count. If this device is not an
+    /// admin yet, the root makes it one, so it can sign the rotation that follows.
+    pub async fn revoke_device_with_root(
+        &self,
+        root: &KeyPair,
+        device: &shoebox_core::ids::EndpointId,
+    ) -> Result<()> {
+        let cap = self.capability()?;
+        anyhow::ensure!(
+            root.root_public() == cap.root,
+            "that recovery phrase belongs to another library"
+        );
+        anyhow::ensure!(*device != self.device(), "this device cannot remove itself");
+        let store = self.store();
+        let list = store.device_list().await?;
+        let current = list
+            .devices
+            .iter()
+            .find(|d| d.device == *device)
+            .ok_or_else(|| anyhow::anyhow!("no such device in this library"))?
+            .clone();
+        anyhow::ensure!(!current.revoked, "that device is already revoked");
+        if !list.admins.iter().any(|a| a.admin == self.device()) {
+            let admin = issue_admin_cert(
+                root,
+                cap.identity_id(),
+                self.device(),
+                self.holdings_hlc(),
+                None,
+            );
+            store
+                .apply_device_change(SignedDeviceChange::Admin(admin))
+                .await?;
+        }
+        // Keep what it signed first, then remove it, so no device drops out in between.
+        for kept in list
+            .devices
+            .iter()
+            .filter(|d| d.added_by == *device && d.device != *device)
+        {
+            let cert = issue_device_cert(
+                root,
+                cap.identity_id(),
+                kept.device,
+                kept.role,
+                &kept.name,
+                self.holdings_hlc(),
+                kept.revoked,
+            );
+            store
+                .apply_device_change(SignedDeviceChange::Device(cert))
+                .await?;
+        }
+        let revocation = issue_device_cert(
+            root,
+            cap.identity_id(),
+            *device,
+            current.role,
+            &current.name,
+            self.holdings_hlc(),
+            true,
+        );
+        store
+            .apply_device_change(SignedDeviceChange::Device(revocation))
             .await?;
         Ok(())
     }

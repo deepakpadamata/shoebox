@@ -45,6 +45,11 @@ struct PathReply {
 }
 
 #[derive(Deserialize)]
+struct PickReply {
+    uris: Vec<String>,
+}
+
+#[derive(Deserialize)]
 struct ConditionsReply {
     on_wifi: bool,
     charging: bool,
@@ -152,6 +157,20 @@ impl PhotoSource for AndroidPhotoSource {
         let id = id.to_string();
         Box::pin(async move {
             let r: PathReply = self.call("readOriginal", json!({ "id": id })).await?;
+            Ok(PathBuf::from(r.path))
+        })
+    }
+    fn pick(&self, files: bool) -> BoxFuture<'_, Result<Vec<String>>> {
+        Box::pin(async move {
+            let source = if files { "files" } else { "gallery" };
+            let r: PickReply = self.call("pickMedia", json!({ "source": source })).await?;
+            Ok(r.uris)
+        })
+    }
+    fn read_picked(&self, handle: &str) -> BoxFuture<'_, Result<PathBuf>> {
+        let uri = handle.to_string();
+        Box::pin(async move {
+            let r: PathReply = self.call("readPicked", json!({ "uri": uri })).await?;
             Ok(PathBuf::from(r.path))
         })
     }

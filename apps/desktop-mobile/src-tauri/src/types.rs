@@ -207,6 +207,18 @@ ts_type! {
 }
 
 ts_type! {
+    /// How much of the library one device holds (Devices screen), from the replicated holdings.
+    pub struct DeviceStorageInfo {
+        pub id: String,
+        /// Photos and videos whose original it holds, and their size in bytes.
+        pub originals: u32,
+        pub original_bytes: f64,
+        /// Previews and thumbnails, in bytes.
+        pub other_bytes: f64,
+    }
+}
+
+ts_type! {
     pub struct PairStart {
         /// The ticket text (what the QR encodes).
         pub ticket: String,

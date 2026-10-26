@@ -3,11 +3,14 @@ package org.shoebox.desktop
 import android.Manifest
 import android.app.Activity
 import android.os.Build
+import androidx.activity.result.ActivityResult
+import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.Permission
 import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
+import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import org.json.JSONObject
@@ -66,6 +69,32 @@ class PhotoLibraryPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun readOriginal(invoke: Invoke) = guarded(invoke, "cannot read asset") {
         JSObject().put("path", backend.readOriginal(invoke.getArgs().getString("id") ?: throw IllegalArgumentException("missing id")))
+    }
+
+    /** Let the user choose photos and videos: `source` "gallery" (the photo picker) or "files"
+     *  (the document picker). Resolves with the chosen content URIs, none when cancelled. */
+    @Command
+    fun pickMedia(invoke: Invoke) {
+        val files = invoke.getArgs().getString("source") == "files"
+        try {
+            startActivityForResult(invoke, if (files) backend.filesIntent() else backend.galleryIntent(), "picked")
+        } catch (e: Exception) {
+            invoke.reject("cannot open the picker: ${e.message}")
+        }
+    }
+
+    @ActivityCallback
+    fun picked(invoke: Invoke, result: ActivityResult) {
+        val uris = JSArray()
+        if (result.resultCode == Activity.RESULT_OK) backend.pickedUris(result.data).forEach { uris.put(it) }
+        val out = JSObject()
+        out.put("uris", uris)
+        invoke.resolve(out)
+    }
+
+    @Command
+    fun readPicked(invoke: Invoke) = guarded(invoke, "cannot read the chosen file") {
+        JSObject().put("path", backend.readPicked(invoke.getArgs().getString("uri") ?: throw IllegalArgumentException("missing uri")))
     }
 
     @Command

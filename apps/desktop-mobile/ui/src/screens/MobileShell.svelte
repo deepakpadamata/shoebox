@@ -31,6 +31,24 @@
   const tab = $derived(sec === 'album' ? 'albums' : ['favorites', 'deleted', 'health', 'settings'].includes(sec) ? '' : sec);
   const atRisk = $derived(app.counts?.at_risk ?? 0);
   let kitOpen = $state(false);
+  let addOpen = $state(false);
+  let adding = $state(false);
+  // A phone with a camera roll can also add photos the backup does not see: other albums when
+  // only some photos are shared with the app, Downloads, a cloud drive, a USB stick.
+  const canAdd = $derived(!!app.backup && app.backup.permission !== 'unavailable' && app.state?.role !== 'viewer');
+  async function addPhotos(files: boolean) {
+    adding = true;
+    try {
+      const r = await api.importPicked(files);
+      addOpen = false;
+      const n = r.imported + r.duplicates + r.skipped + r.failed.length;
+      if (n > 0) toast(`Added ${plural(r.imported, 'photo')}${r.duplicates ? `, ${r.duplicates} already in the library` : ''}${r.skipped ? `, ${plural(r.skipped, 'file')} not a photo or video` : ''}${r.failed.length ? `, ${r.failed.length} failed` : ''}`);
+    } catch (e) {
+      fail(e);
+    } finally {
+      adding = false;
+    }
+  }
   let menuOpen = $state(false);
   let awake = $state(false);
   const eta = $derived((app.counts, etaSeconds()));
@@ -50,6 +68,9 @@
         <div class="small muted row-flex"><span class="sd" class:busy={app.syncing.length > 0}></span>{app.syncing.length > 0 ? 'Syncing…' : app.syncError ? 'Some devices are not reachable' : 'Up to date'}</div>
       {/if}
     </div>
+    {#if canAdd && (sec === 'library' || sec === '')}
+      <button class="add-btn" aria-label="Add photos" onclick={() => (addOpen = true)}>＋</button>
+    {/if}
     <button class="avatar-btn" aria-label="Menu" onclick={() => (menuOpen = true)}>
       <Avatar name={app.state?.device_name ?? '?'} size={32} />
       {#if atRisk > 0}<span class="badge"></span>{/if}
@@ -103,6 +124,15 @@
   </div>
 </Sheet>
 
+<Sheet open={addOpen} title="Add photos" onclose={() => { if (!adding) addOpen = false; }}>
+  <div class="add">
+    <p class="small muted">Add photos and videos the backup does not see on its own. They are copied into your library and backed up like the rest.</p>
+    <button class="choice" disabled={adding} onclick={() => addPhotos(false)}><b>{adding ? 'Adding…' : 'From the gallery'}</b><span class="small muted">Any album on this phone</span></button>
+    <button class="choice" disabled={adding} onclick={() => addPhotos(true)}><b>From files</b><span class="small muted">Downloads, a cloud drive, a USB stick…</span></button>
+    {#if app.importProgress}<ProgressBar total={app.importProgress.total} segments={[{ value: app.importProgress.done, tone: 'info' }]} label="Adding" />{/if}
+  </div>
+</Sheet>
+
 <Sheet open={kitOpen} title="Recovery kit" onclose={() => (kitOpen = false)}>
   <RecoveryKit onsaved={() => (kitOpen = false)} />
 </Sheet>
@@ -112,6 +142,10 @@
   .navbar { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 6px 16px 10px; gap: 10px; }
   .navbar h2 { margin: 0; font-size: 28px; letter-spacing: -0.02em; }
   .back { background: none; border: 0; color: var(--accent); font-size: 15px; padding: 0; cursor: pointer; }
+  .add-btn { width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--accent-soft); color: var(--accent); font-size: 20px; line-height: 1; cursor: pointer; }
+  .add { display: flex; flex-direction: column; gap: 10px; }
+  .choice { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+  .choice:disabled { opacity: .6; }
   .avatar-btn { position: relative; background: none; border: 0; padding: 0; cursor: pointer; }
   .badge { position: absolute; right: -1px; top: -1px; width: 10px; height: 10px; border-radius: 50%; background: var(--risk); border: 2px solid var(--surface); }
   .banners { padding: 0 16px 8px; }

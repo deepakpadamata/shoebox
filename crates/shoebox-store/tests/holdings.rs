@@ -129,3 +129,58 @@ async fn copy_counts_follow_adds_removals_and_an_offline_node() {
     settle_to(&nodes, &a, 1, "after the removal propagates").await;
     c.shutdown().await;
 }
+
+/// Per-device storage (the Devices screen): every device sees the same totals, a keeper that
+/// fetched everything holds as much original data as the phone that imported it, and a photo
+/// in Recently Deleted still counts (it takes room until it is purged).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn storage_by_device_adds_up_what_each_device_holds() {
+    use shoebox_core::model::Role;
+    let c = Cluster::with_roles(&[Role::Phone, Role::Keeper])
+        .await
+        .unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    let samples: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/samples");
+    let files = ["photo-gps.jpg", "IMG_0001.jpg", "screenshot.png"].map(|f| samples.join(f));
+    let ids = nodes[0]
+        .import_paths(&files, ImportOptions::default())
+        .await
+        .unwrap()
+        .imported;
+    let mut original_bytes = 0;
+    for id in &ids {
+        original_bytes += nodes[0].node().blobs().size(id).await.unwrap().unwrap();
+    }
+    nodes[1].start_fetcher(shoebox_node::FetcherConfig {
+        concurrency: 6,
+        tick: Duration::from_millis(300),
+        retry: Duration::from_millis(300),
+    });
+    let (phone, keeper) = (core_id(&c, 0), core_id(&c, 1));
+    wait_until(Duration::from_secs(40), || async {
+        for n in &nodes {
+            let s = n.storage_by_device().await.unwrap();
+            if s.get(&keeper).map(|k| k.originals) != Some(3) {
+                return false;
+            }
+        }
+        true
+    })
+    .await
+    .expect("the keeper's holdings reach both devices");
+
+    nodes[0].delete_photos(&ids[..1]).await.unwrap();
+    for n in &nodes {
+        let s = n.storage_by_device().await.unwrap();
+        for d in [phone, keeper] {
+            let got = &s[&d];
+            assert_eq!(
+                (got.originals, got.original_bytes),
+                (3, original_bytes),
+                "a deleted photo still takes room"
+            );
+            assert!(got.other_bytes > 0, "previews and thumbnails");
+        }
+    }
+    c.shutdown().await;
+}

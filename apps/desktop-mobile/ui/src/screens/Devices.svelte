@@ -2,7 +2,8 @@
   // Devices and activity (mockups 5a/5b): who has the library, how they are connected, adding
   // a device with a QR code and comparing the six-digit code, and removing one.
   import { onMount, untrack } from 'svelte';
-  import { api, type DeviceInfo, type PairStart } from '../lib/api';
+  import { api, type DeviceInfo, type DeviceStorageInfo, type PairStart } from '../lib/api';
+  import { bytes, plural } from '../lib/format';
   import { pullRefresh } from '../lib/gestures';
   import { refreshEverything } from '../lib/refresh';
   import { app, fail, toast } from '../lib/store.svelte';
@@ -16,6 +17,16 @@
   import Sheet from '../components/Sheet.svelte';
 
   let devices = $state<DeviceInfo[]>([]);
+  let storage = $state<DeviceStorageInfo[]>([]);
+  const used = (s: DeviceStorageInfo) => s.original_bytes + s.other_bytes;
+  // The library's devices by how much they hold, largest first (bars are relative to it).
+  const storageRows = $derived(
+    devices
+      .filter((d) => !d.revoked)
+      .map((d) => ({ d, s: storage.find((x) => x.id === d.id) ?? { id: d.id, originals: 0, original_bytes: 0, other_bytes: 0 } }))
+      .sort((a, b) => used(b.s) - used(a.s)),
+  );
+  const most = $derived(Math.max(1, ...storageRows.map((r) => used(r.s))));
   let addOpen = $state(false);
   let role = $state('phone');
   let pair = $state<PairStart | null>(null);
@@ -52,6 +63,8 @@
 
   async function load() {
     devices = await api.devices();
+    // Totals walk every photo's holdings: fetched after the list so it never waits on them.
+    api.deviceStorage().then((s) => (storage = s)).catch(() => {});
   }
   onMount(() => { load().catch(fail); });
   $effect(() => {
@@ -165,6 +178,23 @@
     {/each}
   </List>
 
+  {#if storageRows.length > 0}
+    <div class="section">Storage</div>
+    <List>
+      {#each storageRows as { d, s } (d.id)}
+        <div class="store">
+          <div class="row-flex between">
+            <b>{d.is_this_device ? `${d.name} (this device)` : d.name}</b>
+            <span>{bytes(used(s))}</span>
+          </div>
+          <div class="bar"><span class="orig" style:width="{(s.original_bytes / most) * 100}%"></span><span class="prev" style:width="{(s.other_bytes / most) * 100}%"></span></div>
+          <div class="small muted">{s.originals ? `${plural(s.originals, 'original')} (${bytes(s.original_bytes)})` : 'No originals'} · previews {bytes(s.other_bytes)}</div>
+        </div>
+      {/each}
+    </List>
+    <p class="small muted">What each device keeps of this library, as this device last heard. Photos outside Shoebox are not counted.</p>
+  {/if}
+
   {#if devices.some((d) => d.revoked)}
     <div class="section">Removed</div>
     <List>
@@ -258,4 +288,10 @@
   .code { display: flex; gap: 8px; justify-content: center; font: 700 30px var(--mono); margin: 12px 0 18px; }
   .code span { width: 40px; height: 52px; background: var(--surface-2); border-radius: 10px; display: grid; place-items: center; }
   .err { color: var(--risk); }
+  .store { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .store:last-child { border-bottom: 0; }
+  .between { justify-content: space-between; }
+  .bar { display: flex; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+  .bar .orig { background: var(--accent); }
+  .bar .prev { background: var(--ink-3); opacity: .5; }
 </style>

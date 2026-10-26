@@ -288,3 +288,63 @@ async fn denied_access_is_an_error_with_a_next_step_and_state_survives_a_restart
     assert_eq!(photos(&core).await, 1);
     core.shutdown().await.unwrap();
 }
+
+/// "Add photos": the person picks files the backup does not see. They are imported in batches,
+/// progress reads as one run, the temporary copies are gone afterwards, and the device's storage
+/// counts them. Cancelling the picker imports nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn picked_photos_are_imported_in_batches_and_their_copies_removed() {
+    let r = rig().await;
+    let picks: Vec<PathBuf> = r.files.iter().take(45).cloned().collect();
+    assert!(picks.len() > 20, "more than one batch");
+    let mut events = r.core.events();
+    r.source.set_picks(picks.clone());
+    let got = r.core.import_picked(false).await.unwrap();
+    assert_eq!(
+        got.imported + got.duplicates + got.skipped,
+        picks.len() as u32,
+        "{got:?}"
+    );
+    assert!(got.failed.is_empty(), "{got:?}");
+    assert!(got.imported > 20);
+    assert_eq!(photos(&r.core).await, got.imported as usize);
+
+    // Events are forwarded by a task: read until the run's last one arrives.
+    let mut last = None;
+    while last != Some(picks.len() as u32) {
+        let ev = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+            .await
+            .expect("the last progress event arrives")
+            .unwrap();
+        if let desktop_mobile::types::AppEvent::ImportProgress { done, total } = ev {
+            assert_eq!(total, picks.len() as u32, "one run, not one per batch");
+            assert!(last.is_none_or(|l| done >= l), "progress never goes back");
+            last = Some(done);
+        }
+    }
+
+    let leftovers = std::fs::read_dir(r._dir.path().join("scratch"))
+        .map(|d| d.count())
+        .unwrap_or(0);
+    assert_eq!(leftovers, 0, "temporary copies are deleted");
+
+    let storage = r.core.device_storage().await.unwrap();
+    assert_eq!(storage.len(), 1);
+    assert_eq!(storage[0].originals, got.imported);
+    assert!(storage[0].original_bytes > 0.0 && storage[0].other_bytes > 0.0);
+
+    // Cancelled: nothing picked, nothing imported.
+    let none = r.core.import_picked(true).await.unwrap();
+    assert_eq!((none.imported, none.duplicates), (0, 0));
+    assert_eq!(photos(&r.core).await, got.imported as usize);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_device_without_a_camera_roll_cannot_pick() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = AppCore::open(dir.path().join("app"), AppOptions::local_only())
+        .await
+        .unwrap();
+    core.create_library("Mac", "keeper").await.unwrap();
+    assert!(core.import_picked(false).await.is_err());
+}

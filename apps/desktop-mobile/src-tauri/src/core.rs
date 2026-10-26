@@ -198,6 +198,9 @@ pub struct AppCore {
     /// A newer release the last check found.
     update: Mutex<Option<crate::types::UpdateInfo>>,
     pub(crate) photo_source: Mutex<Option<Arc<dyn crate::photos_source::PhotoSource>>>,
+    /// While a picked import runs in batches: (files done in earlier batches, total), so the
+    /// node's per-batch progress reads as one run.
+    import_batches: Mutex<Option<(u32, u32)>>,
     pub(crate) backup: tokio::sync::Mutex<crate::backup::BackupState>,
     pub(crate) backup_running: tokio::sync::Mutex<()>,
 }
@@ -261,6 +264,7 @@ impl AppCore {
             approved_recoveries: Mutex::new(vec![]),
             update: Mutex::new(None),
             photo_source: Mutex::new(None),
+            import_batches: Mutex::new(None),
             backup: tokio::sync::Mutex::new(backup_state),
             backup_running: tokio::sync::Mutex::new(()),
         });
@@ -448,9 +452,14 @@ impl AppCore {
                         kind: "blob".into(),
                     }),
                     NodeEvent::ImportProgress { done, total, .. } => {
+                        let (base, total) = core
+                            .import_batches
+                            .lock()
+                            .unwrap()
+                            .unwrap_or((0, total as u32));
                         Some(AppEvent::ImportProgress {
-                            done: done as u32,
-                            total: total as u32,
+                            done: base + done as u32,
+                            total,
                         })
                     }
                     NodeEvent::PairingCode {
@@ -1116,6 +1125,64 @@ impl AppCore {
         })
     }
 
+    /// "Add photos" on a phone: the person chooses photos and videos (the gallery picker, or
+    /// files from anywhere) and they are imported like any other. Each is copied out of the
+    /// system a batch at a time and the copy deleted after its batch, so a large pick never needs
+    /// much more room than the library's own copy. Cancelling imports nothing.
+    pub async fn import_picked(&self, files: bool) -> Result<ImportSummary> {
+        const BATCH: usize = 20;
+        let ln = self.ln().await?;
+        let source = self
+            .photo_source
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| anyhow!("choosing photos is not available on this device"))?;
+        let picked = source.pick(files).await?;
+        let mut summary = ImportSummary {
+            imported: 0,
+            duplicates: 0,
+            skipped: 0,
+            failed: vec![],
+        };
+        let total = picked.len() as u32;
+        let mut done = 0u32;
+        for batch in picked.chunks(BATCH) {
+            let mut paths = vec![];
+            for handle in batch {
+                match source.read_picked(handle).await {
+                    Ok(p) => paths.push(p),
+                    Err(e) => summary.failed.push(format!("{e:#}")),
+                }
+            }
+            *self.import_batches.lock().unwrap() =
+                Some((done + batch.len() as u32 - paths.len() as u32, total));
+            let result = ln.import_paths(&paths, ImportOptions::default()).await;
+            for p in &paths {
+                let _ = std::fs::remove_file(p);
+            }
+            let report = match result {
+                Ok(r) => r,
+                Err(e) => {
+                    *self.import_batches.lock().unwrap() = None;
+                    return Err(e);
+                }
+            };
+            summary.imported += report.imported.len() as u32;
+            summary.duplicates += report.duplicates.len() as u32;
+            summary.skipped += report.skipped.len() as u32;
+            summary.failed.extend(
+                report
+                    .failed
+                    .iter()
+                    .map(|(p, why)| format!("{}: {why}", p.display())),
+            );
+            done += batch.len() as u32;
+        }
+        *self.import_batches.lock().unwrap() = None;
+        Ok(summary)
+    }
+
     pub async fn pin_original(&self, id: &str, pin: bool) -> Result<()> {
         let ln = self.ln().await?;
         let id = parse_hash(id)?;
@@ -1258,6 +1325,22 @@ impl AppCore {
     }
 
     // ---------- devices ----------
+
+    /// What each device holds of the library (devices holding nothing are left out).
+    pub async fn device_storage(&self) -> Result<Vec<crate::types::DeviceStorageInfo>> {
+        let ln = self.ln().await?;
+        Ok(ln
+            .storage_by_device()
+            .await?
+            .into_iter()
+            .map(|(id, s)| crate::types::DeviceStorageInfo {
+                id: hex::encode(id.0),
+                originals: s.originals,
+                original_bytes: s.original_bytes as f64,
+                other_bytes: s.other_bytes as f64,
+            })
+            .collect())
+    }
 
     pub async fn devices(&self) -> Result<Vec<DeviceInfo>> {
         let ln = self.ln().await?;

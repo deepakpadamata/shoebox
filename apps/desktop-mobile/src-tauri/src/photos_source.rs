@@ -55,6 +55,16 @@ pub trait PhotoSource: Send + Sync {
     /// reason for assets that cannot be read (for example an iCloud-only photo that is offline).
     fn read_original(&self, id: &str) -> BoxFuture<'_, Result<PathBuf>>;
     fn conditions(&self) -> BoxFuture<'_, Result<Conditions>>;
+    /// Let the person choose photos and videos to add: from the gallery (`files: false`, any
+    /// album, whatever the backup permission) or from files anywhere (`true`). Returns handles
+    /// for [`PhotoSource::read_picked`]; none when cancelled.
+    fn pick(&self, _files: bool) -> BoxFuture<'_, Result<Vec<String>>> {
+        Box::pin(async { Err(anyhow!("choosing photos is not available on this device")) })
+    }
+    /// A readable copy of a picked file, named like the original; the caller deletes it.
+    fn read_picked(&self, _handle: &str) -> BoxFuture<'_, Result<PathBuf>> {
+        Box::pin(async { Err(anyhow!("choosing photos is not available on this device")) })
+    }
 }
 
 /// An in-memory camera roll for tests and demos: assets are files the test creates.
@@ -72,6 +82,8 @@ struct FakeState {
     removed: Vec<(String, u64)>,
     unreadable: Vec<String>,
     reads: Vec<String>,
+    /// What the next [`PhotoSource::pick`] returns.
+    picks: Vec<PathBuf>,
 }
 
 impl FakePhotoSource {
@@ -90,6 +102,7 @@ impl FakePhotoSource {
                 removed: vec![],
                 unreadable: vec![],
                 reads: vec![],
+                picks: vec![],
             }),
         }
     }
@@ -136,6 +149,11 @@ impl FakePhotoSource {
 
     pub fn make_unreadable(&self, id: &str) {
         self.state.lock().unwrap().unreadable.push(id.into());
+    }
+
+    /// The files the person "chooses" next time the app asks.
+    pub fn set_picks(&self, files: Vec<PathBuf>) {
+        self.state.lock().unwrap().picks = files;
     }
 
     /// Ids whose original was read, in order (to check what the pipeline touched).
@@ -200,5 +218,21 @@ impl PhotoSource for FakePhotoSource {
     }
     fn conditions(&self) -> BoxFuture<'_, Result<Conditions>> {
         Box::pin(async move { Ok(self.state.lock().unwrap().conditions) })
+    }
+    fn pick(&self, _files: bool) -> BoxFuture<'_, Result<Vec<String>>> {
+        Box::pin(async move {
+            let picks = std::mem::take(&mut self.state.lock().unwrap().picks);
+            Ok(picks.iter().map(|p| p.display().to_string()).collect())
+        })
+    }
+    fn read_picked(&self, handle: &str) -> BoxFuture<'_, Result<PathBuf>> {
+        let src = PathBuf::from(handle);
+        Box::pin(async move {
+            std::fs::create_dir_all(&self.dir)?;
+            let name = src.file_name().ok_or_else(|| anyhow!("no file name"))?;
+            let copy = self.dir.join(format!("picked-{}", name.to_string_lossy()));
+            std::fs::copy(&src, &copy)?;
+            Ok(copy)
+        })
     }
 }

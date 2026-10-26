@@ -44,6 +44,7 @@ pub const COMMANDS: &[&str] = &[
     "restore",
     "recently_deleted",
     "import_paths",
+    "import_picked",
     "pin_original",
     "fetch_now",
     "albums",
@@ -52,6 +53,7 @@ pub const COMMANDS: &[&str] = &[
     "album_remove",
     "album_page",
     "devices",
+    "device_storage",
     "revoke_device",
     "set_device_role",
     "make_admin",
@@ -156,6 +158,7 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
         "import_paths" => out(core
             .import_paths(&arg::<Vec<String>>(&args, "paths")?)
             .await?),
+        "import_picked" => out(core.import_picked(arg(&args, "files")?).await?),
         "pin_original" => {
             core.pin_original(&arg::<String>(&args, "id")?, arg(&args, "pin")?)
                 .await?;
@@ -192,6 +195,7 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             )
             .await?),
         "devices" => out(core.devices().await?),
+        "device_storage" => out(core.device_storage().await?),
         "replace_recovery_phrase" => out(core
             .replace_recovery_phrase(&arg::<String>(&args, "phrase")?)
             .await?),

@@ -287,6 +287,30 @@ Behaviour that will come back as features or needs a decision.
   member answers with its current epoch). `shoebox-keeper recover` is the CLI entry.
 - **A-083 · M5 not done** · Shared albums need a library on the device (no "shared albums only" mode, M5-02). No gossip presence, nudges or avatars (names are shared, M5-06). The accept-invitation screen has no storage-cost line. The UI loads an album page by page (500) but not virtualised. Notification posting when someone adds photos is not wired.
 
+- **A-090 · adding photos on a phone (2026-10-27)** · The phone's Library has a ＋ button: *From the gallery* opens the
+  system photo picker (`MediaStore.ACTION_PICK_IMAGES`, any album, no media permission needed; it falls back to the document
+  picker on phones without it), *From files* the document picker (Downloads, cloud drives, USB). Each pick is copied to the
+  cache 20 files at a time, imported like any other file and the copy deleted after its batch (`AppCore::import_picked`), so a
+  large pick needs little more room than the library's own copy; progress reads as one run. Limits: the photo picker returns
+  at most `getPickImagesMaxLimit()` items per pick (100 on most phones); it strips GPS from what it hands over, so picked
+  photos have no location (the document picker may keep it). A picked photo that camera backup later sees is a duplicate and
+  is skipped. Verified with a fake photo source and on the S25 build only as far as it installs; the pickers themselves
+  need a person.
+- **A-091 · storage per device (2026-10-27)** · *Devices → Storage* shows, per device, the originals it holds and their size
+  plus its previews and thumbnails, from the replicated holdings (`LibraryNode::storage_by_device`): what that device last
+  said it holds, not a disk measurement, and nothing outside Shoebox. Recently Deleted photos count until purged. It walks
+  every photo's holders, so it is loaded after the device list rather than with it; fine for tens of thousands of photos,
+  revisit with a per-device total in the store if it gets slow.
+- **A-092 · a backed-up phone photo takes room twice (open, 2026-10-27)** · Every import copies the file into the blob store
+  (`ImportMode::Copy`; the app never uses `Reference`). On Android the camera-roll original stays in the gallery, so a photo
+  backed up from the phone exists twice on it until *Free up space*, and freeing space only removes Shoebox's copy: the
+  gallery original is untouched, so it reclaims only the duplicate. The plan said "referenced in place where possible"
+  (docs/05-prototype-plan.md §3); MediaStore files are content URIs the app cannot reference by path, and a gallery file
+  can be edited or deleted under the library. Options: keep originals out of the phone's store once a keeper or two
+  devices confirm them (the app would then serve the gallery file while it exists), or have *Free up space* delete gallery
+  originals (needs `MediaStore.createDeleteRequest`, one system confirmation per batch). Desktop imports copy too; a
+  by-reference import for folders the person promises not to change is possible (`ImportMode::Reference`, A-028).
+
 ### Rules for future changes
 
 Not open questions, but they must be honoured by any format or protocol change, and re-checked on every iroh upgrade (shared albums still run on iroh-docs).

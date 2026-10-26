@@ -8,9 +8,12 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
+import android.os.ext.SdkExtensions
 import android.os.BatteryManager
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import androidx.core.content.ContextCompat
@@ -91,6 +94,45 @@ class PhotoBackend(private val context: Context) {
         val dir = File(context.cacheDir, "backup").apply { mkdirs() }
         val out = File(dir, "asset-$id")
         val input = context.contentResolver.openInputStream(uri) ?: throw IllegalStateException("cannot open asset $id")
+        input.use { i -> out.outputStream().use { o -> i.copyTo(o) } }
+        return out.absolutePath
+    }
+
+    /** The system photo picker: any album, and no media permission needed. Falls back to the
+     *  document picker on phones without it. At most [MediaStore.getPickImagesMaxLimit] per pick. */
+    fun galleryIntent(): Intent =
+        if (Build.VERSION.SDK_INT >= 33 ||
+            (Build.VERSION.SDK_INT >= 30 && SdkExtensions.getExtensionVersion(Build.VERSION_CODES.R) >= 2)
+        ) {
+            Intent(MediaStore.ACTION_PICK_IMAGES).putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, MediaStore.getPickImagesMaxLimit())
+        } else {
+            filesIntent()
+        }
+
+    /** The document picker: Downloads, cloud drives, a USB stick... */
+    fun filesIntent(): Intent =
+        Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*")
+            .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+
+    /** The content URIs a picker returned (one, or several in the clip data). */
+    fun pickedUris(data: Intent?): List<String> {
+        val clip = data?.clipData ?: return listOfNotNull(data?.data?.toString())
+        return (0 until clip.itemCount).map { clip.getItemAt(it).uri.toString() }
+    }
+
+    /** Copy a picked file to the cache, keeping its name (the import looks at the extension), and
+     *  return the path. The caller deletes it. */
+    fun readPicked(uri: String): String {
+        val u = Uri.parse(uri)
+        val name = context.contentResolver.query(u, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: "picked"
+        val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "_").takeLast(80)
+        val dir = File(context.cacheDir, "picked").apply { mkdirs() }
+        val out = File.createTempFile("p", "-$safe", dir)
+        val input = context.contentResolver.openInputStream(u) ?: throw IllegalStateException("cannot open $uri")
         input.use { i -> out.outputStream().use { o -> i.copyTo(o) } }
         return out.absolutePath
     }

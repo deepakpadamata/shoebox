@@ -33,7 +33,7 @@ pub use doc_digest::{doc_digest, DOC_DIGEST_ALPN};
 pub use ext::{ConnHandler, ExtSlot};
 pub use fetcher::{FetchSource, FetcherConfig};
 pub use freeup::{FreeReport, CONFIRMATION_TTL_MS};
-pub use holdings::{DEFAULT_REDUNDANCY, REDUNDANCY_KEY};
+pub use holdings::{DeviceStorage, DEFAULT_REDUNDANCY, REDUNDANCY_KEY};
 pub use identity::{Membership, RECOVERY_KIT_SAVED_KEY};
 pub use import::{ImportOptions, ImportReport};
 pub use keys::load_or_create_secret;

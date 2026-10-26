@@ -42,7 +42,8 @@ in the last week: the same rule as "backed up".
    do not match*: someone is in the middle.
 4. **Bring photos in.** On a computer: *Import* a folder (the app can also watch a folder). On a phone: turn
    on camera backup in Settings; it uploads new photos to your other devices when conditions allow
-   (Wi-Fi only, charging only and battery limits are yours to choose).
+   (Wi-Fi only, charging only and battery limits are yours to choose). To add photos the backup does not see
+   (other albums, Downloads, a cloud drive), tap **＋** in the Library.
 
 ## Sharing an album
 

@@ -17,6 +17,7 @@ import type { BackupReport } from '../bindings/BackupReport';
 import type { BackupStatus } from '../bindings/BackupStatus';
 import type { CreatedLibrary } from '../bindings/CreatedLibrary';
 import type { DeviceInfo } from '../bindings/DeviceInfo';
+import type { DeviceStorageInfo } from '../bindings/DeviceStorageInfo';
 import type { ExportReport } from '../bindings/ExportReport';
 import type { FreeUpReport } from '../bindings/FreeUpReport';
 import type { Health } from '../bindings/Health';
@@ -33,7 +34,7 @@ import type { Settings } from '../bindings/Settings';
 
 export type {
   AboutInfo, AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
-  AlbumInfo, AppEvent, BackupPolicy, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, ExportReport, FreeUpReport, Health, ImportSummary,
+  AlbumInfo, AppEvent, BackupPolicy, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, Health, ImportSummary,
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Settings,
 };
 
@@ -123,6 +124,8 @@ export const api = {
   restore: (ids: string[]) => call<{}>('restore', { ids }),
   recentlyDeleted: () => call<PhotoSummary[]>('recently_deleted'),
   importPaths: (paths: string[]) => call<ImportSummary>('import_paths', { paths }),
+  /** Phone: the person chooses photos (`files`: from anywhere, else the gallery) and they are imported. */
+  importPicked: (files: boolean) => call<ImportSummary>('import_picked', { files }),
   pinOriginal: (id: string, pin: boolean) => call<{}>('pin_original', { id, pin }),
   fetchNow: (id: string, kind: BlobKind) => call<{}>('fetch_now', { id, kind }),
   albums: () => call<AlbumInfo[]>('albums'),
@@ -131,6 +134,7 @@ export const api = {
   albumRemove: (album: string, ids: string[]) => call<{}>('album_remove', { album, ids }),
   albumPage: (album: string, cursor: PageCursor | null, limit = 500) => call<PhotoPage>('album_page', { album, cursor, limit }),
   devices: () => call<DeviceInfo[]>('devices'),
+  deviceStorage: () => call<DeviceStorageInfo[]>('device_storage'),
   /** `phrase`: the recovery phrase, needed to remove an admin device or when this device is no admin. */
   revokeDevice: (id: string, phrase?: string) => call<{}>('revoke_device', { id, phrase: phrase ?? null }),
   /** `phrase`: the recovery phrase, needed when this device is no admin. */

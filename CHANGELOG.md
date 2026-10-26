@@ -14,3 +14,5 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
   Android and on the desktop, and `shoebox-keeper status` / `alerts` on the keeper.
 - The app and the keeper tell you when a newer version is out (Settings → About → Check for new versions; the keeper's
   `status`). Nothing is installed automatically.
+- Phones can add photos by hand (＋ in the Library): from any album through the system photo picker, or from files.
+- Devices → Storage shows how much of the library each device holds (originals, previews).

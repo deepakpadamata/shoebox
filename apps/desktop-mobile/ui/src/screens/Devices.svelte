@@ -22,6 +22,22 @@
   let revoking = $state<DeviceInfo | null>(null);
   let phrase = $state('');
   let changing = $state<DeviceInfo | null>(null);
+  let promoting = $state<DeviceInfo | null>(null);
+  async function makeAdmin() {
+    if (!promoting) return;
+    busy = true;
+    try {
+      await api.makeAdmin(promoting.id, phrase);
+      toast(`${promoting.is_this_device ? 'This device' : promoting.name} is now an admin`);
+      promoting = null;
+      phrase = '';
+      await load();
+    } catch (e) {
+      fail(e);
+    } finally {
+      busy = false;
+    }
+  }
   let newRole = $state('phone');
   const roleHelp: Record<string, string> = {
     phone: 'Keeps previews of everything, and the originals of its own photos until they are backed up elsewhere.',
@@ -140,6 +156,7 @@
           <span class="row-flex">
             {#if !d.is_this_device}<Pill tone={pathTone(d)}>{pathLabel(d)}</Pill>{/if}
             <span class="dot" class:on={d.online} class:relay={d.path === 'relay'} title={d.online ? 'online' : 'offline'}></span>
+            {#if !d.admin}<Button size="sm" kind="ghost" onclick={() => { promoting = d; phrase = ''; }}>Make admin</Button>{/if}
             <Button size="sm" kind="ghost" onclick={() => openRole(d)}>Role</Button>
             {#if !d.is_this_device}<Button size="sm" kind="ghost" onclick={() => { revoking = d; phrase = ''; }}>Remove</Button>{/if}
           </span>
@@ -181,6 +198,18 @@
       <p class="muted small">What will the new device do?</p>
       <Segmented bind:value={role} options={[{ value: 'phone', label: 'Phone' }, { value: 'keeper', label: 'Keeper' }, { value: 'viewer', label: 'Viewer' }]} />
       <Button kind="primary" block disabled={busy} onclick={startPairing}>Show pairing code</Button>
+    </div>
+  {/if}
+</Sheet>
+
+<Sheet open={!!promoting} title="Make an admin" onclose={() => { promoting = null; phrase = ''; }} width={400}>
+  {#if promoting}
+    <div class="stack">
+      <p class="small">{promoting.is_this_device ? 'This device' : promoting.name} will be able to add devices, change roles and remove devices that are not admins, without the recovery phrase.</p>
+      <p class="small muted">A second admin means losing one device does not leave every change needing the phrase. The other devices are told.</p>
+      <textarea class="input" rows="3" placeholder="24-word recovery phrase" autocomplete="off" spellcheck="false" bind:value={phrase}></textarea>
+      <Button kind="primary" block disabled={busy || !phrase.trim()} onclick={makeAdmin}>{busy ? 'Saving…' : 'Make admin'}</Button>
+      <Button block onclick={() => { promoting = null; phrase = ''; }}>Cancel</Button>
     </div>
   {/if}
 </Sheet>

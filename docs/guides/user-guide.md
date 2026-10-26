@@ -19,7 +19,8 @@ device, you remove it from another one.
 
 A role is not forever: *Devices → Role* next to a device changes it, for example when an old laptop becomes the
 keeper. It takes an admin device (the one you created the library on, and any device restored with the
-recovery phrase), or your recovery phrase from any other device. The device switches as soon as it hears about the change.
+recovery phrase), or your recovery phrase from any other device. *Devices → Make admin* (with the phrase) gives
+you a second admin, so losing one device does not leave every change needing the phrase. The device switches as soon as it hears about the change.
 
 **Copy count is the number to watch.** Every photo shows how many devices hold its original. The goal is
 two or more (you can change it in Settings), **or one copy on a keeper**: a keeper is the backstop, so a photo

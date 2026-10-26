@@ -274,3 +274,73 @@ async fn changes_reach_devices_known_only_from_the_device_list() {
     .expect("the change was pushed to the phone");
     c.shutdown().await;
 }
+
+/// R1-04: the recovery phrase makes a second admin, so losing the first one does not leave every
+/// change needing the phrase. The new admin pairs and changes roles on its own; a wrong phrase
+/// changes nothing; the other devices alert on the new admin.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_phrase_makes_another_device_an_admin() {
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Phone, Role::Phone])
+        .await
+        .unwrap();
+    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Phone, Role::Phone]).await;
+    for n in &nodes {
+        n.enforce_membership().await.unwrap();
+    }
+    let alerts: std::sync::Arc<std::sync::Mutex<Vec<EndpointId>>> = Default::default();
+    let mut events = c.node(0).events();
+    let sink = alerts.clone();
+    tokio::spawn(async move {
+        while let Ok(ev) = events.recv().await {
+            if let NodeEvent::AdminAdded { device, .. } = ev {
+                sink.lock().unwrap().push(device);
+            }
+        }
+    });
+    // Node 0 has synced, so it alerts on admins from now on.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let (phone, other) = (core_id(&c, 1), core_id(&c, 2));
+    let phrase =
+        shoebox_core::recovery::RecoveryKit::new(rig.cap.library, 0, rig.root.clone()).phrase();
+
+    assert!(nodes[1]
+        .make_admin_with_phrase("not the phrase", &phone)
+        .await
+        .is_err());
+    assert!(
+        nodes[1]
+            .set_device_role(&other, Role::Keeper)
+            .await
+            .is_err(),
+        "not an admin yet"
+    );
+
+    nodes[1]
+        .make_admin_with_phrase(&phrase, &phone)
+        .await
+        .unwrap();
+    nodes[1]
+        .set_device_role(&other, Role::Keeper)
+        .await
+        .expect("an admin changes roles without the phrase");
+    assert!(nodes[1]
+        .start_pairing(
+            Role::Phone,
+            Duration::from_secs(60),
+            std::sync::Arc::new(|_| Box::pin(async { true }))
+        )
+        .await
+        .is_ok());
+    // Again: nothing changes.
+    nodes[1]
+        .make_admin_with_phrase(&phrase, &phone)
+        .await
+        .unwrap();
+    wait_until(Duration::from_secs(20), || async {
+        alerts.lock().unwrap().contains(&phone)
+    })
+    .await
+    .expect("node 0 alerts on the new admin");
+    assert_eq!(alerts.lock().unwrap().len(), 1);
+    c.shutdown().await;
+}

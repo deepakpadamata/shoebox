@@ -356,6 +356,33 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(())
     }
 
+    /// Make `device` an admin (it can then pair devices, remove ordinary ones and change roles
+    /// without the phrase), signed by the library's root key from the recovery phrase. Every other
+    /// device alerts on the new admin (A-087). Nothing changes if it already is one.
+    pub async fn make_admin_with_phrase(
+        &self,
+        phrase: &str,
+        device: &shoebox_core::ids::EndpointId,
+    ) -> Result<()> {
+        let cap = self.capability()?;
+        let root = RecoveryKit::key_from_phrase(phrase, &cap.root)?;
+        let list = self.store().device_list().await?;
+        anyhow::ensure!(
+            list.devices
+                .iter()
+                .any(|d| d.device == *device && !d.revoked),
+            "no such device in this library"
+        );
+        if list.admins.iter().any(|a| a.admin == *device) {
+            return Ok(());
+        }
+        let cert = issue_admin_cert(&root, cap.identity_id(), *device, self.holdings_hlc(), None);
+        self.store()
+            .apply_device_change(SignedDeviceChange::Admin(cert))
+            .await?;
+        Ok(())
+    }
+
     /// Give `device` another role (signed by this device, which must be an admin). The device
     /// follows its new certificate when it receives it (see [`LibraryNode::enforce_membership`]).
     /// Roles decide what a device may write (a viewer writes no library records) and what it

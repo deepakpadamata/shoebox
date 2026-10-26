@@ -113,7 +113,7 @@ Everything here was tested on loopback or in a browser on one machine.
   uses the node clock (default offered 5 min by the caller), and failed lookups are rate-limited per joining device (30/min, then that device is refused for a minute; a global limit let any stranger lock pairing for everyone, changed 2026-10-26; per-ticket proof
   failures burn a ticket after 5, though a ticket id cannot be guessed without the secret). The grant carries the device cert, the inviter's root-signed admin cert and the library
   capability; the joiner verifies the chain to the capability's root key before trusting it. The role is fixed by the ticket (a camera device scanning a QR gets what the QR offers).
-  Admin rights are not granted by pairing. **Verified: loopback only.** "Through a relay" is unverified (no relay available here; the protocol is plain QUIC streams so nothing
+  Admin rights are not granted by pairing; *Make admin* with the recovery phrase grants them (R1-04, `make_admin_with_phrase`; the others alert). **Verified: loopback only.** "Through a relay" is unverified (no relay available here; the protocol is plain QUIC streams so nothing
   relay-specific is expected). The `shoebox-dev` CLI does not use pairing yet — the keeper CLI (M2-06) will. Recovery-with-root-key still lacks its capability handoff (A-060).
 - **A-063 · M2-05..07** · Keeper: one daemon per storage dir (`keeper.lock` via `File::try_lock`, so the **workspace MSRV is now 1.89**; clippy msrv follows). Node data lives directly under
   `--storage` (`keys/endpoint.key` 0600, `blobs/`, `store/`, `keeper.json`, `control.sock` 0600, `keeper.lock`). `keeper.json` stores the library ticket string (capability + peers

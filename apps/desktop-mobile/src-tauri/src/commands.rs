@@ -54,6 +54,7 @@ pub const COMMANDS: &[&str] = &[
     "devices",
     "revoke_device",
     "set_device_role",
+    "make_admin",
     "answer_recovery",
     "replace_recovery_phrase",
     "dismiss_alert",
@@ -195,6 +196,14 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
         }
         "dismiss_alert" => {
             core.dismiss_alert(&arg::<String>(&args, "device_id")?)?;
+            Ok(json!({}))
+        }
+        "make_admin" => {
+            core.make_admin(
+                &arg::<String>(&args, "id")?,
+                &arg::<String>(&args, "phrase")?,
+            )
+            .await?;
             Ok(json!({}))
         }
         "set_device_role" => {

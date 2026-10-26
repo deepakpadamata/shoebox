@@ -174,7 +174,7 @@ pub struct AppCore {
     events: broadcast::Sender<AppEvent>,
     pending_pairing: PendingAnswer,
     pending_recovery: Mutex<Option<PendingRecovery>>,
-    /// Devices this person let in through a recovery here: no alert for those.
+    /// Devices this person let in (a recovery approved here) or made admin here: no alert for those.
     approved_recoveries: Mutex<Vec<shoebox_core::ids::EndpointId>>,
     pub(crate) photo_source: Mutex<Option<Arc<dyn crate::photos_source::PhotoSource>>>,
     pub(crate) backup: tokio::sync::Mutex<crate::backup::BackupState>,
@@ -1176,6 +1176,16 @@ impl AppCore {
         }
         out.sort_by(|a, b| (b.is_this_device, &a.name).cmp(&(a.is_this_device, &b.name)));
         Ok(out)
+    }
+
+    /// Make a device an admin with the recovery phrase (R1-04). No alert here: it was done here.
+    pub async fn make_admin(&self, id: &str, phrase: &str) -> Result<()> {
+        let ln = self.ln().await?;
+        let device = parse_device(id)?;
+        self.approved_recoveries.lock().unwrap().push(device);
+        ln.make_admin_with_phrase(phrase.trim(), &device).await?;
+        self.emit(AppEvent::DevicesChanged);
+        Ok(())
     }
 
     /// Give a device another role. Without a recovery phrase this device must be an admin.

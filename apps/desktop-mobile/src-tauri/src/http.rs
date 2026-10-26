@@ -2,6 +2,11 @@
 //! events), `GET /blob/<photo id>?kind=…` (byte ranges honoured) and the built UI as static
 //! files. It lets the UI be reviewed in a browser and exercised end to end without a webview.
 //! Listens on loopback only; it is a development tool, not part of a shipped app.
+//!
+//! A web page the developer has open could still reach a loopback port, so every request must
+//! name a loopback host (stops DNS rebinding), a browser `Origin` must be loopback too (stops
+//! cross-site requests), and commands must be sent as JSON (a cross-site form or `text/plain`
+//! post is refused instead of running without a CORS preflight).
 
 use crate::commands::{dispatch, user_message};
 use crate::core::AppCore;
@@ -31,7 +36,58 @@ pub fn router(core: Arc<AppCore>, ui_dist: Option<PathBuf>) -> Router {
         let index = dist.join("index.html");
         app = app.fallback_service(ServeDir::new(dist).fallback(ServeFile::new(index)));
     }
-    app
+    app.layer(axum::middleware::from_fn(loopback_only))
+}
+
+/// `localhost`, `127.0.0.1` or `[::1]`, with or without a port.
+fn is_loopback_host(host: &str) -> bool {
+    let name = match host.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(""),
+        None => host.rsplit_once(':').map_or(host, |(name, _)| name),
+    };
+    name.eq_ignore_ascii_case("localhost")
+        || name
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// The origin's host part, e.g. `localhost:5173` from `http://localhost:5173`.
+fn origin_host(origin: &str) -> Option<&str> {
+    let rest = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))?;
+    Some(rest.split('/').next().unwrap_or(rest))
+}
+
+async fn loopback_only(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let headers = req.headers();
+    let text = |name| {
+        headers
+            .get(name)
+            .and_then(|v: &header::HeaderValue| v.to_str().ok())
+    };
+    let host_ok =
+        headers.get(header::HOST).is_none() || text(header::HOST).is_some_and(is_loopback_host);
+    let origin_ok = headers.get(header::ORIGIN).is_none()
+        || text(header::ORIGIN)
+            .and_then(origin_host)
+            .is_some_and(is_loopback_host);
+    if !host_ok || !origin_ok {
+        return (StatusCode::FORBIDDEN, "loopback pages only").into_response();
+    }
+    if req.uri().path().starts_with("/api/") {
+        let json = text(header::CONTENT_TYPE)
+            .and_then(|c| c.split(';').next())
+            .is_some_and(|c| c.trim().eq_ignore_ascii_case("application/json"));
+        if !json {
+            return (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "commands are sent as application/json",
+            )
+                .into_response();
+        }
+    }
+    next.run(req).await
 }
 
 async fn api(
@@ -123,6 +179,10 @@ pub async fn serve(
     addr: std::net::SocketAddr,
     ui_dist: Option<PathBuf>,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        addr.ip().is_loopback(),
+        "the dev bridge listens on loopback only, not {addr}"
+    );
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router(core, ui_dist)).await?;
     Ok(())

@@ -32,20 +32,45 @@ recommended before the public release (see "Not covered").
 
 | Area | What was checked | Result |
 |---|---|---|
-| Ticket entropy and expiry | pairing ticket: 256-bit secret from the OS RNG, expires (default 5 min), single use, per-peer attempt limiter. Album invitation: 128-bit random secret, 7 days by default, single use, expiry checked on both sides | OK |
+| Ticket entropy and expiry | pairing ticket: 256-bit secret from the OS RNG, expires (default 5 min), single use, per-device attempt limiter (it was global until F14). Album invitation: 128-bit random secret, 7 days by default, single use, expiry checked on both sides | OK |
 | SAS derivation | `blake3::keyed_hash(ticket secret, "shoebox/pair-sas/0" ‖ ids ‖ both nonces)` mod 10⁶; both sides compute and compare | OK (6 digits is the usual trade-off; the ticket secret never crosses the wire) |
-| Certificate chain | device certificates are signed by an admin certificate, admin certificates by the root; revoked devices are listed; unsigned and out-of-chain records are rejected on every replica (`judge`, parallel verification); rotation notices are verified against the root and the identity id | OK |
+| Certificate chain | device certificates are signed by an admin certificate, admin certificates by the root; revoked devices are listed; unsigned and out-of-chain records are rejected on every replica (`judge`, parallel verification); rotation notices are verified against the root and the identity id | OK, except that a compromised admin can backdate (F9, found in the second review) |
 | Capability handling | the root key is never stored; library capability holds no secret (Loro backend); the album write capability is a secret: **F1 (fixed)** the registry holding it was created with default permissions, now `0600` and tested | Fixed |
 | Keystore usage | iOS/macOS Keychain, Windows, Secret Service via `keyring`; Android Keystore AES-GCM wrapping with migration of plaintext keys; `allowBackup=false` so keys never reach cloud backup | OK (desktop keystore paths compiled but never run: not verified) |
 | Log redaction | tickets/phrases are never passed to `tracing`; the diagnostics bundle redacts names, paths, coordinates, file names, e-mail addresses, invitations (`redact` tests include a hostile line) | OK |
 | Connection gate | with a library, only device-list peers connect; outsiders get pairing, recovery, the album handshake, docs/gossip (guarded by the namespace capability) and — only for album members — blob transfer. **F2 (fixed while building M5)** an earlier draft let album members use any protocol; the allow-list is now per protocol | Fixed |
-| Dev HTTP bridge | `desktop-dev-server` exposes every command on `127.0.0.1` with no authentication | **F3 (accepted)**: it exists only behind the `http` cargo feature, which no release build enables; documented in the README |
+| Dev HTTP bridge | `desktop-dev-server` exposes every command on loopback with no authentication | **F3 (accepted, hardened 2026-10-26)**: it exists only behind the `http` cargo feature, which no release build enables. A web page the developer has open could reach it (a `text/plain` POST needs no preflight; DNS rebinding could read replies), so it now refuses non-loopback `Host` and `Origin` headers and commands not sent as `application/json`, and will not listen on a non-loopback address (F12) |
 | WebView surface | CSP limits scripts, images and media to the app, `shoebox:` and `blob:`; the `shoebox://` handler serves only photos that are in the library or in an album the device belongs to | OK |
 | Android surface | the debug-only `BurstNow` receiver is not in release builds; the camera permission is requested only when scanning | OK |
 | Album tampering | contributors hold the write capability (A-078) | **F4 (accepted)**: members you invite to contribute are trusted; the owner's remedy is to remove them. Not fixable without per-record author signatures in albums (a post-MVP item) |
-| Invitation guest window | a stranger with a valid invitation can fetch blobs from the inviter for 30 minutes even if it never finishes joining | **F5 (accepted)**: it can only fetch blobs whose hashes it knows, which for a stranger is none until it reads the album |
+| Invitation guest window | a stranger with a valid invitation can fetch blobs from the inviter for 30 minutes even if it never finishes joining | **F5 (accepted)**: it can only fetch blobs whose hashes it knows, which for a stranger is none until it reads the album. Until 2026-10-26 the access did not actually end after 30 minutes (F13) |
 | Blob hash knowledge | an album member can fetch *any* blob from you if it knows the hash | **F6 (accepted)**: hashes are 256-bit and appear only in records the member can read |
 | Location removal | GPS removal covers JPEG, PNG and MP4/MOV; not HEIC, embedded thumbnails or maker notes (A-080) | **F7 (accepted, user-visible)**: unsupported files are refused, not shared with their location |
+
+## Second review (2026-10-26): message authentication and open protocols
+
+Every protocol was re-read for who can send what. Direct request/response protocols are authenticated by
+the QUIC handshake (the peer's key is its id), so the question there is whether the handler checks that id.
+Messages that are relayed or stored and trusted later need their own signature.
+
+| # | Finding | Status |
+|---|---|---|
+| F8 | Presence messages (gossip) were unsigned; gossip is open to outsiders, so anyone who knew the topic could show a device online or rename it on the Devices screen | **Fixed**: signed with the device key, bound to the topic, accepted only from listed non-revoked devices, replays dropped (A-045) |
+| F9 | A stolen admin device can backdate certs: revoke the real admin "before" its own revocation, undoing it everywhere; a revoked or expired admin can keep adding devices | **Open, needs a design decision** (A-085) |
+| F10 | A rotation notice from a revoked admin is accepted by a member that has not heard of the revocation, and then blocks the real notice | **Partly fixed**: members that know of the revocation (or the expiry) refuse it, including when another member forwards it; the offline-member case goes with F9 |
+| F11 | A contributor could forge an "Owner" membership entry and send `Moved`, taking every member (the owner too) to a space it controls | **Fixed**: `Moved` is accepted only from the inviter a member joined through; the owner's device never follows one (A-081) |
+| F12 | Dev HTTP bridge reachable from web pages (cross-site POST, DNS rebinding) | **Fixed** for the dev tool (see F3) |
+| F13 | Anyone who presented a valid invitation kept blob access permanently and could not be removed if they never wrote a membership entry | **Fixed**: after the 30-minute window only members with an entry and recorded viewers pass the blob gate; the owner can remove a joiner (A-079) |
+| F14 | Pairing and recovery failure limits were global, so any stranger could keep both refused for everyone | **Fixed**: counted per remote device (the secrets cannot be guessed, so the limit only caps wasted work) |
+| F15 | The album handshake and doc-digest handlers (open to outsiders) waited without limit for the peer to close | **Fixed**: 5 s cap, also on ping and has |
+| — | Album invitation secrets are compared with `==`, not in constant time | Accepted: 128-bit random secrets, single use |
+
+Checked and fine: pairing and recovery proofs (keyed BLAKE3 bound to both ids; root signature over a nonce;
+1 MB message cap), Loro sync (device list only; records signed and checked against the certs; viewers write only
+their own holdings), `has/0` and ping (device list only), iroh-blobs (album peers only, BLAKE3-verified), iroh-docs
+(namespace capability, signed entries), doc-digest (needs the namespace id; reveals only whether this device
+holds it), the `shoebox://` handler and poster files (ids parsed as hex, no paths from the peer), the keeper
+control socket (`0600`).
 
 Severity: nothing found that lets a stranger read photos or impersonate a device. F1 and F2 were
 the two issues with real consequences and are fixed. F4 is the one a user should understand

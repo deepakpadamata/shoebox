@@ -30,7 +30,6 @@ use shoebox_core::store::{
     LibraryCapability, LibraryId, LibraryStore, PeerAddr, RootPublicKey, SignedDeviceChange,
 };
 use shoebox_core::Hlc;
-use std::collections::VecDeque;
 use std::fmt;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, Weak};
@@ -147,7 +146,7 @@ async fn read_msg<T: for<'de> Deserialize<'de>>(
 
 struct Responder<L: LibraryStore> {
     inner: Weak<Inner<L>>,
-    failed: Arc<Mutex<VecDeque<u64>>>,
+    failed: Arc<Mutex<crate::limit::FailureLimit>>,
 }
 
 impl<L: LibraryStore> crate::ext::ConnHandler for Responder<L> {
@@ -178,24 +177,22 @@ impl<L: LibraryStore> crate::ext::ConnHandler for Responder<L> {
 
 async fn serve<L: LibraryStore>(
     ln: &LibraryNode<L>,
-    failed: &Mutex<VecDeque<u64>>,
+    failed: &Mutex<crate::limit::FailureLimit>,
     conn: &Connection,
     send: &mut iroh::endpoint::SendStream,
     recv: &mut iroh::endpoint::RecvStream,
 ) -> Result<()> {
     let now = ln.now_ms();
-    {
-        let mut f = failed.lock().unwrap();
-        while f.front().is_some_and(|t| now.saturating_sub(*t) > 60_000) {
-            f.pop_front();
-        }
-        ensure!(
-            f.len() < MAX_FAILED_PER_MINUTE,
-            "too many failed attempts, try again later"
-        );
-    }
+    let peer = conn.remote_id();
+    ensure!(
+        failed
+            .lock()
+            .unwrap()
+            .allows(&peer, now, MAX_FAILED_PER_MINUTE),
+        "too many failed attempts, try again later"
+    );
     let fail = |why: &str| -> anyhow::Error {
-        failed.lock().unwrap().push_back(now);
+        failed.lock().unwrap().record(peer, now);
         anyhow!("{why}")
     };
     let ToMember::Hello = read_msg(recv).await? else {

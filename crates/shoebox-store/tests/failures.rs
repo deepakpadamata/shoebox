@@ -432,3 +432,67 @@ async fn renaming_a_device_reaches_the_others() {
     .expect("the other device sees the new name, live and in the device list");
     c.shutdown().await;
 }
+
+/// A device outside the device list that knows the presence topic (gossip is open to outsiders
+/// for shared albums) cannot show itself as one of the library's devices: its messages are signed
+/// with its own key, which is not on the list, so the members ignore them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn presence_from_outside_the_device_list_is_ignored() {
+    use shoebox_node::PresenceConfig;
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Phone])
+        .await
+        .unwrap();
+    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Phone]).await;
+
+    // The outsider has the library's capability (so it derives the same topic) but no
+    // certificate. Its own library has no device list, so it accepts every signer: seeing the
+    // members proves it really reached the topic.
+    let o = Cluster::new(1).await.unwrap();
+    for i in 0..c.len() {
+        o.node(0).add_peer_addr(c.node(i).addr());
+        c.node(i).add_peer_addr(o.node(0).addr());
+    }
+    let own = shoebox_store::HybridBackend::for_node(o.node(0).clone(), o.clock().clone())
+        .create_library(&KeyPair::generate().root_public())
+        .await
+        .unwrap()
+        .0;
+    let outsider = LibraryNode::new(
+        o.node(0).clone(),
+        std::sync::Arc::new(own),
+        o.clock().clone(),
+    )
+    .with_capability(rig.cap.clone());
+    for i in 0..c.len() {
+        outsider.add_peer(peer_addr(&c, i)).unwrap();
+    }
+    let fast = PresenceConfig {
+        heartbeat: Duration::from_millis(200),
+        offline_after: Duration::from_millis(900),
+    };
+    for n in &nodes {
+        n.start_presence(fast.clone()).await.unwrap();
+    }
+    outsider.start_presence(fast).await.unwrap();
+
+    let (member, stranger) = (nodes[1].device(), outsider.device());
+    wait_until(Duration::from_secs(30), || async {
+        nodes[0]
+            .devices()
+            .iter()
+            .any(|d| d.id == member && d.online)
+            && outsider.devices().iter().any(|d| d.online)
+    })
+    .await
+    .expect("the members see each other and the outsider hears them");
+    outsider.announce_new_items(1).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    for n in &nodes {
+        assert!(
+            n.devices().iter().all(|d| d.id != stranger),
+            "the outsider never appears in a member's device table"
+        );
+    }
+    o.shutdown().await;
+    c.shutdown().await;
+}

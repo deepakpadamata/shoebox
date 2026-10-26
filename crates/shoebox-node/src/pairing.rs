@@ -26,7 +26,7 @@ use shoebox_core::identity::{issue_device_cert, TrustChain};
 use shoebox_core::ids::{EndpointId, Timestamp};
 use shoebox_core::model::{AdminCert, DeviceCert, Role};
 use shoebox_core::store::{LibraryCapability, LibraryStore, PeerAddr, SignedDeviceChange};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, Weak};
@@ -267,8 +267,8 @@ struct Invite {
 #[derive(Default)]
 pub(crate) struct Invites {
     by_id: HashMap<[u8; 8], Invite>,
-    /// When recent failed proofs happened (any ticket).
-    failed: VecDeque<u64>,
+    /// Recent failed proofs, per joining device.
+    failed: crate::limit::FailureLimit,
 }
 
 struct Inviter<L: LibraryStore> {
@@ -319,19 +319,13 @@ async fn respond<L: LibraryStore>(
     let now = ln.now_ms();
     let accepted: Result<Invite, &'static str> = {
         let mut inv = invites.lock().unwrap();
-        while inv
-            .failed
-            .front()
-            .is_some_and(|t| now.saturating_sub(*t) > 60_000)
-        {
-            inv.failed.pop_front();
-        }
-        if inv.failed.len() >= MAX_FAILED_PER_MINUTE {
+        let peer = conn.remote_id();
+        if !inv.failed.allows(&peer, now, MAX_FAILED_PER_MINUTE) {
             Err("too many failed attempts, try again later")
         } else {
             match inv.by_id.get_mut(&ticket_id) {
                 None => {
-                    inv.failed.push_back(now);
+                    inv.failed.record(peer, now);
                     Err(EXPIRED)
                 }
                 Some(i) if now as i64 >= i.expires_ms => {
@@ -345,7 +339,7 @@ async fn respond<L: LibraryStore>(
                     } else {
                         i.failures += 1;
                         let burned = i.failures >= MAX_FAILED_PROOFS;
-                        inv.failed.push_back(now);
+                        inv.failed.record(peer, now);
                         if burned {
                             inv.by_id.remove(&ticket_id);
                         }

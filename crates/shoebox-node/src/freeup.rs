@@ -64,7 +64,8 @@ impl ProtocolHandler for HasProtocol {
             .await
             .map_err(AcceptError::from_err)?;
         send.finish()?;
-        connection.closed().await;
+        // The peer closes once it has read the reply; do not wait on it for longer than that.
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), connection.closed()).await;
         Ok(())
     }
 }

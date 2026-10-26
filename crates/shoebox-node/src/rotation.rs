@@ -224,6 +224,20 @@ impl<L: LibraryStore> LibraryNode<L> {
         notice
             .verify(&cap.root, cap.identity_id())
             .map_err(|e| anyhow!("invalid rotation notice: {e}"))?;
+        // `verify` only sees the notice itself. What this device already knows counts too: a
+        // notice from an admin it knows was revoked, or whose admin rights have expired by its own
+        // clock, is refused (another member may forward one it adopted before it heard).
+        let signer = notice.admin.admin;
+        let now = self.now_ms() as i64;
+        let list = self.store().device_list().await?;
+        ensure!(
+            !list.devices.iter().any(|d| d.device == signer && d.revoked),
+            "invalid rotation notice: its signer was removed from this library"
+        );
+        ensure!(
+            notice.admin.expires_at.is_none_or(|t| t.0 > now),
+            "invalid rotation notice: its signer's admin rights have expired"
+        );
         if notice.revocation.device == self.device() {
             bail!("this device was revoked");
         }

@@ -424,8 +424,9 @@ impl SharedAlbums {
             "you cannot remove yourself: leave the album instead"
         );
         let members = self.members(id).await?;
+        let only_joined = e.reg.lock().unwrap().joined.contains(member);
         ensure!(
-            members.iter().any(|m| m.member.key == *member),
+            members.iter().any(|m| m.member.key == *member) || only_joined,
             "that person is not in this album"
         );
         let moved = Arc::new(self.inner.backend.move_album(&e.album, &[*member]).await?);
@@ -667,12 +668,19 @@ impl SharedAlbums {
 }
 
 impl Inner {
-    /// Everyone this album knows: members that wrote their own entry, and viewers.
+    /// Everyone this album knows: members that wrote their own entry, viewers, and devices that
+    /// presented an invitation (to sync with before their entry reaches us).
     fn member_ids(e: &Entry) -> Vec<EndpointId> {
+        let mut ids = Self::confirmed_member_ids(e);
+        ids.extend(e.reg.lock().unwrap().joined.iter().copied());
+        ids
+    }
+
+    /// Members that wrote their own entry, and viewers: who may fetch blobs from us. A device that
+    /// only presented an invitation gets the guest window, not lasting access.
+    fn confirmed_member_ids(e: &Entry) -> Vec<EndpointId> {
         let mut ids = e.album.known_member_ids();
-        let reg = e.reg.lock().unwrap();
-        ids.extend(reg.viewers.iter().copied());
-        ids.extend(reg.joined.iter().copied());
+        ids.extend(e.reg.lock().unwrap().viewers.iter().copied());
         ids
     }
 
@@ -681,7 +689,7 @@ impl Inner {
         let entries: Vec<Arc<Entry>> = self.entries.lock().unwrap().values().cloned().collect();
         let mut ids = HashSet::new();
         for e in entries {
-            for id in Self::member_ids(&e) {
+            for id in Self::confirmed_member_ids(&e) {
                 if let Ok(i) = to_iroh_id(&id) {
                     ids.insert(i);
                 }
@@ -784,13 +792,17 @@ impl Inner {
             .get(&moved.album)
             .cloned()
             .ok_or_else(|| anyhow!("not a member of that album"))?;
+        // Only the owner invites, so the inviter we joined through is the owner. Membership
+        // entries cannot decide this: any writer can forge one that says "Owner" (A-078). The
+        // owner's own device has no inviter, so nobody can move an album away from its owner.
         let sender = shoebox_node::from_iroh_id(&from);
         let owner = entry
-            .album
-            .members()
-            .await?
-            .iter()
-            .any(|m| m.key == sender && m.role == MemberRole::Owner);
+            .reg
+            .lock()
+            .unwrap()
+            .inviter
+            .as_ref()
+            .is_some_and(|inv| inv.id == sender);
         ensure!(owner, "only the owner can move an album");
         let album = Arc::new(self.backend.open_album(&moved.capability).await?);
         let mut reg = entry.reg.lock().unwrap().clone();
@@ -1066,7 +1078,8 @@ impl ConnHandler for InviteHandler {
             };
             send.write_all(&reply).await?;
             send.finish()?;
-            conn.closed().await;
+            // The peer closes once it has read the reply; do not wait on it for longer than that.
+            let _ = tokio::time::timeout(Duration::from_secs(5), conn.closed()).await;
             Ok(())
         })
     }

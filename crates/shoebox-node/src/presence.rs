@@ -1,10 +1,12 @@
 //! Gossip presence (M1-10): one iroh-gossip topic per library carries `Hello`, `Heartbeat` and
 //! `NewItems` messages, giving a live "who is online" table and a push nudge for new photos.
 //!
-//! The topic is derived from the library id and root key, so devices of other libraries never
-//! share it. Messages are unauthenticated in M1 (M2 signs them with the device certs): they carry
-//! nothing sensitive (device name, role, app version), and a forged `NewItems` can at worst
-//! trigger an extra sync with a peer we already know.
+//! The topic is derived from the library's identity id and root key, so devices of other
+//! libraries never share it. Gossip relays messages through other peers, and the gossip protocol is
+//! open to devices outside the device list (shared albums need it), so every message is signed
+//! with the sender's device key, bound to this topic, and accepted only from a listed, non-revoked
+//! device (or, before a library has any device list, from whoever signed it, the same rule as the
+//! connection gate). A per-device send time that must increase stops replays of old messages.
 
 use crate::library_node::{Inner, LibraryNode};
 use crate::node::NodeEvent;
@@ -14,9 +16,11 @@ use futures::StreamExt;
 use iroh_gossip::api::{Event, GossipSender};
 use iroh_gossip::TopicId;
 use serde::{Deserialize, Serialize};
+use shoebox_core::identity::{verify_signature, KeyPair};
 use shoebox_core::ids::EndpointId;
 use shoebox_core::model::Role;
-use shoebox_core::store::{LibraryCapability, LibraryStore};
+use shoebox_core::store::{LibraryCapability, LibraryStore, SignedDeviceList};
+use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
@@ -41,19 +45,34 @@ impl Default for PresenceConfig {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PresenceMsg {
     Hello {
-        device: EndpointId,
         name: String,
         role: Role,
         app_version: String,
     },
-    Heartbeat {
-        device: EndpointId,
-    },
+    Heartbeat,
     NewItems {
-        device: EndpointId,
         count: u32,
     },
 }
+
+/// What the sender signs: who it is, when it sent this (its own clock, ms), and the message.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+struct PresenceBody {
+    device: EndpointId,
+    sent_at_ms: u64,
+    msg: PresenceMsg,
+}
+
+/// On the wire: the encoded body and the device key's signature over it.
+#[derive(Serialize, Deserialize)]
+struct Envelope {
+    body: Vec<u8>,
+    sig: Vec<u8>,
+}
+
+/// Longest name and version kept from a `Hello`; anything longer is cut.
+const MAX_NAME_CHARS: usize = 64;
+const MAX_VERSION_CHARS: usize = 32;
 
 /// A device of this library, as last seen on the presence topic.
 #[derive(Clone, Debug)]
@@ -77,19 +96,79 @@ pub(crate) struct DeviceRecord {
 pub(crate) struct PresenceState {
     sender: GossipSender,
     cfg: PresenceConfig,
+    topic: TopicId,
+    /// The latest send time accepted per device; anything not newer is a replay.
+    last_sent: HashMap<EndpointId, u64>,
+    /// The send time of this device's previous message: the next one is always later, even when
+    /// two go out in the same millisecond or the clock steps back.
+    own_last_sent: u64,
 }
 
 fn topic_id(cap: &LibraryCapability) -> TopicId {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"shoebox/presence/0");
+    hasher.update(b"shoebox/presence/1");
     // The identity id, not the epoch: presence survives a rotation (M2-03b).
     hasher.update(&cap.identity_id().0);
     hasher.update(&cap.root.0);
     TopicId::from_bytes(*hasher.finalize().as_bytes())
 }
 
-fn encode(msg: &PresenceMsg) -> Bytes {
-    Bytes::from(postcard::to_stdvec(msg).expect("presence message encodes"))
+/// The bytes a signature covers: a domain tag, the topic (so a message cannot be replayed into
+/// another library's topic) and the encoded body.
+fn signed_bytes(topic: &TopicId, body: &[u8]) -> Vec<u8> {
+    let mut out = b"shoebox/presence-msg/1\0".to_vec();
+    out.extend_from_slice(topic.as_bytes());
+    out.extend_from_slice(body);
+    out
+}
+
+fn seal(key: &KeyPair, topic: &TopicId, sent_at_ms: u64, msg: PresenceMsg) -> Bytes {
+    let body = postcard::to_stdvec(&PresenceBody {
+        device: key.endpoint_id(),
+        sent_at_ms,
+        msg,
+    })
+    .expect("presence body encodes");
+    let sig = key.sign(&signed_bytes(topic, &body));
+    Bytes::from(postcard::to_stdvec(&Envelope { body, sig }).expect("presence envelope encodes"))
+}
+
+/// Decode and check a received message: well formed, signed by the device it names, for this
+/// topic. Says nothing yet about whether that device belongs to the library.
+fn open(topic: &TopicId, bytes: &[u8]) -> Option<PresenceBody> {
+    let env: Envelope = postcard::from_bytes(bytes).ok()?;
+    let body: PresenceBody = postcard::from_bytes(&env.body).ok()?;
+    verify_signature(&body.device.0, &signed_bytes(topic, &env.body), &env.sig).then_some(body)
+}
+
+/// Whether a signed message from `device` may change what this device shows: it must be a
+/// listed, non-revoked device. A library without any device list yet accepts every signer
+/// (as the connection gate does, A-061).
+fn from_member(list: &SignedDeviceList, device: &EndpointId) -> bool {
+    list.devices.is_empty()
+        || list
+            .devices
+            .iter()
+            .any(|d| d.device == *device && !d.revoked)
+}
+
+/// Record `sent_at_ms` as the newest message from `device`, unless it is not newer than one
+/// already accepted (a replay, or a duplicate).
+fn is_fresh(last_sent: &mut HashMap<EndpointId, u64>, device: EndpointId, sent_at_ms: u64) -> bool {
+    match last_sent.get(&device) {
+        Some(&last) if sent_at_ms <= last => false,
+        _ => {
+            last_sent.insert(device, sent_at_ms);
+            true
+        }
+    }
+}
+
+fn truncate(s: String, max_chars: usize) -> String {
+    match s.char_indices().nth(max_chars) {
+        Some((i, _)) => s[..i].to_string(),
+        None => s,
+    }
 }
 
 impl<L: LibraryStore> LibraryNode<L> {
@@ -104,16 +183,20 @@ impl<L: LibraryStore> LibraryNode<L> {
             .iter()
             .filter_map(|id| crate::addr::to_iroh_id(id).ok())
             .collect();
+        let topic_id = topic_id(&cap);
         let topic = self
             .node()
             .gossip()
-            .subscribe(topic_id(&cap), bootstrap)
+            .subscribe(topic_id, bootstrap)
             .await
             .map_err(|e| anyhow!("joining presence topic: {e}"))?;
         let (sender, receiver) = topic.split();
         *self.inner.presence.lock().unwrap() = Some(PresenceState {
             sender: sender.clone(),
             cfg: cfg.clone(),
+            topic: topic_id,
+            last_sent: HashMap::new(),
+            own_last_sent: 0,
         });
 
         let weak = Arc::downgrade(&self.inner);
@@ -156,20 +239,9 @@ impl<L: LibraryStore> LibraryNode<L> {
 
     /// Tell the other devices that this one has new items, so they sync now instead of waiting.
     pub async fn announce_new_items(&self, count: u32) -> Result<()> {
-        let sender = self
-            .inner
-            .presence
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|p| p.sender.clone());
-        if let Some(sender) = sender {
-            let msg = PresenceMsg::NewItems {
-                device: self.inner.device,
-                count,
-            };
+        if let Some((sender, bytes)) = sealed(&self.inner, PresenceMsg::NewItems { count }) {
             sender
-                .broadcast(encode(&msg))
+                .broadcast(bytes)
                 .await
                 .map_err(|e| anyhow!("announcing new items: {e}"))?;
         }
@@ -193,24 +265,61 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 }
 
+/// `msg` signed by this device for the presence topic, with the sender to broadcast it on; `None`
+/// before presence has started.
+fn sealed<L: LibraryStore>(inner: &Inner<L>, msg: PresenceMsg) -> Option<(GossipSender, Bytes)> {
+    let (sender, topic, sent_at_ms) = {
+        let mut presence = inner.presence.lock().unwrap();
+        let p = presence.as_mut()?;
+        p.own_last_sent = inner.clock.now_ms().max(p.own_last_sent + 1);
+        (p.sender.clone(), p.topic, p.own_last_sent)
+    };
+    let bytes = seal(&inner.node.device_key(), &topic, sent_at_ms, msg);
+    Some((sender, bytes))
+}
+
 async fn send_hello<L: LibraryStore>(inner: &Arc<Inner<L>>) {
-    let sender = inner
-        .presence
-        .lock()
-        .unwrap()
-        .as_ref()
-        .map(|p| p.sender.clone());
-    let Some(sender) = sender else { return };
     let cfg = inner.node.config();
     let msg = PresenceMsg::Hello {
-        device: inner.device,
         name: cfg.name,
         role: cfg.role,
         app_version: env!("CARGO_PKG_VERSION").to_string(),
     };
-    if let Err(e) = sender.broadcast(encode(&msg)).await {
+    let Some((sender, bytes)) = sealed(inner, msg) else {
+        return;
+    };
+    if let Err(e) = sender.broadcast(bytes).await {
         debug!("could not send hello: {e}");
     }
+}
+
+/// Check a received message and, if it passes, the device it came from.
+async fn accept<L: LibraryStore>(inner: &Inner<L>, bytes: &[u8]) -> Option<PresenceBody> {
+    let topic = inner.presence.lock().unwrap().as_ref()?.topic;
+    let Some(body) = open(&topic, bytes) else {
+        debug!("ignoring a presence message that is malformed or not signed by its device");
+        return None;
+    };
+    if body.device == inner.device {
+        return None;
+    }
+    match inner.store.device_list().await {
+        Ok(list) if from_member(&list, &body.device) => {}
+        Ok(_) => {
+            debug!(
+                "ignoring presence from {}: not a device of this library",
+                body.device
+            );
+            return None;
+        }
+        Err(e) => {
+            debug!("ignoring presence: device list unavailable: {e}");
+            return None;
+        }
+    }
+    let mut presence = inner.presence.lock().unwrap();
+    let state = presence.as_mut()?;
+    is_fresh(&mut state.last_sent, body.device, body.sent_at_ms).then_some(body)
 }
 
 fn set_online<L: LibraryStore>(inner: &Inner<L>, id: EndpointId, online: bool) {
@@ -266,30 +375,29 @@ async fn receive_loop<L: LibraryStore>(
         let Some(inner) = weak.upgrade() else { break };
         match event {
             Ok(Event::Received(message)) => {
-                match postcard::from_bytes::<PresenceMsg>(&message.content) {
-                    Ok(PresenceMsg::Hello {
-                        device,
+                let Some(PresenceBody { device, msg, .. }) = accept(&inner, &message.content).await
+                else {
+                    continue;
+                };
+                match msg {
+                    PresenceMsg::Hello {
                         name,
                         role,
                         app_version,
-                    }) => {
-                        if device != inner.device {
-                            touch(&inner, device, Some((name, role, app_version)));
-                        }
+                    } => {
+                        let hello = (
+                            truncate(name, MAX_NAME_CHARS),
+                            role,
+                            truncate(app_version, MAX_VERSION_CHARS),
+                        );
+                        touch(&inner, device, Some(hello));
                     }
-                    Ok(PresenceMsg::Heartbeat { device }) => {
-                        if device != inner.device {
-                            touch(&inner, device, None);
-                        }
+                    PresenceMsg::Heartbeat => touch(&inner, device, None),
+                    PresenceMsg::NewItems { count } => {
+                        touch(&inner, device, None);
+                        debug!("{count} new item(s) announced by {device}: syncing");
+                        let _ = inner.nudge.send(device);
                     }
-                    Ok(PresenceMsg::NewItems { device, count }) => {
-                        if device != inner.device {
-                            touch(&inner, device, None);
-                            debug!("{count} new item(s) announced by {device}: syncing");
-                            let _ = inner.nudge.send(device);
-                        }
-                    }
-                    Err(e) => debug!("ignoring malformed presence message: {e}"),
                 }
             }
             // A new neighbor does not know us yet: introduce ourselves.
@@ -315,10 +423,9 @@ async fn heartbeat_loop<L: LibraryStore>(
     loop {
         ticker.tick().await;
         let Some(inner) = weak.upgrade() else { break };
-        let msg = PresenceMsg::Heartbeat {
-            device: inner.device,
-        };
-        let _ = sender.broadcast(encode(&msg)).await;
+        if let Some((_, bytes)) = sealed(&inner, PresenceMsg::Heartbeat) {
+            let _ = sender.broadcast(bytes).await;
+        }
         // Mark devices we have not heard from as offline.
         let stale: Vec<EndpointId> = inner
             .devices
@@ -339,19 +446,96 @@ mod tests {
     use super::*;
     use shoebox_core::store::{Capability, LibraryId, RootPublicKey};
 
-    #[test]
-    fn messages_round_trip_and_topics_are_per_library() {
-        let msg = PresenceMsg::Hello {
-            device: EndpointId([1; 32]),
+    fn hello() -> PresenceMsg {
+        PresenceMsg::Hello {
             name: "Pi".into(),
             role: Role::Keeper,
             app_version: "0.1".into(),
-        };
-        assert_eq!(
-            postcard::from_bytes::<PresenceMsg>(&encode(&msg)).unwrap(),
-            msg
-        );
+        }
+    }
 
+    #[test]
+    fn signed_messages_open_only_for_their_signer_and_topic() {
+        let key = KeyPair::generate();
+        let topic = TopicId::from_bytes([7; 32]);
+        let bytes = seal(&key, &topic, 42, hello());
+        let body = open(&topic, &bytes).expect("opens");
+        assert_eq!(body.device, key.endpoint_id());
+        assert_eq!(body.sent_at_ms, 42);
+        assert_eq!(body.msg, hello());
+
+        // Another library's topic: the signature does not cover it.
+        assert!(open(&TopicId::from_bytes([8; 32]), &bytes).is_none());
+
+        // A body edited after signing (here: claiming another device) fails.
+        let mut env: Envelope = postcard::from_bytes(&bytes).unwrap();
+        let mut forged: PresenceBody = postcard::from_bytes(&env.body).unwrap();
+        forged.device = EndpointId([9; 32]);
+        env.body = postcard::to_stdvec(&forged).unwrap();
+        assert!(open(&topic, &postcard::to_stdvec(&env).unwrap()).is_none());
+
+        // Signed by one key while naming another device: fails.
+        let other = KeyPair::generate();
+        let body = postcard::to_stdvec(&PresenceBody {
+            device: key.endpoint_id(),
+            sent_at_ms: 43,
+            msg: PresenceMsg::Heartbeat,
+        })
+        .unwrap();
+        let sig = other.sign(&signed_bytes(&topic, &body));
+        let env = postcard::to_stdvec(&Envelope { body, sig }).unwrap();
+        assert!(open(&topic, &env).is_none());
+
+        // Unsigned old-format or garbage bytes: ignored, never a panic.
+        assert!(open(&topic, b"").is_none());
+        assert!(open(&topic, &[0xff; 300]).is_none());
+    }
+
+    #[test]
+    fn only_listed_devices_count_once_a_device_list_exists() {
+        use shoebox_core::model::DeviceCert;
+        let cert = |b: u8, revoked: bool| DeviceCert {
+            device: EndpointId([b; 32]),
+            role: Role::Keeper,
+            name: String::new(),
+            added_by: EndpointId([0; 32]),
+            hlc: shoebox_core::hlc::Hlc::GENESIS,
+            revoked,
+            signature: vec![],
+        };
+        let empty = SignedDeviceList {
+            admins: vec![],
+            devices: vec![],
+        };
+        assert!(from_member(&empty, &EndpointId([1; 32])));
+        let list = SignedDeviceList {
+            admins: vec![],
+            devices: vec![cert(1, false), cert(2, true)],
+        };
+        assert!(from_member(&list, &EndpointId([1; 32])));
+        assert!(!from_member(&list, &EndpointId([2; 32])), "revoked");
+        assert!(!from_member(&list, &EndpointId([3; 32])), "not listed");
+    }
+
+    #[test]
+    fn replays_and_duplicates_are_dropped() {
+        let mut last = HashMap::new();
+        let a = EndpointId([1; 32]);
+        assert!(is_fresh(&mut last, a, 100));
+        assert!(!is_fresh(&mut last, a, 100), "duplicate");
+        assert!(!is_fresh(&mut last, a, 50), "older");
+        assert!(is_fresh(&mut last, a, 101));
+        assert!(is_fresh(&mut last, EndpointId([2; 32]), 1), "per device");
+    }
+
+    #[test]
+    fn long_names_are_cut_on_a_character_boundary() {
+        assert_eq!(truncate("Pi".into(), 64), "Pi");
+        assert_eq!(truncate("é".repeat(70), 64).chars().count(), 64);
+    }
+
+    #[test]
+    fn topics_are_per_library() {
         let cap = |lib: u8, root: u8, mode| LibraryCapability {
             library: LibraryId([lib; 16]),
             root: RootPublicKey([root; 32]),

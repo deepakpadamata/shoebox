@@ -14,6 +14,7 @@ mod identity;
 mod import;
 mod keys;
 mod library_node;
+mod limit;
 mod maintenance;
 mod node;
 mod pairing;

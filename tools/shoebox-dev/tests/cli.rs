@@ -112,7 +112,8 @@ fn a_single_device_can_init_import_and_list() {
 
     let status = json(&dir, &["status"]);
     assert_eq!(status["photos"], 2);
-    assert_eq!(status["at_risk"], 2, "1 copy < target 2");
+    // One copy is below the target of 2, but it is on a keeper, which counts as backed up.
+    assert_eq!(status["at_risk"], 0, "held by a keeper");
     assert_eq!(status["role"], "Keeper");
 }
 

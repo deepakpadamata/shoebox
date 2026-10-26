@@ -209,6 +209,11 @@ Behaviour that will come back as features or needs a decision.
   `NodeEvent::RoleChanged`, which the app saves in `app.json`. An admin may change its own role and stays an admin. Camera-roll backup
   pauses on a viewer ("viewers do not add photos"). Replacement certs are dated after the cert they replace (`cert_hlc_after`): before,
   a device whose clock was behind the last signer's issued a cert that lost to the older one (this also affected removal and rename).
+  Found while checking this in two dev instances: a device synced on its own initiative only with the peers it was given when it
+  joined, so the device that started the library never pushed to devices that joined later, and a certificate change (role, name) waited
+  for their 5-minute pull. Every listed, non-revoked device is now a sync peer and removed ones are dropped (`apply_membership`; test
+  `revocation.rs::changes_reach_devices_known_only_from_the_device_list`, which fails without it). The app's sidebar also refreshes
+  this device's name and role on device-list changes.
   Not done: the keeper CLI cannot change roles (use the app); the keeper daemon starts as Keeper and then follows its cert; nothing
   warns before demoting the only keeper (photos it held count as at risk again until another device holds them). Tested:
   `revocation.rs::roles_can_change_and_devices_follow_their_certificate`.

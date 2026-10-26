@@ -221,3 +221,56 @@ async fn roles_can_change_and_devices_follow_their_certificate() {
     .expect("the change replicates");
     c.shutdown().await;
 }
+
+/// A device that only learned of another one from the device list (here: the one that started the
+/// library, and the device that joined through it) still pushes its changes there at once,
+/// instead of waiting for the other to pull.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn changes_reach_devices_known_only_from_the_device_list() {
+    use shoebox_node::{LibraryNode, SyncConfig};
+    let c = Cluster::new(2).await.unwrap();
+    let (rig, libs) = rig(&c, &[Role::Keeper, Role::Phone]).await;
+    // Periodic sync effectively off: only a push or a nudge moves anything.
+    let push_only = SyncConfig {
+        tick: Duration::from_millis(100),
+        resync_interval: Duration::from_secs(3600),
+        backoff_min: Duration::from_millis(100),
+        backoff_max: Duration::from_millis(500),
+        timeout: Duration::from_secs(10),
+    };
+    let mut libs = libs.into_iter();
+    let admin = LibraryNode::with_sync_config(
+        c.node(0).clone(),
+        std::sync::Arc::new(libs.next().unwrap()),
+        c.clock().clone(),
+        push_only.clone(),
+    )
+    .with_capability(rig.cap.clone());
+    let phone = LibraryNode::with_sync_config(
+        c.node(1).clone(),
+        std::sync::Arc::new(libs.next().unwrap()),
+        c.clock().clone(),
+        push_only,
+    )
+    .with_capability(rig.cap.clone());
+    // Only the phone was told where the admin is, as after joining.
+    phone.add_peer(peer_addr(&c, 0)).unwrap();
+    admin.enforce_membership().await.unwrap();
+    phone.enforce_membership().await.unwrap();
+    assert!(
+        admin.peers().contains(&core_id(&c, 1)),
+        "learned from the device list"
+    );
+
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    admin
+        .set_device_role(&core_id(&c, 1), Role::Viewer)
+        .await
+        .unwrap();
+    wait_until(Duration::from_secs(5), || async {
+        c.node(1).config().role == Role::Viewer
+    })
+    .await
+    .expect("the change was pushed to the phone");
+    c.shutdown().await;
+}

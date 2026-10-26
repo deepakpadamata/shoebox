@@ -86,6 +86,8 @@ function handle(e: AppEvent) {
     app.devicesVersion++;
     app.version++;
     refreshPeers().catch(() => {});
+    // This device's own name or role may be what changed.
+    refreshState().catch(() => {});
   } else if (e === 'RemovedFromLibrary') {
     app.removed = true;
   } else if (e === 'PairingDone') {

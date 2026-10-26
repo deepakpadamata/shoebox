@@ -224,6 +224,7 @@
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-3); display: inline-block; }
   .dot.on { background: var(--ok); }
   .dot.relay { background: var(--warn); }
+  .input { width: 100%; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 10px 12px; color: var(--ink); font: inherit; resize: none; }
   .ticket { width: 100%; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); padding: 8px; resize: none; }
   .code { display: flex; gap: 8px; justify-content: center; font: 700 30px var(--mono); margin: 12px 0 18px; }
   .code span { width: 40px; height: 52px; background: var(--surface-2); border-radius: 10px; display: grid; place-items: center; }

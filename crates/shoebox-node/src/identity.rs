@@ -120,6 +120,24 @@ impl<L: LibraryStore> LibraryNode<L> {
             )
         };
         self.node().set_allowed_peers(allowed);
+        if state == Membership::Member {
+            // Every listed device is a peer to sync with, not only the ones this device joined
+            // through: otherwise what changes here (a role, a name, a removal) waits until the
+            // others pull. Removed devices are dropped.
+            let known: HashSet<_> = self.inner.peers.lock().unwrap().keys().copied().collect();
+            for d in list
+                .devices
+                .iter()
+                .filter(|d| !d.revoked && d.device != me && !known.contains(&d.device))
+            {
+                let _ = self.add_peer(shoebox_core::store::PeerAddr::id_only(d.device));
+            }
+            self.inner
+                .peers
+                .lock()
+                .unwrap()
+                .retain(|id, _| !list.devices.iter().any(|d| d.device == *id && d.revoked));
+        }
         // A device does what its certificate says: follow a role an admin changed.
         if let Some(c) = mine.filter(|c| !c.revoked) {
             if c.role != self.node().config().role {

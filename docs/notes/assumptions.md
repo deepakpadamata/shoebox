@@ -88,6 +88,8 @@ No remote exists, so CI and the release workflows have never run.
 - **A-059 · M2-01** · Known flake: `shoebox-store-docs` `autosync::sync_now_waits_for_a_sync_already_in_flight` (300 records, `fast()` 10 s sync timeout) fails
   intermittently — 1 in 6 runs on the pre-M2 tree (verified with `git stash -u`), more often on a nearly full disk. It is a sync that hangs inside iroh-docs, unrelated
   to identity. Not fixed; re-run before treating it as a regression. Worth a proper look if it appears in CI.
+  Second known flake (seen 2026-10-26, 2 in 10 runs on the code from before that day too): `shoebox-store-docs` `freeup::dry_run_and_real_run_agree_and_pins_are_kept`
+  (the dry run's byte total sometimes differs from the expected one, `freeup.rs:78`). Not investigated.
 - **A-065 · M2-09** · Release automation is written but never ran: `release.yml` (tag `keeper-v*`; musl x86_64 natively, aarch64 through `cross`, macOS universal via `lipo`; SHA256SUMS signed
   with minisign from repo secrets) and `scripts/install-keeper.sh` (verifies the *signature of SHA256SUMS* then the tarball checksum; refuses to install without `minisign`). The
   project public key is a placeholder (`MINISIGN_PUBKEY`) and the repo/owner is `OWNER/shoebox` until a remote and key exist. Not verified: musl/cross builds of the iroh stack, the macOS lipo

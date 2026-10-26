@@ -58,6 +58,17 @@ fn admin_added() -> String {
 }
 
 ts_type! {
+    /// Settings → About.
+    pub struct AboutInfo {
+        pub version: String,
+        /// The commit this build comes from (`unknown` outside a git checkout).
+        pub commit: String,
+        /// Where the source code is (the AGPL offer).
+        pub source_url: String,
+    }
+}
+
+ts_type! {
     pub struct RecoveryQuestion {
         pub device_id: String,
         pub device_name: String,

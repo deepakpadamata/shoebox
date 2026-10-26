@@ -81,6 +81,8 @@ enum Cmd {
     },
     /// Stop the running daemon.
     Stop,
+    /// Print the licence of this keeper, where to get its source, and the third-party notices.
+    Licences,
 }
 
 #[derive(Subcommand)]
@@ -149,6 +151,18 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let storage = cli.storage.clone().unwrap_or_else(default_storage);
     match cli.cmd {
+        Cmd::Licences => {
+            let text = format!(
+                "shoebox-keeper {} is free software under the GNU AGPL-3.0-only (apps/LICENSE-AGPL).\n\
+                 Its source code: {}\n\n{}",
+                env!("CARGO_PKG_VERSION"),
+                env!("CARGO_PKG_REPOSITORY"),
+                include_str!("../THIRD-PARTY-LICENSES.txt")
+            );
+            // Piped into `less` or `head`, a closed pipe just ends the output.
+            let _ = std::io::Write::write_all(&mut std::io::stdout(), text.as_bytes());
+            return Ok(());
+        }
         Cmd::Run {
             name,
             relay: r,

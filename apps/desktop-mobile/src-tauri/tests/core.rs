@@ -649,3 +649,19 @@ async fn the_recovery_phrase_can_be_replaced() {
     assert!(again.replace_recovery_phrase(&new.phrase).await.is_ok());
     again.shutdown().await.unwrap();
 }
+
+/// R1-05: what Settings → About shows, and the licence notices that ship with the app.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn about_names_the_version_the_source_and_the_licences() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = open(dir.path()).await;
+    let about = core.about();
+    assert_eq!(about.version, env!("CARGO_PKG_VERSION"));
+    assert!(!about.commit.is_empty());
+    assert!(about.source_url.starts_with("https://"));
+    let text = core.third_party_licences();
+    assert!(text.contains("AGPL-3.0-only"));
+    assert!(text.contains("\niroh "), "the iroh crate is listed");
+    assert!(text.contains("[standard MIT]"));
+    core.shutdown().await.unwrap();
+}

@@ -27,10 +27,11 @@ import type { PairStart } from '../bindings/PairStart';
 import type { PhotoDetail } from '../bindings/PhotoDetail';
 import type { PhotoPage } from '../bindings/PhotoPage';
 import type { PhotoSummary } from '../bindings/PhotoSummary';
+import type { AboutInfo } from '../bindings/AboutInfo';
 import type { Settings } from '../bindings/Settings';
 
 export type {
-  AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
+  AboutInfo, AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
   AlbumInfo, AppEvent, BackupPolicy, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, ExportReport, FreeUpReport, Health, ImportSummary,
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Settings,
 };
@@ -102,6 +103,8 @@ export const api = {
   recover: (link: string, phrase: string, device_name: string) => call<{}>('recover', { link, phrase, device_name }),
   confirmPairing: (accept: boolean) => call<{}>('confirm_pairing', { accept }),
   /** Let in (or refuse) the device rejoining through this one with the recovery phrase. */
+  about: () => call<AboutInfo>('about'),
+  thirdPartyLicences: () => call<string>('third_party_licences'),
   answerRecovery: (accept: boolean) => call<{}>('answer_recovery', { accept }),
   /** Make a new recovery phrase; `phrase` is the current one. The result is the only copy. */
   replaceRecoveryPhrase: (phrase: string) => call<CreatedLibrary>('replace_recovery_phrase', { phrase }),

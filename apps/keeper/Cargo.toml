@@ -2,6 +2,7 @@
 name = "keeper"
 description = "shoebox-keeper: the always-on backstop device (daemon, control socket, CLI)."
 version.workspace = true
+repository.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "AGPL-3.0-only"

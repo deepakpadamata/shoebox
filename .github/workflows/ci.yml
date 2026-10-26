@@ -78,6 +78,8 @@ jobs:
         run: cargo test -p desktop-mobile --features http
       - name: TypeScript bindings are up to date
         run: git diff --exit-code apps/desktop-mobile/ui/src/bindings
+      - name: Third-party licence notices are up to date
+        run: python3 scripts/licences.py --check
 
   site:
     runs-on: ubuntu-latest

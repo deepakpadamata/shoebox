@@ -1,7 +1,7 @@
 <script lang="ts">
   // Settings (mockup 6b/6c): this device, how many copies to keep, relay, watched folders, theme.
   import { onMount } from 'svelte';
-  import { api, type Settings } from '../lib/api';
+  import { api, type AboutInfo, type Settings } from '../lib/api';
   import { app, fail, refreshState, toast } from '../lib/store.svelte';
   import Button from '../components/Button.svelte';
   import List from '../components/List.svelte';
@@ -29,6 +29,9 @@
     applyTextSize(v);
   }
   let diag = $state<{ file_name: string; text: string } | null>(null);
+  let about = $state<AboutInfo | null>(null);
+  let licences = $state<string | null>(null);
+  onMount(() => { api.about().then((a) => (about = a)).catch(() => {}); });
   // Replacing the recovery phrase: the current one in, the new kit out (shown once).
   let replaceOpen = $state(false);
   let oldPhrase = $state('');
@@ -176,10 +179,25 @@
       <div class="muted">If someone else may have seen your phrase, replace it: the old one stops working on every device.</div>
       <div><Button size="sm" onclick={() => { replaceOpen = true; newKit = null; oldPhrase = ''; }}>Replace recovery phrase…</Button></div>
     </div>
+
+    <div class="section">About</div>
+    <div class="card pad small stack">
+      {#if about}
+        <div><b>Shoebox {about.version}</b> <span class="muted mono">({about.commit})</span></div>
+        <div class="muted">Shoebox is free software under the GNU Affero General Public License 3.0. You can get its source code, and the source of this exact version, at <a href={about.source_url} target="_blank" rel="noreferrer">{about.source_url}</a>.</div>
+      {/if}
+      <div><Button size="sm" onclick={async () => { try { licences = await api.thirdPartyLicences(); } catch (e) { fail(e); } }}>Third-party licences</Button></div>
+    </div>
   {:else}
     <span class="muted">Loading…</span>
   {/if}
 </div>
+
+<Sheet open={licences !== null} title="Third-party licences" onclose={() => (licences = null)} width={720}>
+  {#if licences !== null}
+    <textarea class="report mono" readonly rows="22" value={licences}></textarea>
+  {/if}
+</Sheet>
 
 <Sheet open={replaceOpen} title={newKit ? 'Your new recovery kit' : 'Replace recovery phrase'} onclose={() => { if (!newKit) { replaceOpen = false; oldPhrase = ''; } }} width={560}>
   {#if newKit}

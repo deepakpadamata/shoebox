@@ -50,7 +50,13 @@ async fn rig(keepers: usize) -> (Cluster, Vec<LibraryNode<Library>>, Vec<Blake3H
             }
         }
         // ...and everybody has heard that those keepers hold them.
-        nodes[0].copy_count(&ids[0]).await.unwrap() == 1 + keepers
+        // Every photo, not only the first: the others' holdings can arrive a moment later (R1-02).
+        for id in &ids {
+            if nodes[0].copy_count(id).await.unwrap() != 1 + keepers {
+                return false;
+            }
+        }
+        true
     })
     .await
     .expect("keepers fetch the originals and say so");

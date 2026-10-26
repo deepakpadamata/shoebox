@@ -129,7 +129,7 @@ Implementation status per issue. Assumptions made along the way are logged in
 | Issue | Status | Notes |
 |---|---|---|
 | R1-01 Version 0.1.0 and the format and protocol baseline | ✅ | 0.1.0 everywhere; layout 2 with a migration for pre-0.1 notices; `docs/notes/formats.md` guarded by `tests/formats.rs`; rule in CONTRIBUTING; CHANGELOG started |
-| R1-02 Fix the two flaky tests | ⬜ | A-059 |
+| R1-02 Fix the two flaky tests | ✅ | autosync: a real iroh-docs stall (sync paths stopped reading their event queue between rounds), now drained; free-up: a race in the test setup only. 50 runs each in a row (A-059 closed) |
 | R1-03 Freeing space trusts a keeper copy | ⬜ | A-064 |
 | R1-04 Make this device an admin | ⬜ |  |
 | R1-05 About screen, licences and source offer | ⬜ |  |

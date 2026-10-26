@@ -26,6 +26,10 @@ const FETCH_AFTER: Duration = Duration::from_millis(750);
 const CONTENT_HOLD: Duration = Duration::from_secs(60);
 /// After a failed content fetch, wait this long before trying the same hash again.
 const FETCH_RETRY: Duration = Duration::from_secs(4);
+/// In a sync round, ask iroh-docs again when nothing happened for this long.
+const ASK_AGAIN: Duration = Duration::from_secs(2);
+/// How often a round asks before giving up (stale finishes and silent requests together).
+const MAX_ASKS: usize = 8;
 
 pub struct Replica {
     pub doc: Doc,
@@ -354,13 +358,40 @@ where
         .map_err(|e| anyhow!("starting sync: {e}"))?;
     let mut finished = false;
     let mut retries = 0;
-    while let Some(event) = events.next().await {
-        match event? {
+    loop {
+        // iroh-docs sometimes drops a request without any event (R1-02: right after a sync that
+        // ended with a close-phase error, the next request produced nothing for 10 s): do not wait
+        // on the event alone, ask again now and then, like `sync_until_key`.
+        let event = match tokio::time::timeout(ASK_AGAIN, events.next()).await {
+            Ok(Some(event)) => event?,
+            Ok(None) => bail!("event stream ended before the sync finished"),
+            Err(_) if finished => {
+                // The sync is done; the "content ready" event did not come. The caller compares
+                // digests and fetches missing content itself, so stop waiting here.
+                return Ok(());
+            }
+            Err(_) => {
+                retries += 1;
+                if retries > MAX_ASKS {
+                    bail!("could not start a fresh sync with {}", peer.id.fmt_short());
+                }
+                debug!(
+                    "no sync with {} started yet; asking again",
+                    peer.id.fmt_short()
+                );
+                since = std::time::SystemTime::now();
+                doc.start_sync(vec![peer.clone()])
+                    .await
+                    .map_err(|e| anyhow!("starting sync: {e}"))?;
+                continue;
+            }
+        };
+        match event {
             LiveEvent::SyncFinished(ev) if ev.peer == peer.id => {
                 if ev.started < since {
                     // Stale: it began before our request. Ask for a fresh one.
                     retries += 1;
-                    if retries > 5 {
+                    if retries > MAX_ASKS {
                         bail!("could not start a fresh sync with {}", peer.id.fmt_short());
                     }
                     since = std::time::SystemTime::now();
@@ -387,5 +418,4 @@ where
             _ => {}
         }
     }
-    bail!("event stream ended before the sync finished")
 }

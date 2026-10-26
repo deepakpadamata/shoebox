@@ -310,8 +310,10 @@ impl LibraryStore for DocsLibrary {
             core.replica.note_peer(target.id);
             (core.replica.doc.clone(), core.replica.node().clone())
         };
-        // Do not hold the state lock while waiting on the network.
-        let mut events = doc.subscribe().await.map_err(backend_err)?;
+        // Do not hold the state lock while waiting on the network. Read the events from the first
+        // moment: between rounds the sync compares digests, and a subscriber that stops reading
+        // lets its queue fill and stalls iroh-docs, including the next sync request (R1-02).
+        let mut events = crate::album::drained(doc.subscribe().await.map_err(backend_err)?);
         node.note_activity();
         crate::replica::sync_and_wait(&doc, &node, &mut events, target.clone())
             .await

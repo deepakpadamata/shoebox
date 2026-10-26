@@ -85,11 +85,6 @@ No remote exists, so CI and the release workflows have never run.
   Note: cargo-deny skips *path* crates as "private", so only registry deps are covered by the allow-list; edges
   from libraries to `apps/*` are covered by `scripts/check-no-app-deps.py` (verified by giving `keeper` a temporary
   lib target). Bin-only apps can't be depended on anyway.
-- **A-059 · M2-01** · Known flake: `shoebox-store-docs` `autosync::sync_now_waits_for_a_sync_already_in_flight` (300 records, `fast()` 10 s sync timeout) fails
-  intermittently — 1 in 6 runs on the pre-M2 tree (verified with `git stash -u`), more often on a nearly full disk. It is a sync that hangs inside iroh-docs, unrelated
-  to identity. Not fixed; re-run before treating it as a regression. Worth a proper look if it appears in CI.
-  Second known flake (seen 2026-10-26, 2 in 10 runs on the code from before that day too): `shoebox-store-docs` `freeup::dry_run_and_real_run_agree_and_pins_are_kept`
-  (the dry run's byte total sometimes differs from the expected one, `freeup.rs:78`). Not investigated.
 - **A-065 · M2-09** · Release automation is written but never ran: `release.yml` (tag `keeper-v*`; musl x86_64 natively, aarch64 through `cross`, macOS universal via `lipo`; SHA256SUMS signed
   with minisign from repo secrets) and `scripts/install-keeper.sh` (verifies the *signature of SHA256SUMS* then the tarball checksum; refuses to install without `minisign`). The
   project public key is a placeholder (`MINISIGN_PUBKEY`) and the repo/owner is `OWNER/shoebox` until a remote and key exist. Not verified: musl/cross builds of the iroh stack, the macOS lipo
@@ -438,6 +433,17 @@ Not open questions, but they must be honoured by any format or protocol change, 
   `AdminCert` gained `expires_at: Option<Timestamp>` (golden bytes updated). A revoked admin's earlier certs stay valid; later ones do not.
 - **A-058 · M2-01** · `shoebox-dev init` creates a random root key, self-issues an admin cert and a device cert, and keeps the root seed in `dev.json`
   (dev tool only; real devices never store it, see M2-02). `shoebox-dev join` does not yet obtain a cert: pairing (M2-04) does that.
+- **A-059 · M2-01 · closed by R1-02** · Two flaky tests, both fixed on 2026-10-26 and run 50 times in a row since.
+  (1) `shoebox-store-docs` `autosync::sync_now_waits_for_a_sync_already_in_flight` (about 1 in 6): a real stall, not a test
+  problem. The library's (and an album's) `sync_with` held an iroh-docs event subscription and stopped reading it between
+  sync rounds while comparing digests; 300 records' worth of events filled the bounded queue and iroh-docs blocked, including
+  the next `start_sync`, until the 10 s timeout. The same lesson as A-043, in the sync path itself. Fix: the sync paths read
+  their subscription through `album::drained` (an unbounded queue fed by a task); `sync_round` also asks again every 2 s
+  when iroh-docs answers a request with no event at all (up to 8 times). Confirmed: without the draining it fails again
+  within 5 runs. (2) `freeup::dry_run_and_real_run_agree_and_pins_are_kept` and `too_few_other_copies_means_nothing_is_freed`
+  (2 in 10, in both the docs and the Loro copies of the test): a race in the test setup, which waited until the phone knew the
+  keepers' copies of the *first* photo only; a dry run before the other photos' holdings arrived rightly freed less. Free-up
+  itself was safe throughout (it frees less, never more). Fix: the setup waits for every photo.
 - **A-060 · M2-02** · The kit holds the *root key* (24 words = its 32-byte seed as BIP39 entropy, English list; typed phrases are case/space-forgiving) plus library id and
   creation date in a printable text file (`RecoveryKit::to_text/from_text`). `LibraryNode::create_identity(root, …)` returns the kit and keeps nothing (the issue's
   `Node::export_recovery_kit()` cannot exist because the root is never stored; export happens once, at creation). `restore_from_kit(phrase)` verifies the phrase against the

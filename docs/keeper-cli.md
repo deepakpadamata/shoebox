@@ -22,7 +22,7 @@ be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held w
 
 ```json
 {
-  "schema": 1, "version": "0.0.1", "name": "pi", "device_id": "<64 hex>", "uptime_secs": 123,
+  "schema": 1, "version": "0.1.0", "name": "pi", "device_id": "<64 hex>", "uptime_secs": 123,
   "paired": true, "membership": "member | unknown | removed",
   "library": { "id": "<32 hex>", "photos": 0, "held_originals": 0, "at_risk": 0,
                "redundancy_target": 2, "recovery_kit_saved": false },

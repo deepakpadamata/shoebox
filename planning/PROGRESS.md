@@ -122,13 +122,13 @@ Implementation status per issue. Assumptions made along the way are logged in
 | M7-01 Documentation | ◐ | user guide, keeper guide, relay guide (`docs/guides`); nobody has followed them yet; the relay steps point to iroh's own docs and were not exercised |
 | M7-02 Website | ◐ | static site with the guides built from the docs, a download page filled from `release.json`, link checker, CI check; **not hosted**, and there are no downloads to verify yet |
 | M7-03 Store submission | ⬜ | needs signing identities, store accounts and the iOS app |
-| M7-04 1.0 release | ⬜ | needs the above; versions are still 0.0.1 |
+| M7-04 1.0 release | ⬜ | needs the above; versions are 0.1.0 (R1-01) |
 
 ## R1 · v0.1 testers' preview — planned 2026-10-26 (no iOS; keeper on Linux; GitHub upload last)
 
 | Issue | Status | Notes |
 |---|---|---|
-| R1-01 Version 0.1.0 and the format and protocol baseline | ⬜ |  |
+| R1-01 Version 0.1.0 and the format and protocol baseline | ✅ | 0.1.0 everywhere; layout 2 with a migration for pre-0.1 notices; `docs/notes/formats.md` guarded by `tests/formats.rs`; rule in CONTRIBUTING; CHANGELOG started |
 | R1-02 Fix the two flaky tests | ⬜ | A-059 |
 | R1-03 Freeing space trusts a keeper copy | ⬜ | A-064 |
 | R1-04 Make this device an admin | ⬜ |  |

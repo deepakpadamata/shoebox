@@ -8,6 +8,7 @@ use anyhow::Result;
 use clap::Parser;
 
 #[derive(Parser)]
+#[command(name = "desktop-dev-server", version)]
 struct Args {
     #[arg(long)]
     data_dir: std::path::PathBuf,

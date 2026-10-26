@@ -35,7 +35,7 @@ pub(crate) fn load_notice(data_dir: &Path) -> Option<EpochNotice> {
 
 fn save_notice(data_dir: &Path, notice: &EpochNotice) {
     if let Ok(bytes) = postcard::to_stdvec(notice) {
-        let tmp = data_dir.join("rotation-notice.tmp");
+        let tmp = data_dir.join("epoch-notice.tmp");
         if std::fs::write(&tmp, bytes).is_ok() {
             let _ = std::fs::rename(&tmp, data_dir.join(FILE));
         }

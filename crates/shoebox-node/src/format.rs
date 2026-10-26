@@ -11,7 +11,12 @@
 //! backup and album registries, the Loro `snapshot.loro`/`updates.log`, the docs store) and the
 //! blob tag names. Wire protocols are versioned separately, by their ALPN (`shoebox/loro/0`): a
 //! release that changes one serves the old ALPN as well as the new for one release, so versions N
-//! and N-1 interoperate.
+//! and N-1 interoperate. Every name and file with its version is listed in `docs/notes/formats.md`
+//! (a test keeps that list and the source in step).
+//!
+//! Layouts: 0 = before the marker; 1 = the marker (M6-05); 2 = **0.1.0, the first release**: the
+//! latest epoch notice lives in `epoch-notice.bin` (either kind of epoch change), where layout 1
+//! kept a revocation notice in `rotation-notice.bin`.
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -25,7 +30,7 @@ const BACKUP_MAX_FILE: u64 = 64 * 1024 * 1024;
 const BACKUP_SKIP: &[&str] = &["blobs", "posters", "backups"];
 
 /// The layout this build writes.
-pub const CURRENT_FORMAT: u32 = 1;
+pub const CURRENT_FORMAT: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct Marker {
@@ -42,11 +47,40 @@ pub struct Migration {
 }
 
 /// The migrations this build knows, oldest first. Layout 0 (no marker) to 1 only adds the marker.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    from: 0,
-    name: "adopt the format marker",
-    run: |_| Ok(()),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        from: 0,
+        name: "adopt the format marker",
+        run: |_| Ok(()),
+    },
+    Migration {
+        from: 1,
+        name: "keep the latest epoch notice in epoch-notice.bin",
+        run: epoch_notice_file,
+    },
+];
+
+/// Layout 1 → 2: `rotation-notice.bin` (a revocation notice) becomes `epoch-notice.bin` (an
+/// [`EpochNotice`](shoebox_core::identity::EpochNotice)). The node's data dir is the marked dir
+/// itself (keeper) or its `node/` (app); both are looked at. An unreadable old file is dropped:
+/// the notice only helps devices that were away, and they also get it from any other member.
+fn epoch_notice_file(dir: &Path) -> Result<()> {
+    use shoebox_core::identity::{EpochNotice, RotationNotice};
+    for node_dir in [dir.to_path_buf(), dir.join("node")] {
+        let old = node_dir.join("rotation-notice.bin");
+        let Ok(bytes) = std::fs::read(&old) else {
+            continue;
+        };
+        if let Ok(notice) = postcard::from_bytes::<RotationNotice>(&bytes) {
+            let new = postcard::to_stdvec(&EpochNotice::Revocation(notice))?;
+            let tmp = node_dir.join("epoch-notice.tmp");
+            std::fs::write(&tmp, new)?;
+            std::fs::rename(tmp, node_dir.join("epoch-notice.bin"))?;
+        }
+        std::fs::remove_file(old)?;
+    }
+    Ok(())
+}
 
 /// What [`ensure_format`] did.
 #[derive(Debug, PartialEq, Eq)]
@@ -183,6 +217,66 @@ mod tests {
 
     fn step(from: u32, name: &'static str, run: fn(&Path) -> Result<()>) -> Migration {
         Migration { from, name, run }
+    }
+
+    /// Pre-0.1 data (layout 1) keeps its revocation notice, now as an epoch notice.
+    #[test]
+    fn layout_1_notices_move_to_the_epoch_notice_file() {
+        use shoebox_core::identity::*;
+        use shoebox_core::model::Role;
+        use shoebox_core::store::{Capability, LibraryCapability, LibraryId};
+        let (root, admin) = (KeyPair::generate(), KeyPair::generate());
+        let identity = LibraryId([1; 16]);
+        let hlc = |ms| shoebox_core::Hlc {
+            physical_ms: ms,
+            counter: 0,
+            device: admin.endpoint_id(),
+        };
+        let notice = issue_rotation_notice(
+            &admin,
+            identity,
+            identity,
+            LibraryCapability {
+                library: LibraryId([2; 16]),
+                root: root.root_public(),
+                mode: Capability::Write,
+                backend: vec![],
+            },
+            issue_device_cert(
+                &root,
+                identity,
+                KeyPair::generate().endpoint_id(),
+                Role::Phone,
+                "p",
+                hlc(5),
+                true,
+            ),
+            issue_admin_cert(&root, identity, admin.endpoint_id(), hlc(1), None),
+        );
+        let d = tempfile::tempdir().unwrap();
+        stamp(d.path(), 1).unwrap();
+        std::fs::create_dir_all(d.path().join("node")).unwrap();
+        std::fs::write(
+            d.path().join("node/rotation-notice.bin"),
+            postcard::to_stdvec(&notice).unwrap(),
+        )
+        .unwrap();
+        // A keeper keeps the node files in the marked dir itself; this one is damaged.
+        std::fs::write(d.path().join("rotation-notice.bin"), b"junk").unwrap();
+
+        let r = ensure_format(d.path()).unwrap();
+        assert_eq!((r.from, r.to), (1, 2));
+        let moved: EpochNotice =
+            postcard::from_bytes(&std::fs::read(d.path().join("node/epoch-notice.bin")).unwrap())
+                .unwrap();
+        assert_eq!(moved, EpochNotice::Revocation(notice));
+        assert!(!d.path().join("node/rotation-notice.bin").exists());
+        assert!(
+            !d.path().join("rotation-notice.bin").exists(),
+            "damaged one dropped"
+        );
+        assert!(!d.path().join("epoch-notice.bin").exists());
+        assert_eq!(read_marker(d.path()).unwrap(), Some(2));
     }
 
     #[test]

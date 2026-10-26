@@ -123,3 +123,23 @@ Implementation status per issue. Assumptions made along the way are logged in
 | M7-02 Website | ◐ | static site with the guides built from the docs, a download page filled from `release.json`, link checker, CI check; **not hosted**, and there are no downloads to verify yet |
 | M7-03 Store submission | ⬜ | needs signing identities, store accounts and the iOS app |
 | M7-04 1.0 release | ⬜ | needs the above; versions are still 0.0.1 |
+
+## R1 · v0.1 testers' preview — planned 2026-10-26
+
+| Issue | Status | Notes |
+|---|---|---|
+| R1-01 Version 0.1.0 and the format and protocol baseline | ⬜ | |
+| R1-02 Fix the two flaky tests | ⬜ | A-059 |
+| R1-03 Freeing space trusts a keeper copy | ⬜ | A-064 |
+| R1-04 Make this device an admin | ⬜ | |
+| R1-05 About screen, licences and source offer | ⬜ | |
+| R1-06 Security alerts reach people when the app is closed | ⬜ | A-087, A-088 |
+| R1-07 Bring PROGRESS, READMEs and the changelog up to date | ⬜ | |
+| R1-08 Repository remote and the first green CI run | ⬜ | needs the owner: a repository |
+| R1-09 Run the desktop app on a real Mac | ⬜ | needs the owner: a Mac |
+| R1-10 Run Android on a physical phone | ⬜ | needs the owner: a phone |
+| R1-11 Keeper on a Raspberry Pi | ⬜ | needs the owner: a Pi |
+| R1-12 Test across real networks | ⬜ | needs the owner: a VPS or a second network |
+| R1-13 Signed release builds | ⬜ | needs the owner: Apple, Android and minisign keys |
+| R1-14 How testers get updates | ⬜ | |
+| R1-15 Ship the v0.1 testers' preview | ⬜ | needs the owner: testers and a feedback channel |

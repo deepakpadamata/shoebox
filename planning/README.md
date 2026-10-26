@@ -1,6 +1,6 @@
 # Planning · Shoebox MVP
 
-The executable plan: 8 milestones, **83 issues**, in strict execution order for a **solo developer** (decision #20).
+The executable plan: 9 milestones, **98 issues**, in strict execution order for a **solo developer** (decision #20).
 The product and technical context is in `docs/`. Read [`05-prototype-plan.md`](../docs/05-prototype-plan.md) first.
 
 ```
@@ -26,8 +26,9 @@ interruptions, review and unknowns.
 | M4 · Mobile apps | 12 | 33.5 | 8.0 | 36 |
 | M5 · Shared albums | 8 | 20.5 | 4.9 | 41 |
 | M6 · Hardening & beta | 8 | 19 | 4.6 | 46 |
-| M7 · MVP release | 4 | 6.5 | 1.6 | 47 |
-| **Total** | **83** | **201** | **47** | |
+| R1 · v0.1 testers' preview | 15 | 17.5 | 4.2 | 50 |
+| M7 · MVP release | 4 | 6.5 | 1.6 | 52 |
+| **Total** | **98** | **218.5** | **52** | |
 
 That's roughly **10 months** to MVP for one person, plus the beta's calendar time
 (3–4 weeks, overlapping M7) and app-store review.
@@ -44,7 +45,7 @@ That's roughly **10 months** to MVP for one person, plus the beta's calendar tim
   working through the list top to bottom always works.
 - **Estimates** (`estimate_days`) are 0.5–5 days. Anything bigger was split. Re-estimate after M1-15.
 - **Labels:** `area:*` (core, store, node, media, keeper, app, ui, mobile, ios, android, security, infra, docs) and
-  `type:*` (feature, spike, test, chore, docs).
+  `type:*` (feature, spike, test, chore, docs), plus `needs:owner` for issues that wait on something only the owner can provide.
 - **Features:** every MVP feature in `docs/02-features.md` (F-IDs) is covered by at least one issue. Coverage is checked when generating.
 - **Definition of done** for every issue: acceptance criteria met, tests in CI, docs updated if behaviour or a decision changed.
 
@@ -171,6 +172,30 @@ Re-runs are safe: created issue numbers are stored in `planning/scripts/github-m
 | M6-06 | [Empty states, first-sync progress and accessibility](issues/M6-06-empty-states-first-sync-progress-and-accessibility.md) | 2.5 | M5-08 |
 | M6-07 | [Diagnostics bundle](issues/M6-07-diagnostics-bundle.md) | 1.5 | M6-04 |
 | M6-08 | [Closed beta](issues/M6-08-closed-beta.md) | 2 | M6-02, M6-03, M6-05, M6-06, M6-07 |
+
+### R1 · v0.1 testers' preview
+
+Added 2026-10-26: what stands between the built MVP and a first build in other people's hands (macOS, Android, the keeper;
+iOS stays in M4). It is the first wave of the closed beta (M6-08). Issues marked *needs you* wait on something only the
+owner can provide (an account, a key, a device, a server); they carry the `needs:owner` label. The rest can start now.
+
+| ID | Issue | Est. (d) | Depends on |
+|---|---|---|---|
+| R1-01 | [Version 0.1.0 and the format and protocol baseline](issues/R1-01-version-0-1-0-and-the-format-and-protocol-baseline.md) | 1 | — |
+| R1-02 | [Fix the two flaky tests](issues/R1-02-fix-the-two-flaky-tests.md) | 2 | — |
+| R1-03 | [Freeing space trusts a keeper copy](issues/R1-03-freeing-space-trusts-a-keeper-copy.md) | 1 | — |
+| R1-04 | [Make this device an admin](issues/R1-04-make-this-device-an-admin.md) | 1 | — |
+| R1-05 | [About screen, licences and source offer](issues/R1-05-about-screen-licences-and-source-offer.md) | 1 | R1-01 |
+| R1-06 | [Security alerts reach people when the app is closed](issues/R1-06-security-alerts-reach-people-when-the-app-is-closed.md) | 1.5 | — |
+| R1-07 | [Bring PROGRESS, READMEs and the changelog up to date](issues/R1-07-bring-progress-readmes-and-the-changelog-up-to-date.md) | 0.5 | R1-01 |
+| R1-08 | [Repository remote and the first green CI run](issues/R1-08-repository-remote-and-the-first-green-ci-run.md) (needs you) | 0.5 | R1-01, R1-02 |
+| R1-09 | [Run the desktop app on a real Mac](issues/R1-09-run-the-desktop-app-on-a-real-mac.md) (needs you) | 1 | R1-01 |
+| R1-10 | [Run Android on a physical phone](issues/R1-10-run-android-on-a-physical-phone.md) (needs you) | 1 | R1-01 |
+| R1-11 | [Keeper on a Raspberry Pi](issues/R1-11-keeper-on-a-raspberry-pi.md) (needs you) | 1 | R1-01 |
+| R1-12 | [Test across real networks](issues/R1-12-test-across-real-networks.md) (needs you) | 2 | R1-08 |
+| R1-13 | [Signed release builds](issues/R1-13-signed-release-builds.md) (needs you) | 2 | R1-08 |
+| R1-14 | [How testers get updates](issues/R1-14-how-testers-get-updates.md) | 1 | R1-13 |
+| R1-15 | [Ship the v0.1 testers' preview](issues/R1-15-ship-the-v0-1-testers-preview.md) (needs you) | 1 | R1-03, R1-04, R1-05, R1-06, R1-07, R1-09, R1-10, R1-11, R1-12, R1-14 |
 
 ### M7 · MVP release
 

@@ -36,6 +36,17 @@ ts_type! {
         /// Someone is rejoining through this device with the recovery phrase and waits for an
         /// answer (`answer_recovery`).
         pub recovery_request: Option<RecoveryQuestion>,
+        /// A newer release is out (and its banner was not dismissed).
+        pub update: Option<UpdateInfo>,
+    }
+}
+
+ts_type! {
+    /// A newer release of Shoebox (R1-07).
+    pub struct UpdateInfo {
+        pub version: String,
+        /// The download page.
+        pub page: String,
     }
 }
 
@@ -307,6 +318,8 @@ ts_type! {
         pub relay: String,
         pub watched_folders: Vec<String>,
         pub role: String,
+        /// Look for a newer release now and then.
+        pub update_checks: bool,
     }
 }
 
@@ -326,7 +339,8 @@ ts_type! {
         PairingFailed { reason: String },
         RemovedFromLibrary,
         LibraryRotated,
-        /// A recovery waits for this device's answer, or an alert was added: reload the state.
+        /// A recovery waits for this device's answer, an alert was added or a newer release
+        /// appeared: reload the state.
         SecurityChanged,
         BackupProgress { done: u32, total: u32 },
         BackupPaused { reason: Option<String> },

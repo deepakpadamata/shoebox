@@ -53,6 +53,9 @@ pub(crate) async fn report(shared: &Shared) -> Result<Value> {
         "uptime_secs": shared.started.elapsed().as_secs(),
         "paired": false,
     });
+    if let Some(r) = shared.update.lock().unwrap().clone() {
+        out["update"] = json!({ "version": r.version, "page": r.page });
+    }
     let guard = shared.library.lock().await;
     let Some(ln) = guard.as_ref() else {
         return Ok(out);

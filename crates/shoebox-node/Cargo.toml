@@ -29,6 +29,10 @@ postcard.workspace = true
 shoebox-media.workspace = true
 notify = "8"
 serde_json = "1"
+# Update checks (R1-07): the same reqwest and TLS stack iroh already brings.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
 
 [dev-dependencies]
 tempfile.workspace = true

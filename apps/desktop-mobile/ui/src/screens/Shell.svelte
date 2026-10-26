@@ -136,6 +136,8 @@
       <div class="banners"><Banner tone="risk" icon="🛡" action="Review" onaction={() => go('devices')} ondismiss={() => api.dismissAlert(alert.device_id).catch(fail)}>Your library's <b>recovery phrase was replaced</b> on another device ({when(alert.at_ms)}). Your old phrase no longer works; get the new one from whoever replaced it. If nobody you know did, check Devices for devices you do not know.</Banner></div>
     {:else if alert}
       <div class="banners"><Banner tone="risk" icon="🛡" action="Review" onaction={() => go('devices')} ondismiss={() => api.dismissAlert(alert.device_id).catch(fail)}><b>{alert.device_name}</b> became an admin of your library ({when(alert.at_ms)}). If that was not you, someone may have your recovery phrase: remove that device in Devices.</Banner></div>
+    {:else if app.state?.update}
+      <div class="banners"><Banner tone="info" icon="⬆︎" action="Download" onaction={() => window.open(app.state!.update!.page, '_blank')} ondismiss={() => api.dismissUpdate().catch(fail)}><b>Shoebox {app.state.update.version}</b> is available. Download it and install it over this one: your library and settings stay.</Banner></div>
     {:else if atRisk > 0 && sec !== 'health'}
       <div class="banners"><Banner tone="risk" action="View" onaction={() => go('health')}><b>{plural(atRisk, 'photo')}</b> {atRisk === 1 ? 'is' : 'are'} not backed up on enough devices yet.</Banner></div>
     {:else if app.state && !app.state.recovery_kit_saved && !kitDismissed}

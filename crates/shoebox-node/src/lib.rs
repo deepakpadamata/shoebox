@@ -23,6 +23,7 @@ mod recover;
 mod rotation;
 mod sync;
 mod ticket;
+pub mod update;
 
 pub use activity::Activity;
 pub use addr::{from_endpoint_addr, from_iroh_id, to_endpoint_addr, to_iroh_id};

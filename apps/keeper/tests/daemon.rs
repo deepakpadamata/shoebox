@@ -513,3 +513,53 @@ async fn security_alerts_wait_in_status_until_acknowledged() {
     assert_eq!(status().await["alerts"], serde_json::json!([]));
     d.shutdown().await.unwrap();
 }
+
+/// R1-07: the keeper reads the release feed and `status` mentions a newer version.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn status_mentions_a_newer_release() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let feed = format!(
+        "http://{}/downloads/release.json",
+        listener.local_addr().unwrap()
+    );
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let _ = s.read(&mut buf).await;
+                let body = r#"{"version":"99.1.0"}"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let mut o = opts(dir.path());
+    o.update_feed = feed;
+    let d = Daemon::start(o).await.unwrap();
+    assert!(
+        wait_for(10, || async {
+            let s = Client::connect(d.control_path())
+                .await
+                .unwrap()
+                .status()
+                .await
+                .unwrap();
+            s["update"]["version"] == "99.1.0"
+        })
+        .await,
+        "status mentions 99.1.0"
+    );
+    let s = Client::connect(d.control_path())
+        .await
+        .unwrap()
+        .status()
+        .await
+        .unwrap();
+    assert!(keeper::render::status(&s).contains("A newer version is available: 99.1.0"));
+    d.shutdown().await.unwrap();
+}

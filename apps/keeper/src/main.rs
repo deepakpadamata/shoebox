@@ -34,6 +34,9 @@ enum Cmd {
         /// Do not announce/discover devices on the local network.
         #[arg(long)]
         no_mdns: bool,
+        /// Do not look for newer releases (twice a day, on the Shoebox website).
+        #[arg(long)]
+        no_update_check: bool,
     },
     /// Pair this keeper with a library using a ticket from “Add a device”.
     Pair {
@@ -178,6 +181,7 @@ async fn main() -> Result<()> {
             name,
             relay: r,
             no_mdns,
+            no_update_check,
         } => {
             tracing_subscriber::fmt()
                 .with_env_filter(
@@ -189,6 +193,9 @@ async fn main() -> Result<()> {
             let mut opts = KeeperOptions::new(&storage, name);
             opts.relay = relay(&r)?;
             opts.mdns = !no_mdns;
+            if no_update_check {
+                opts.update_feed = shoebox_node::update::PLACEHOLDER_FEED.to_string();
+            }
             let daemon = Daemon::start(opts).await?;
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => tracing::info!("interrupted"),

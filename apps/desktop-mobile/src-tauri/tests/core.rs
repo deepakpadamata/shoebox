@@ -725,3 +725,59 @@ async fn security_alerts_are_notified_once() {
     a.shutdown().await.unwrap();
     b.shutdown().await.unwrap();
 }
+
+/// R1-07: the app reads a release feed (here a local one) and shows a newer version until the
+/// banner is dismissed; turning the checks off clears it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_newer_release_on_the_feed_shows_until_dismissed() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let feed = format!(
+        "http://{}/downloads/release.json",
+        listener.local_addr().unwrap()
+    );
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let _ = s.read(&mut buf).await;
+                let body = r#"{"version":"99.1.0","files":[]}"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let core = AppCore::open(
+        dir.path(),
+        AppOptions {
+            update_feed: feed.clone(),
+            ..AppOptions::local_only()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        wait(10, || async {
+            core.app_state()
+                .await
+                .unwrap()
+                .update
+                .is_some_and(|u| u.version == "99.1.0" && u.page.ends_with("/downloads/"))
+        })
+        .await,
+        "checked at start"
+    );
+    core.dismiss_update().unwrap();
+    assert!(
+        core.app_state().await.unwrap().update.is_none(),
+        "dismissed"
+    );
+    assert!(core.settings().await.unwrap().update_checks);
+    core.set_update_checks(false).unwrap();
+    assert!(!core.settings().await.unwrap().update_checks);
+    core.shutdown().await.unwrap();
+}

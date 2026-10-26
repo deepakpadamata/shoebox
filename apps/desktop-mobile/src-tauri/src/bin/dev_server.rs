@@ -20,6 +20,9 @@ struct Args {
     /// No relay, no LAN discovery.
     #[arg(long)]
     local_only: bool,
+    /// Look for new releases here (a `release.json`), e.g. a local test feed.
+    #[arg(long)]
+    update_feed: Option<String>,
 }
 
 #[tokio::main]
@@ -31,6 +34,10 @@ async fn main() -> Result<()> {
     } else {
         desktop_mobile::AppOptions::default()
     };
+    let mut opts = opts;
+    if let Some(feed) = args.update_feed {
+        opts.update_feed = feed;
+    }
     let core = desktop_mobile::AppCore::open(&args.data_dir, opts).await?;
     println!("listening on http://{}", args.listen);
     desktop_mobile::http::serve(core, args.listen, args.ui).await

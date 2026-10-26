@@ -29,6 +29,14 @@ pub fn status(v: &Value) -> String {
         s(v, "version"),
         uptime(v["uptime_secs"].as_u64().unwrap_or(0))
     );
+    if let Some(u) = v.get("update").filter(|u| u.is_object()) {
+        let _ = writeln!(
+            out,
+            "\nA newer version is available: {} ({})",
+            s(u, "version"),
+            s(u, "page")
+        );
+    }
     if v["paired"] != true {
         out.push_str("\nNot paired with a library yet.\nOn a phone or laptop choose “Add a device”, then run:\n  shoebox-keeper pair <ticket>\n");
         return out;

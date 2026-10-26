@@ -4,4 +4,8 @@ export type Settings = { device_name: string, redundancy_target: number,
 /**
  * `default`, `off` or a custom relay URL.
  */
-relay: string, watched_folders: Array<string>, role: string, };
+relay: string, watched_folders: Array<string>, role: string, 
+/**
+ * Look for a newer release now and then.
+ */
+update_checks: boolean, };

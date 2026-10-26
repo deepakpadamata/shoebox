@@ -242,6 +242,8 @@ fn run(
             &dir,
             AppOptions {
                 secrets: Some(store),
+                // The short background run does not look for updates; the app does when open.
+                update_feed: shoebox_node::update::PLACEHOLDER_FEED.to_string(),
                 ..AppOptions::default()
             },
         )

@@ -6684,6 +6684,8 @@ dependencies = [
  "iroh-mdns-address-lookup",
  "notify",
  "postcard",
+ "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "shoebox-core",
@@ -6694,6 +6696,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tracing",
+ "webpki-roots",
  "xtask",
 ]
 

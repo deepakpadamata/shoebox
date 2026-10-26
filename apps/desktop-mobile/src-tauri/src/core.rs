@@ -35,7 +35,18 @@ pub struct AppOptions {
     pub secrets: Option<Arc<dyn SecretStore>>,
     /// Start the fetcher, maintenance and presence loops (off in some tests).
     pub background: bool,
+    /// Where to look for a newer release (R1-07): the site's `release.json`. The placeholder (the
+    /// default until the site exists, or `SHOEBOX_UPDATE_FEED`) is never contacted.
+    pub update_feed: String,
 }
+
+fn default_update_feed() -> String {
+    std::env::var("SHOEBOX_UPDATE_FEED")
+        .unwrap_or_else(|_| shoebox_node::update::PLACEHOLDER_FEED.to_string())
+}
+
+/// How often the app looks for a newer release while it runs.
+const UPDATE_CHECK_EVERY: Duration = Duration::from_secs(12 * 60 * 60);
 
 impl Default for AppOptions {
     fn default() -> Self {
@@ -44,6 +55,7 @@ impl Default for AppOptions {
             mdns: true,
             secrets: None,
             background: true,
+            update_feed: default_update_feed(),
         }
     }
 }
@@ -56,6 +68,7 @@ impl AppOptions {
             mdns: false,
             secrets: None,
             background: true,
+            update_feed: shoebox_node::update::PLACEHOLDER_FEED.to_string(),
         }
     }
 }
@@ -67,6 +80,12 @@ struct AppFile {
     /// Unacknowledged new-admin alerts (see `SecurityAlert`).
     #[serde(default)]
     alerts: Vec<crate::types::SecurityAlert>,
+    /// Look for a newer release now and then (R1-07); `None` = yes.
+    #[serde(default)]
+    update_checks: Option<bool>,
+    /// The release whose "new version" banner was dismissed.
+    #[serde(default)]
+    dismissed_update: Option<String>,
     /// `LibraryTicket` text: the library capability plus first peers.
     ticket: Option<String>,
     relay: Option<String>,
@@ -176,6 +195,8 @@ pub struct AppCore {
     pending_recovery: Mutex<Option<PendingRecovery>>,
     /// Devices this person let in (a recovery approved here) or made admin here: no alert for those.
     approved_recoveries: Mutex<Vec<shoebox_core::ids::EndpointId>>,
+    /// A newer release the last check found.
+    update: Mutex<Option<crate::types::UpdateInfo>>,
     pub(crate) photo_source: Mutex<Option<Arc<dyn crate::photos_source::PhotoSource>>>,
     pub(crate) backup: tokio::sync::Mutex<crate::backup::BackupState>,
     pub(crate) backup_running: tokio::sync::Mutex<()>,
@@ -238,11 +259,13 @@ impl AppCore {
             pending_pairing: Mutex::new(PairingSlot::Idle),
             pending_recovery: Mutex::new(None),
             approved_recoveries: Mutex::new(vec![]),
+            update: Mutex::new(None),
             photo_source: Mutex::new(None),
             backup: tokio::sync::Mutex::new(backup_state),
             backup_running: tokio::sync::Mutex::new(()),
         });
         core.forward_node_events();
+        core.start_update_checks();
         let ticket = core.file.lock().unwrap().ticket.clone();
         if let Some(text) = ticket {
             let ticket: LibraryTicket = text
@@ -296,6 +319,73 @@ impl AppCore {
             kit_text: kit.to_text(),
             library_id: hex::encode(ln.library_id().0),
         })
+    }
+
+    /// Look for a newer release every 12 hours while the app runs (R1-07), unless turned off or
+    /// no feed exists yet.
+    fn start_update_checks(self: &Arc<Self>) {
+        if self.opts.update_feed == shoebox_node::update::PLACEHOLDER_FEED {
+            return;
+        }
+        let weak = Arc::downgrade(self);
+        tokio::spawn(async move {
+            loop {
+                let Some(core) = weak.upgrade() else { break };
+                if core.update_checks_enabled() {
+                    let _ = core.check_for_update().await;
+                }
+                drop(core);
+                tokio::time::sleep(UPDATE_CHECK_EVERY).await;
+            }
+        });
+    }
+
+    fn update_checks_enabled(&self) -> bool {
+        self.file.lock().unwrap().update_checks.unwrap_or(true)
+    }
+
+    /// Ask the release feed now. `Some` when a newer version than this one is out.
+    pub async fn check_for_update(&self) -> Result<Option<crate::types::UpdateInfo>> {
+        let found = shoebox_node::update::check(&self.opts.update_feed)
+            .await?
+            .map(|r| crate::types::UpdateInfo {
+                version: r.version,
+                page: r.page,
+            });
+        let changed = {
+            let mut current = self.update.lock().unwrap();
+            let changed = *current != found;
+            *current = found.clone();
+            changed
+        };
+        if changed {
+            self.emit(AppEvent::SecurityChanged);
+        }
+        Ok(found)
+    }
+
+    /// Hide the banner for this release (a later one shows again).
+    pub fn dismiss_update(&self) -> Result<()> {
+        let version = self
+            .update
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|u| u.version.clone());
+        self.file.lock().unwrap().dismissed_update = version;
+        self.save()?;
+        self.emit(AppEvent::SecurityChanged);
+        Ok(())
+    }
+
+    pub fn set_update_checks(&self, on: bool) -> Result<()> {
+        self.file.lock().unwrap().update_checks = Some(on);
+        if !on {
+            *self.update.lock().unwrap() = None;
+        }
+        self.save()?;
+        self.emit(AppEvent::SecurityChanged);
+        Ok(())
     }
 
     /// Version, build and where the source is (Settings → About).
@@ -752,6 +842,14 @@ impl AppCore {
                 f.alerts.clone(),
             )
         };
+        let update = {
+            let dismissed = self.file.lock().unwrap().dismissed_update.clone();
+            self.update
+                .lock()
+                .unwrap()
+                .clone()
+                .filter(|u| Some(&u.version) != dismissed.as_ref())
+        };
         // A question nobody waits for any more (the node gave up) is not shown.
         let recovery_request = self
             .pending_recovery
@@ -772,6 +870,7 @@ impl AppCore {
                 library_id: None,
                 alerts: vec![],
                 recovery_request: None,
+                update,
             },
             Some(ln) => AppState {
                 has_library: true,
@@ -783,6 +882,7 @@ impl AppCore {
                 library_id: Some(hex::encode(ln.library_id().0)),
                 alerts,
                 recovery_request,
+                update,
             },
         })
     }
@@ -1457,6 +1557,7 @@ impl AppCore {
                 .map(|p| p.display().to_string())
                 .collect(),
             role,
+            update_checks: self.update_checks_enabled(),
         })
     }
 
@@ -1561,6 +1662,8 @@ fn adopt_dev_library(dir: &Path) -> Result<Option<AppFile>> {
         ticket: Some(dev.ticket),
         relay: None,
         alerts: vec![],
+        update_checks: None,
+        dismissed_update: None,
     }))
 }
 

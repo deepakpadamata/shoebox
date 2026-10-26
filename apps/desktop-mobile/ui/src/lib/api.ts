@@ -28,6 +28,7 @@ import type { PhotoDetail } from '../bindings/PhotoDetail';
 import type { PhotoPage } from '../bindings/PhotoPage';
 import type { PhotoSummary } from '../bindings/PhotoSummary';
 import type { AboutInfo } from '../bindings/AboutInfo';
+import type { UpdateInfo } from '../bindings/UpdateInfo';
 import type { Settings } from '../bindings/Settings';
 
 export type {
@@ -104,6 +105,9 @@ export const api = {
   confirmPairing: (accept: boolean) => call<{}>('confirm_pairing', { accept }),
   /** Let in (or refuse) the device rejoining through this one with the recovery phrase. */
   about: () => call<AboutInfo>('about'),
+  checkForUpdate: () => call<UpdateInfo | null>('check_for_update'),
+  dismissUpdate: () => call<{}>('dismiss_update'),
+  setUpdateChecks: (on: boolean) => call<{}>('set_update_checks', { on }),
   thirdPartyLicences: () => call<string>('third_party_licences'),
   answerRecovery: (accept: boolean) => call<{}>('answer_recovery', { accept }),
   /** Make a new recovery phrase; `phrase` is the current one. The result is the only copy. */

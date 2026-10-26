@@ -10,6 +10,7 @@
   import BackupCard from '../components/BackupCard.svelte';
   import Sheet from '../components/Sheet.svelte';
   import RecoveryKit from './RecoveryKit.svelte';
+  import Toggle from '../components/Toggle.svelte';
   import { canPick, pickFolder } from '../lib/pick';
   import { applyTextSize, savedTextSize } from '../lib/textsize';
 
@@ -31,6 +32,18 @@
   let diag = $state<{ file_name: string; text: string } | null>(null);
   let about = $state<AboutInfo | null>(null);
   let licences = $state<string | null>(null);
+  let checking = $state(false);
+  async function checkNow() {
+    checking = true;
+    try {
+      const u = await api.checkForUpdate();
+      toast(u ? `Shoebox ${u.version} is available` : 'You have the latest version');
+    } catch (e) {
+      fail(e);
+    } finally {
+      checking = false;
+    }
+  }
   onMount(() => { api.about().then((a) => (about = a)).catch(() => {}); });
   // Replacing the recovery phrase: the current one in, the new kit out (shown once).
   let replaceOpen = $state(false);
@@ -187,6 +200,11 @@
         <div class="muted">Shoebox is free software under the GNU Affero General Public License 3.0. You can get its source code, and the source of this exact version, at <a href={about.source_url} target="_blank" rel="noreferrer">{about.source_url}</a>.</div>
       {/if}
       <div><Button size="sm" onclick={async () => { try { licences = await api.thirdPartyLicences(); } catch (e) { fail(e); } }}>Third-party licences</Button></div>
+      {#if s}
+        <label class="row-flex"><Toggle checked={s.update_checks} label="Check for new versions" onchange={async (v) => { try { await api.setUpdateChecks(v); if (s) s.update_checks = v; } catch (e) { fail(e); } }} /> Check for new versions</label>
+        <div class="muted">Twice a day the app reads the version number on the Shoebox website. Nothing about you or your library is sent; the website sees only that someone asked.</div>
+        <div><Button size="sm" disabled={checking} onclick={checkNow}>{checking ? 'Checking…' : 'Check now'}</Button></div>
+      {/if}
     </div>
   {:else}
     <span class="muted">Loading…</span>

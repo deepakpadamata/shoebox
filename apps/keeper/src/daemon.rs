@@ -28,6 +28,8 @@ pub struct KeeperOptions {
     pub name: String,
     pub relay: RelaySetting,
     pub mdns: bool,
+    /// Where to look for a newer release (R1-07); the placeholder is never contacted.
+    pub update_feed: String,
 }
 
 impl KeeperOptions {
@@ -38,6 +40,7 @@ impl KeeperOptions {
             name: name.into(),
             relay: RelaySetting::Disabled,
             mdns: false,
+            update_feed: shoebox_node::update::PLACEHOLDER_FEED.to_string(),
         }
     }
 
@@ -47,6 +50,8 @@ impl KeeperOptions {
             name: name.into(),
             relay: RelaySetting::Default,
             mdns: true,
+            update_feed: std::env::var("SHOEBOX_UPDATE_FEED")
+                .unwrap_or_else(|_| shoebox_node::update::PLACEHOLDER_FEED.to_string()),
         }
     }
 }
@@ -80,6 +85,8 @@ pub(crate) struct Shared {
     pub library: Mutex<Option<LibraryNode<Library>>>,
     pub albums: Mutex<Option<shoebox_store::SharedAlbums>>,
     pub shutdown: watch::Sender<bool>,
+    /// A newer release the last check found (`status` mentions it).
+    pub update: std::sync::Mutex<Option<shoebox_node::update::Release>>,
 }
 
 pub struct Daemon {
@@ -208,7 +215,25 @@ impl Daemon {
             library: Mutex::new(None),
             albums: Mutex::new(None),
             shutdown,
+            update: std::sync::Mutex::new(None),
         });
+        if opts.update_feed != shoebox_node::update::PLACEHOLDER_FEED {
+            // Twice a day: a keeper runs for months, and its person only sees `status`.
+            let weak = Arc::downgrade(&shared);
+            tokio::spawn(async move {
+                loop {
+                    let Some(shared) = weak.upgrade() else { break };
+                    if let Ok(found) = shoebox_node::update::check(&shared.opts.update_feed).await {
+                        if let Some(r) = &found {
+                            info!("a newer version is available: {} ({})", r.version, r.page);
+                        }
+                        *shared.update.lock().unwrap() = found;
+                    }
+                    drop(shared);
+                    tokio::time::sleep(std::time::Duration::from_secs(12 * 60 * 60)).await;
+                }
+            });
+        }
 
         let saved = state_path(&opts.storage);
         if saved.exists() {

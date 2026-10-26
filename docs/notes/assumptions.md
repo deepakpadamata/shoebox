@@ -243,6 +243,19 @@ Accepted for now; for the external review and the beta.
   epoch rule), `core.rs::the_recovery_phrase_can_be_replaced` (new kit once, saved flag reset, library reopens after a restart); checked by
   hand in two dev instances.
 
+- **A-089 · how testers get updates (R1-07, 2026-10-27)** · Decided: a "new version available" notice, not Tauri's
+  self-updater, for the preview. It works the same on desktop, Android (no store yet) and the keeper, needs no second
+  signing key, and installs keep going through the signed downloads (R1-14). The app and the keeper read the site's
+  `downloads/release.json` (`site/release.py`) at start and every 12 hours (`shoebox_node::update`, reqwest with the ring
+  provider and bundled web roots already in the tree) and compare its version with their own; the app shows a banner with a
+  link to the download page until dismissed for that version, the keeper mentions it in `status` and its log. A setting turns
+  it off (Settings → About; `shoebox-keeper run --no-update-check`); the request carries only a user agent with the version.
+  The feed is a placeholder until the site exists (R1-13) and the placeholder is never contacted; `SHOEBOX_UPDATE_FEED` (and
+  `desktop-dev-server --update-feed`) point at another. The Android background worker does not check. The self-updater can
+  come with the public release. Tested: `update.rs` (local feed; an ignored test reaches a real HTTPS site),
+  `core.rs::a_newer_release_on_the_feed_shows_until_dismissed`, keeper `daemon.rs::status_mentions_a_newer_release`; banner
+  and switch checked in a dev instance against a local feed.
+
 ### Product gaps and open decisions
 
 Behaviour that will come back as features or needs a decision.

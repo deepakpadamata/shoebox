@@ -60,6 +60,10 @@ in the last week: the same rule as "backed up".
   undone.
 * **Leave** an album from its settings. You keep anything you saved to your library.
 
+**New versions.** The app tells you when a newer Shoebox is out (a banner with a download link); install it over the
+old one and your library stays. It asks the Shoebox website twice a day and sends nothing about you; turn it off in
+*Settings → About*. A keeper mentions new versions in `shoebox-keeper status`.
+
 ## When something goes wrong
 
 * **A device was lost or stolen.** On another device: *Devices → Remove* next to it. The remaining devices

@@ -107,10 +107,17 @@ impl AppCore {
             }
         };
         let st = self.backup.lock().await;
-        let paused = conditions
-            .and_then(|c| pause_reason(&st.policy, &c))
+        let paused = self
+            .viewer_pause()
+            .or_else(|| conditions.and_then(|c| pause_reason(&st.policy, &c)))
             .map(String::from);
         Ok(self.status_of(&st, permission, paused))
+    }
+
+    /// A viewer may not add photos to the library (its role can change later, A-086).
+    fn viewer_pause(&self) -> Option<&'static str> {
+        (self.node().config().role == shoebox_core::model::Role::Viewer)
+            .then_some("this device is a viewer, and viewers do not add photos")
     }
 
     fn status_of(
@@ -194,6 +201,13 @@ impl AppCore {
         }
 
         let mut report = BackupReport::default();
+        if let Some(reason) = self.viewer_pause() {
+            self.emit(AppEvent::BackupPaused {
+                reason: Some(reason.into()),
+            });
+            report.pending = self.backup.lock().await.pending.len() as u32;
+            return Ok(report);
+        }
         if !import || paused.is_some() {
             report.pending = self.backup.lock().await.pending.len() as u32;
             return Ok(report);

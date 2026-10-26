@@ -151,3 +151,73 @@ async fn a_device_that_receives_its_own_revocation_reports_removed_and_stops_syn
     assert!(nodes[1].store().photo(&hash(5)).await.unwrap().is_none());
     c.shutdown().await;
 }
+
+/// A device is not stuck with the role it joined with (A-086): an admin (or the recovery phrase)
+/// signs a new certificate, and the device follows it: its node config, and so what it fetches,
+/// frees and announces.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn roles_can_change_and_devices_follow_their_certificate() {
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Phone, Role::Phone])
+        .await
+        .unwrap();
+    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Phone, Role::Phone]).await;
+    for n in &nodes {
+        n.enforce_membership().await.unwrap();
+    }
+    let (phone, other) = (core_id(&c, 1), core_id(&c, 2));
+    let mut events = c.node(1).events();
+
+    // Not an admin: refused without the phrase.
+    let err = nodes[1]
+        .set_device_role(&other, Role::Keeper)
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("admin"), "{err:#}");
+
+    // The admin makes the phone a viewer; the phone follows once the cert reaches it.
+    nodes[0]
+        .set_device_role(&phone, Role::Viewer)
+        .await
+        .unwrap();
+    wait_until(Duration::from_secs(30), || async {
+        c.node(1).config().role == Role::Viewer
+    })
+    .await
+    .expect("the phone follows its new certificate");
+    let mut saw = false;
+    while let Ok(Ok(ev)) = tokio::time::timeout(Duration::from_millis(500), events.recv()).await {
+        saw |= ev == shoebox_node::NodeEvent::RoleChanged { role: Role::Viewer };
+    }
+    assert!(saw, "RoleChanged was emitted for the app to persist");
+
+    // With the recovery phrase a device that is no admin can change a role (here its own).
+    let phrase =
+        shoebox_core::recovery::RecoveryKit::new(rig.cap.library, 0, rig.root.clone()).phrase();
+    nodes[1]
+        .set_device_role_with_phrase(&phrase, &phone, Role::Phone)
+        .await
+        .unwrap();
+    assert_eq!(c.node(1).config().role, Role::Phone, "follows at once");
+    assert!(nodes[1]
+        .set_device_role_with_phrase("not the phrase", &phone, Role::Keeper)
+        .await
+        .is_err());
+
+    // An admin can change its own role; it stays an admin.
+    nodes[0]
+        .set_device_role(&core_id(&c, 0), Role::Phone)
+        .await
+        .unwrap();
+    assert_eq!(c.node(0).config().role, Role::Phone);
+    let list = nodes[0].store().device_list().await.unwrap();
+    assert!(list.admins.iter().any(|a| a.admin == core_id(&c, 0)));
+    // The others learn every change.
+    wait_until(Duration::from_secs(30), || async {
+        let l = nodes[2].store().device_list().await.unwrap();
+        let role = |id| l.devices.iter().find(|d| d.device == id).map(|d| d.role);
+        role(core_id(&c, 0)) == Some(Role::Phone) && role(phone) == Some(Role::Phone)
+    })
+    .await
+    .expect("the change replicates");
+    c.shutdown().await;
+}

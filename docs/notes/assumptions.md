@@ -201,6 +201,18 @@ Accepted for now; for the external review and the beta.
 
 Behaviour that will come back as features or needs a decision.
 
+- **A-086 · roles can change (2026-10-26)** · A device's role lives in its signed device cert, so changing it is a new cert with the
+  new role and the same name, signed by an admin (`set_device_role`) or by the root from the recovery phrase
+  (`set_device_role_with_phrase`). A device cannot pick its own role: the role is access control (a viewer writes no library records) as
+  well as storage policy. Every device follows the role in its own cert (`apply_membership`, on every device-list change and at start):
+  it updates its node config (what the fetcher wants, whether it may free space), announces it on presence and emits
+  `NodeEvent::RoleChanged`, which the app saves in `app.json`. An admin may change its own role and stays an admin. Camera-roll backup
+  pauses on a viewer ("viewers do not add photos"). Replacement certs are dated after the cert they replace (`cert_hlc_after`): before,
+  a device whose clock was behind the last signer's issued a cert that lost to the older one (this also affected removal and rename).
+  Not done: the keeper CLI cannot change roles (use the app); the keeper daemon starts as Keeper and then follows its cert; nothing
+  warns before demoting the only keeper (photos it held count as at risk again until another device holds them). Tested:
+  `revocation.rs::roles_can_change_and_devices_follow_their_certificate`.
+
 - **A-014 · M0-05** · `OrSet` keeps removed tags forever (grow-only). Compaction is deferred; at personal-album
   scale this is small. `Lww` equal-HLC/different-value ties (impossible in practice) resolve by value.
 - **A-064 · M2-08** · Free-up's "≥ target copies elsewhere" is implemented literally: other devices' *originals* (replicated holdings, excluding

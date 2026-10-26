@@ -53,6 +53,7 @@ pub const COMMANDS: &[&str] = &[
     "album_page",
     "devices",
     "revoke_device",
+    "set_device_role",
     "health",
     "free_up_space",
     "settings",
@@ -182,6 +183,16 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             )
             .await?),
         "devices" => out(core.devices().await?),
+        "set_device_role" => {
+            let phrase = opt::<String>(&args, "phrase")?;
+            core.set_device_role(
+                &arg::<String>(&args, "id")?,
+                &arg::<String>(&args, "role")?,
+                phrase.as_deref(),
+            )
+            .await?;
+            Ok(json!({}))
+        }
         "revoke_device" => {
             let phrase = opt::<String>(&args, "phrase")?;
             core.revoke_device(&arg::<String>(&args, "id")?, phrase.as_deref())

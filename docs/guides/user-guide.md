@@ -17,6 +17,10 @@ device, you remove it from another one.
 | Everyday (phone) | previews and thumbnails of everything, originals of what you pin or took on that device | phones and laptops |
 | Viewer | previews only, never originals | a family tablet |
 
+A role is not forever: *Devices → Role* next to a device changes it, for example when an old laptop becomes the
+keeper. It takes an admin device (the first phone and the first computer are), or your recovery phrase from any
+other device. The device switches as soon as it hears about the change.
+
 **Copy count is the number to watch.** Every photo shows how many devices hold its original. The goal is
 two or more (you can change it in Settings), **or one copy on a keeper**: a keeper is the backstop, so a photo
 it holds counts as backed up. A photo only on a phone is one lost phone away from gone; the app tells you

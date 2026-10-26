@@ -146,6 +146,21 @@ impl<L: LibraryStore> LibraryNode<L> {
         self.inner.clock.now_ms()
     }
 
+    /// An HLC for a cert that replaces one dated `prev`: later than it even when the device
+    /// that wrote `prev` has a clock ahead of ours (per device, the latest cert wins).
+    pub(crate) fn cert_hlc_after(&self, prev: &Hlc) -> Hlc {
+        let now = self.holdings_hlc();
+        if now > *prev {
+            now
+        } else {
+            Hlc {
+                physical_ms: prev.physical_ms,
+                counter: prev.counter + 1,
+                device: self.device(),
+            }
+        }
+    }
+
     /// A fresh HLC for this device's own holdings writes.
     pub(crate) fn holdings_hlc(&self) -> Hlc {
         let now = self.now_ms();

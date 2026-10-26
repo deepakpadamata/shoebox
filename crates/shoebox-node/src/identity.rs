@@ -120,6 +120,15 @@ impl<L: LibraryStore> LibraryNode<L> {
             )
         };
         self.node().set_allowed_peers(allowed);
+        // A device does what its certificate says: follow a role an admin changed.
+        if let Some(c) = mine.filter(|c| !c.revoked) {
+            if c.role != self.node().config().role {
+                let role = c.role;
+                self.node().update_config(|cfg| cfg.role = role)?;
+                self.node().emit(NodeEvent::RoleChanged { role });
+                self.send_hello().await;
+            }
+        }
         let previous = std::mem::replace(&mut *self.inner.membership.lock().unwrap(), state);
         if state == Membership::Removed && previous != Membership::Removed {
             self.node().emit(NodeEvent::RemovedFromLibrary);
@@ -152,7 +161,7 @@ impl<L: LibraryStore> LibraryNode<L> {
             *device,
             current.role,
             &current.name,
-            self.holdings_hlc(),
+            self.cert_hlc_after(&current.hlc),
             true,
         );
         self.store()
@@ -210,7 +219,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 kept.device,
                 kept.role,
                 &kept.name,
-                self.holdings_hlc(),
+                self.cert_hlc_after(&kept.hlc),
                 kept.revoked,
             );
             store
@@ -223,13 +232,76 @@ impl<L: LibraryStore> LibraryNode<L> {
             *device,
             current.role,
             &current.name,
-            self.holdings_hlc(),
+            self.cert_hlc_after(&current.hlc),
             true,
         );
         store
             .apply_device_change(SignedDeviceChange::Device(revocation))
             .await?;
         Ok(())
+    }
+
+    /// Give `device` another role (signed by this device, which must be an admin). The device
+    /// follows its new certificate when it receives it (see [`LibraryNode::enforce_membership`]).
+    /// Roles decide what a device may write (a viewer writes no library records) and what it
+    /// keeps, so a device cannot pick its own: it takes an admin or the recovery phrase.
+    pub async fn set_device_role(
+        &self,
+        device: &shoebox_core::ids::EndpointId,
+        role: Role,
+    ) -> Result<()> {
+        let list = self.store().device_list().await?;
+        anyhow::ensure!(
+            list.admins.iter().any(|a| a.admin == self.device()),
+            "only an admin device can change roles"
+        );
+        self.reissue_with_role(&self.node().device_key(), device, role)
+            .await
+    }
+
+    /// [`LibraryNode::set_device_role`] signed with the root key from the recovery phrase (for a
+    /// device that is no admin).
+    pub async fn set_device_role_with_phrase(
+        &self,
+        phrase: &str,
+        device: &shoebox_core::ids::EndpointId,
+        role: Role,
+    ) -> Result<()> {
+        let root = RecoveryKit::key_from_phrase(phrase, &self.capability()?.root)?;
+        self.reissue_with_role(&root, device, role).await
+    }
+
+    async fn reissue_with_role(
+        &self,
+        signer: &KeyPair,
+        device: &shoebox_core::ids::EndpointId,
+        role: Role,
+    ) -> Result<()> {
+        let cap = self.capability()?;
+        let list = self.store().device_list().await?;
+        let current = list
+            .devices
+            .iter()
+            .find(|d| d.device == *device)
+            .ok_or_else(|| anyhow::anyhow!("no such device in this library"))?;
+        anyhow::ensure!(!current.revoked, "that device was removed from the library");
+        if current.role == role {
+            return Ok(());
+        }
+        let cert = issue_device_cert(
+            signer,
+            cap.identity_id(),
+            *device,
+            role,
+            &current.name,
+            self.cert_hlc_after(&current.hlc),
+            false,
+        );
+        self.store()
+            .apply_device_change(SignedDeviceChange::Device(cert))
+            .await?;
+        // This device follows at once; the others when the change reaches them.
+        self.apply_membership().await
     }
 
     /// This device was renamed (the node's config already has the new name). Tell the others
@@ -246,7 +318,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                             self.device(),
                             me.role,
                             name,
-                            self.holdings_hlc(),
+                            self.cert_hlc_after(&me.hlc),
                             false,
                         );
                         self.store()

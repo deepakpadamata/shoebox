@@ -341,6 +341,12 @@ impl AppCore {
                         Some(AppEvent::PairingFailed { reason })
                     }
                     NodeEvent::RemovedFromLibrary => Some(AppEvent::RemovedFromLibrary),
+                    NodeEvent::RoleChanged { role } => {
+                        // The node already follows it; keep it for the next start.
+                        core.file.lock().unwrap().role = Some(role_name(role).into());
+                        let _ = core.save();
+                        Some(AppEvent::DevicesChanged)
+                    }
                     NodeEvent::PresenceChanged { .. } => Some(AppEvent::DevicesChanged),
                     NodeEvent::LibraryRotated { cap } => {
                         // Remember the new capability so a restart rejoins the new epoch.
@@ -1032,6 +1038,21 @@ impl AppCore {
         }
         out.sort_by(|a, b| (b.is_this_device, &a.name).cmp(&(a.is_this_device, &b.name)));
         Ok(out)
+    }
+
+    /// Give a device another role. Without a recovery phrase this device must be an admin.
+    pub async fn set_device_role(&self, id: &str, role: &str, phrase: Option<&str>) -> Result<()> {
+        let ln = self.ln().await?;
+        let (device, role) = (parse_device(id)?, parse_role(role)?);
+        match phrase.map(str::trim).filter(|p| !p.is_empty()) {
+            Some(phrase) => {
+                ln.set_device_role_with_phrase(phrase, &device, role)
+                    .await?
+            }
+            None => ln.set_device_role(&device, role).await?,
+        }
+        self.emit(AppEvent::DevicesChanged);
+        Ok(())
     }
 
     /// Revoke a device and move the library to a new epoch. Without a recovery phrase this

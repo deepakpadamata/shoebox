@@ -21,6 +21,13 @@
   let pair = $state<PairStart | null>(null);
   let revoking = $state<DeviceInfo | null>(null);
   let phrase = $state('');
+  let changing = $state<DeviceInfo | null>(null);
+  let newRole = $state('phone');
+  const roleHelp: Record<string, string> = {
+    phone: 'Keeps previews of everything, and the originals of its own photos until they are backed up elsewhere.',
+    keeper: 'Keeps every original: the backstop. Best for an always-on computer or a small box at home.',
+    viewer: 'Sees previews only and cannot add or change photos. Good for a shared tablet or a TV.',
+  };
   let busy = $state(false);
   const me = $derived(devices.find((d) => d.is_this_device));
   // Admins remove ordinary devices on their own; an admin device, or a removal from a device
@@ -72,6 +79,28 @@
     app.pairing = null;
   }
 
+  function openRole(d: DeviceInfo) {
+    changing = d;
+    newRole = d.role;
+    phrase = '';
+  }
+
+  async function changeRole() {
+    if (!changing) return;
+    busy = true;
+    try {
+      await api.setDeviceRole(changing.id, newRole, me?.admin ? undefined : phrase);
+      toast(`${changing.name} is now a ${newRole}`);
+      changing = null;
+      phrase = '';
+      await load();
+    } catch (e) {
+      fail(e);
+    } finally {
+      busy = false;
+    }
+  }
+
   async function revoke() {
     if (!revoking) return;
     try {
@@ -111,6 +140,7 @@
           <span class="row-flex">
             {#if !d.is_this_device}<Pill tone={pathTone(d)}>{pathLabel(d)}</Pill>{/if}
             <span class="dot" class:on={d.online} class:relay={d.path === 'relay'} title={d.online ? 'online' : 'offline'}></span>
+            <Button size="sm" kind="ghost" onclick={() => openRole(d)}>Role</Button>
             {#if !d.is_this_device}<Button size="sm" kind="ghost" onclick={() => { revoking = d; phrase = ''; }}>Remove</Button>{/if}
           </span>
         {/snippet}
@@ -151,6 +181,22 @@
       <p class="muted small">What will the new device do?</p>
       <Segmented bind:value={role} options={[{ value: 'phone', label: 'Phone' }, { value: 'keeper', label: 'Keeper' }, { value: 'viewer', label: 'Viewer' }]} />
       <Button kind="primary" block disabled={busy} onclick={startPairing}>Show pairing code</Button>
+    </div>
+  {/if}
+</Sheet>
+
+<Sheet open={!!changing} title="Change role" onclose={() => { changing = null; phrase = ''; }} width={400}>
+  {#if changing}
+    <div class="stack">
+      <p class="small">What should {changing.is_this_device ? 'this device' : changing.name} do?</p>
+      <Segmented bind:value={newRole} options={[{ value: 'phone', label: 'Phone' }, { value: 'keeper', label: 'Keeper' }, { value: 'viewer', label: 'Viewer' }]} />
+      <p class="small muted">{roleHelp[newRole]}</p>
+      {#if !me?.admin}
+        <p class="small">This device is not an admin, so changing a role from here needs your recovery phrase.</p>
+        <textarea class="input" rows="3" placeholder="24-word recovery phrase" autocomplete="off" spellcheck="false" bind:value={phrase}></textarea>
+      {/if}
+      <Button kind="primary" block disabled={busy || newRole === changing.role || (!me?.admin && !phrase.trim())} onclick={changeRole}>{busy ? 'Saving…' : 'Save'}</Button>
+      <Button block onclick={() => { changing = null; phrase = ''; }}>Cancel</Button>
     </div>
   {/if}
 </Sheet>

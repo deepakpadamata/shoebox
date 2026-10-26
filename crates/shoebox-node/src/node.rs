@@ -95,6 +95,11 @@ pub enum NodeEvent {
     },
     /// This device's own revocation reached it: it no longer belongs to the library.
     RemovedFromLibrary,
+    /// This device's certified role changed (an admin or the recovery phrase changed it); the
+    /// node already follows it. Persist it where the app keeps its settings.
+    RoleChanged {
+        role: shoebox_core::model::Role,
+    },
     /// A device of the library came online or went offline (from the presence topic).
     PresenceChanged {
         device: shoebox_core::ids::EndpointId,

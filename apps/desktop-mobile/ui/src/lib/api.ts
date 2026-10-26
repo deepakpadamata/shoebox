@@ -121,6 +121,8 @@ export const api = {
   devices: () => call<DeviceInfo[]>('devices'),
   /** `phrase`: the recovery phrase, needed to remove an admin device or when this device is no admin. */
   revokeDevice: (id: string, phrase?: string) => call<{}>('revoke_device', { id, phrase: phrase ?? null }),
+  /** `phrase`: the recovery phrase, needed when this device is no admin. */
+  setDeviceRole: (id: string, role: string, phrase?: string) => call<{}>('set_device_role', { id, role, phrase: phrase ?? null }),
   health: () => call<Health>('health'),
   freeUpSpace: (dry_run: boolean) => call<FreeUpReport>('free_up_space', { dry_run }),
   settings: () => call<Settings>('settings'),

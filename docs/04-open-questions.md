@@ -43,6 +43,7 @@ Decisions from the first review pass (2026-10-22). Each one notes where it shows
 | 18 | Root key custody | **Delegated admin certs.** The root key signs admin certs (by default for the first phone and the first desktop). Admin devices can pair and revoke. Otherwise the root key lives only in the recovery kit. | 05 §4, M2 |
 | 19 | Shared album limits (MVP) | **50 members, 50k items** per album. These are soft limits, enforced in the UI and the invite flow. | M5 |
 | 20 | Delivery assumptions | **Solo developer, strictly linear.** Issues are numbered in execution order. The MVP is planned in detail; v2 (hosted gateway, cloud backup, web viewer) is kept as epics. | `planning/` |
+| 21 | v0.1 scope (2026-10-26) | **A testers' preview of macOS, Android and the keeper on x86_64 Linux.** iOS is out of v0.1 (no Xcode, no iOS tester). The keeper is tested on the owner's Linux box, not a Raspberry Pi. The code goes to GitHub only once the rest of 0.1 is done, so CI, signed builds and the update feed come last. | `planning/` R1 |
 
 ## Still open
 

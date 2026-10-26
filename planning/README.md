@@ -175,9 +175,11 @@ Re-runs are safe: created issue numbers are stored in `planning/scripts/github-m
 
 ### R1 · v0.1 testers' preview
 
-Added 2026-10-26: what stands between the built MVP and a first build in other people's hands (macOS, Android, the keeper;
-iOS stays in M4). It is the first wave of the closed beta (M6-08). Issues marked *needs you* wait on something only the
-owner can provide (an account, a key, a device, a server); they carry the `needs:owner` label. The rest can start now.
+Added 2026-10-26: what stands between the built MVP and a first build in other people's hands: macOS, Android and the
+keeper on x86_64 Linux. **iOS is out of v0.1** (no Xcode, no iOS tester yet); it stays in M4. The keeper is tested on the
+owner's Linux box, not a Raspberry Pi. The code goes to GitHub only once everything else for 0.1 is done (R1-13), so CI,
+signed builds and the update feed come at the end. This is the first wave of the closed beta (M6-08). Issues marked
+*needs you* wait on something only the owner can provide; they carry the `needs:owner` label.
 
 | ID | Issue | Est. (d) | Depends on |
 |---|---|---|---|
@@ -187,15 +189,15 @@ owner can provide (an account, a key, a device, a server); they carry the `needs
 | R1-04 | [Make this device an admin](issues/R1-04-make-this-device-an-admin.md) | 1 | — |
 | R1-05 | [About screen, licences and source offer](issues/R1-05-about-screen-licences-and-source-offer.md) | 1 | R1-01 |
 | R1-06 | [Security alerts reach people when the app is closed](issues/R1-06-security-alerts-reach-people-when-the-app-is-closed.md) | 1.5 | — |
-| R1-07 | [Bring PROGRESS, READMEs and the changelog up to date](issues/R1-07-bring-progress-readmes-and-the-changelog-up-to-date.md) | 0.5 | R1-01 |
-| R1-08 | [Repository remote and the first green CI run](issues/R1-08-repository-remote-and-the-first-green-ci-run.md) (needs you) | 0.5 | R1-01, R1-02 |
-| R1-09 | [Run the desktop app on a real Mac](issues/R1-09-run-the-desktop-app-on-a-real-mac.md) (needs you) | 1 | R1-01 |
-| R1-10 | [Run Android on a physical phone](issues/R1-10-run-android-on-a-physical-phone.md) (needs you) | 1 | R1-01 |
-| R1-11 | [Keeper on a Raspberry Pi](issues/R1-11-keeper-on-a-raspberry-pi.md) (needs you) | 1 | R1-01 |
-| R1-12 | [Test across real networks](issues/R1-12-test-across-real-networks.md) (needs you) | 2 | R1-08 |
-| R1-13 | [Signed release builds](issues/R1-13-signed-release-builds.md) (needs you) | 2 | R1-08 |
-| R1-14 | [How testers get updates](issues/R1-14-how-testers-get-updates.md) | 1 | R1-13 |
-| R1-15 | [Ship the v0.1 testers' preview](issues/R1-15-ship-the-v0-1-testers-preview.md) (needs you) | 1 | R1-03, R1-04, R1-05, R1-06, R1-07, R1-09, R1-10, R1-11, R1-12, R1-14 |
+| R1-07 | [How testers get updates](issues/R1-07-how-testers-get-updates.md) | 1 | — |
+| R1-08 | [Run the desktop app on a real Mac](issues/R1-08-run-the-desktop-app-on-a-real-mac.md) (needs you) | 1 | R1-01 |
+| R1-09 | [Run Android on a physical phone](issues/R1-09-run-android-on-a-physical-phone.md) (needs you) | 1 | R1-01 |
+| R1-10 | [Keeper on a Linux machine](issues/R1-10-keeper-on-a-linux-machine.md) (needs you) | 1 | R1-01 |
+| R1-11 | [Test across real networks](issues/R1-11-test-across-real-networks.md) (needs you) | 2 | — |
+| R1-12 | [Bring PROGRESS, READMEs and the changelog up to date](issues/R1-12-bring-progress-readmes-and-the-changelog-up-to-date.md) | 0.5 | R1-08, R1-09, R1-10, R1-11 |
+| R1-13 | [Upload to GitHub and the first green CI run](issues/R1-13-upload-to-github-and-the-first-green-ci-run.md) (needs you) | 0.5 | R1-01, R1-02, R1-12 |
+| R1-14 | [Signed release builds](issues/R1-14-signed-release-builds.md) (needs you) | 2 | R1-13 |
+| R1-15 | [Ship the v0.1 testers' preview](issues/R1-15-ship-the-v0-1-testers-preview.md) (needs you) | 1 | R1-03, R1-04, R1-05, R1-06, R1-07, R1-14 |
 
 ### M7 · MVP release
 

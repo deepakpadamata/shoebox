@@ -1,5 +1,5 @@
 ---
-id: R1-09
+id: R1-08
 title: Run the desktop app on a real Mac
 milestone: R1 · v0.1 testers' preview
 labels: [area:app, type:test, needs:owner]
@@ -8,7 +8,7 @@ depends_on: [R1-01]
 features: []
 ---
 
-# R1-09 · Run the desktop app on a real Mac
+# R1-08 · Run the desktop app on a real Mac
 
 ## Why
 

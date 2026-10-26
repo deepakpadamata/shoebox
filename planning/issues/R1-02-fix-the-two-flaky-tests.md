@@ -12,8 +12,8 @@ features: []
 
 ## Why
 
-CI is about to run for the first time; a red build that is "probably the flake" trains everyone to ignore it.
-One of the two flakes is in freeing space, the one place where a bug deletes the only copy of a photo.
+CI will run as soon as the repository is uploaded; a red build that is "probably the flake" trains everyone to
+ignore it. One of the two flakes is in freeing space, the one place where a bug deletes the only copy of a photo.
 
 ## Scope
 

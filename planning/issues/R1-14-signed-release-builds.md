@@ -1,14 +1,14 @@
 ---
-id: R1-13
+id: R1-14
 title: Signed release builds
 milestone: R1 · v0.1 testers' preview
 labels: [area:infra, type:chore, needs:owner]
 estimate_days: 2
-depends_on: [R1-08]
+depends_on: [R1-13]
 features: []
 ---
 
-# R1-13 · Signed release builds
+# R1-14 · Signed release builds
 
 ## Why
 
@@ -21,13 +21,13 @@ anything without a valid minisign signature (A-065).
   repository secrets.
 - Put the real minisign public key into the install script.
 - Tag `v0.1.0-rc.1` and let the workflows build: macOS universal (notarised), Android APK, keeper for x86_64/aarch64/macOS.
-- Install each artifact from scratch on a clean machine.
+- Install each artifact from scratch on a clean machine; the keeper through `install-keeper.sh` on the Linux box.
 
 ## Acceptance criteria
 
 - [ ] The macOS app opens without a Gatekeeper warning.
 - [ ] The APK installs on a phone that has never had a dev build.
-- [ ] `install-keeper.sh` verifies the real signature and installs on the Pi.
+- [ ] `install-keeper.sh` verifies the real signature and installs on the Linux box.
 
 ---
-_Depends on: R1-08 · Estimate: 2d · Features: —_
+_Depends on: R1-13 · Estimate: 2d · Features: —_

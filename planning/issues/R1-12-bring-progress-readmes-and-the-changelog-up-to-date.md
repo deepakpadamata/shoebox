@@ -1,19 +1,19 @@
 ---
-id: R1-07
+id: R1-12
 title: Bring PROGRESS, READMEs and the changelog up to date
 milestone: R1 · v0.1 testers' preview
 labels: [area:docs, type:docs]
 estimate_days: 0.5
-depends_on: [R1-01]
+depends_on: [R1-08, R1-09, R1-10, R1-11]
 features: []
 ---
 
-# R1-07 · Bring PROGRESS, READMEs and the changelog up to date
+# R1-12 · Bring PROGRESS, READMEs and the changelog up to date
 
 ## Why
 
-`PROGRESS.md` and the desktop README predate most of the security and device-management work (A-085 to A-088), and
-there is no changelog for testers to read.
+`PROGRESS.md` and the desktop README predate most of the security and device-management work (A-085 to A-088),
+and there is no changelog. Done after the device checks so it describes what was really run.
 
 ## Scope
 
@@ -27,4 +27,4 @@ there is no changelog for testers to read.
 - [ ] CHANGELOG 0.1.0 exists and links the user guide.
 
 ---
-_Depends on: R1-01 · Estimate: 0.5d · Features: —_
+_Depends on: R1-08, R1-09, R1-10, R1-11 · Estimate: 0.5d · Features: —_

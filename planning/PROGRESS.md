@@ -124,22 +124,22 @@ Implementation status per issue. Assumptions made along the way are logged in
 | M7-03 Store submission | ⬜ | needs signing identities, store accounts and the iOS app |
 | M7-04 1.0 release | ⬜ | needs the above; versions are still 0.0.1 |
 
-## R1 · v0.1 testers' preview — planned 2026-10-26
+## R1 · v0.1 testers' preview — planned 2026-10-26 (no iOS; keeper on Linux; GitHub upload last)
 
 | Issue | Status | Notes |
 |---|---|---|
-| R1-01 Version 0.1.0 and the format and protocol baseline | ⬜ | |
+| R1-01 Version 0.1.0 and the format and protocol baseline | ⬜ |  |
 | R1-02 Fix the two flaky tests | ⬜ | A-059 |
 | R1-03 Freeing space trusts a keeper copy | ⬜ | A-064 |
-| R1-04 Make this device an admin | ⬜ | |
-| R1-05 About screen, licences and source offer | ⬜ | |
+| R1-04 Make this device an admin | ⬜ |  |
+| R1-05 About screen, licences and source offer | ⬜ |  |
 | R1-06 Security alerts reach people when the app is closed | ⬜ | A-087, A-088 |
-| R1-07 Bring PROGRESS, READMEs and the changelog up to date | ⬜ | |
-| R1-08 Repository remote and the first green CI run | ⬜ | needs the owner: a repository |
-| R1-09 Run the desktop app on a real Mac | ⬜ | needs the owner: a Mac |
-| R1-10 Run Android on a physical phone | ⬜ | needs the owner: a phone |
-| R1-11 Keeper on a Raspberry Pi | ⬜ | needs the owner: a Pi |
-| R1-12 Test across real networks | ⬜ | needs the owner: a VPS or a second network |
-| R1-13 Signed release builds | ⬜ | needs the owner: Apple, Android and minisign keys |
-| R1-14 How testers get updates | ⬜ | |
+| R1-07 How testers get updates | ⬜ |  |
+| R1-08 Run the desktop app on a real Mac | ⬜ | needs the owner: a Mac |
+| R1-09 Run Android on a physical phone | ⬜ | needs the owner: an Android phone |
+| R1-10 Keeper on a Linux machine | ⬜ | needs the owner: the Linux box |
+| R1-11 Test across real networks | ⬜ | needs the owner: two networks or a VPS |
+| R1-12 Bring PROGRESS, READMEs and the changelog up to date | ⬜ |  |
+| R1-13 Upload to GitHub and the first green CI run | ⬜ | needs the owner: the GitHub repository |
+| R1-14 Signed release builds | ⬜ | needs the owner: Apple, Android and minisign keys |
 | R1-15 Ship the v0.1 testers' preview | ⬜ | needs the owner: testers and a feedback channel |

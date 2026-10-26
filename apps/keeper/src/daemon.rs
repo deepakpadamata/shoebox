@@ -121,6 +121,31 @@ impl Shared {
         let peers = ticket.peers.clone();
         tokio::spawn(async move {
             while let Ok(ev) = events.recv().await {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                match &ev {
+                    shoebox_node::NodeEvent::AdminAdded { device, name } => crate::alerts::add(
+                        &storage,
+                        crate::alerts::Alert {
+                            kind: "admin_added".into(),
+                            device_id: hex::encode(device.0),
+                            device_name: name.clone(),
+                            at_ms: now,
+                        },
+                    ),
+                    shoebox_node::NodeEvent::RecoveryPhraseReplaced => crate::alerts::add(
+                        &storage,
+                        crate::alerts::Alert {
+                            kind: "phrase_replaced".into(),
+                            device_id: String::new(),
+                            device_name: String::new(),
+                            at_ms: now,
+                        },
+                    ),
+                    _ => {}
+                }
                 if let shoebox_node::NodeEvent::LibraryRotated { cap } = ev {
                     let ticket = LibraryTicket {
                         cap,

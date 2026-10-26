@@ -163,6 +163,9 @@ pub fn run() {
     // Native file and folder pickers for importing (desktop only).
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_dialog::init());
+    // Security alerts while the window is hidden (R1-06).
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_notification::init());
     // QR scanning when joining a library from a phone (M4-07).
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
@@ -208,6 +211,8 @@ pub fn run() {
 
             let mut events = core.events();
             let handle = app.handle().clone();
+            #[cfg(desktop)]
+            let alerts_core = core.clone();
             tauri::async_runtime::spawn(async move {
                 let mut syncing = 0i32;
                 while let Ok(ev) = events.recv().await {
@@ -224,6 +229,26 @@ pub fn run() {
                             } else {
                                 "Shoebox: up to date"
                             }));
+                        }
+                    }
+                    // With the window hidden (closed to the tray) nobody sees the banner: show a
+                    // system notification for each new security alert instead (R1-06).
+                    #[cfg(desktop)]
+                    if ev == crate::types::AppEvent::SecurityChanged {
+                        let hidden = handle
+                            .get_webview_window("main")
+                            .is_none_or(|w| !w.is_visible().unwrap_or(true));
+                        if hidden {
+                            use tauri_plugin_notification::NotificationExt;
+                            for alert in alerts_core.take_unnotified_alerts() {
+                                let n = crate::notify::security_notification(&alert);
+                                let _ = handle
+                                    .notification()
+                                    .builder()
+                                    .title(n.title)
+                                    .body(n.body)
+                                    .show();
+                            }
                         }
                     }
                     let _ = handle.emit("app-event", ev);

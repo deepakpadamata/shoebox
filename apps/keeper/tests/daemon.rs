@@ -446,3 +446,70 @@ async fn the_keeper_joins_an_album_and_keeps_every_original_when_told_to() {
     assert_eq!(status["shared_albums"][0]["keep_originals"], true);
     d.shutdown().await.unwrap();
 }
+
+/// R1-06: the keeper has no screen, so a security alert (here: the recovery phrase was replaced on
+/// another device) waits in `status` until someone acknowledges it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn security_alerts_wait_in_status_until_acknowledged() {
+    let dir = tempfile::tempdir().unwrap();
+    let node = Node::open(NodeConfig::local_only(dir.path().join("inviter"), "laptop"))
+        .await
+        .unwrap();
+    let backend = HybridBackend::for_node(node.clone(), SystemClock);
+    let root = KeyPair::generate();
+    let (lib, cap) = backend.create_library(&root.root_public()).await.unwrap();
+    let ln = LibraryNode::new(node.clone(), Arc::new(lib), SystemClock).with_capability(cap);
+    let kit = ln
+        .create_identity(&root, Role::Phone, "laptop")
+        .await
+        .unwrap();
+    ln.enforce_membership().await.unwrap();
+    let ticket = ln
+        .start_pairing(Role::Keeper, Duration::from_secs(300), accept())
+        .await
+        .unwrap();
+    let d = Daemon::start(opts(dir.path())).await.unwrap();
+    Client::connect(d.control_path())
+        .await
+        .unwrap()
+        .pair(&ticket.to_string(), "pi", |_| true)
+        .await
+        .unwrap();
+    let status = || async {
+        Client::connect(d.control_path())
+            .await
+            .unwrap()
+            .status()
+            .await
+            .unwrap()
+    };
+    assert!(
+        wait_for(30, || async { status().await["paired"] == true }).await,
+        "paired"
+    );
+    // Let it finish its first sync (it alerts from then on).
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(status().await["alerts"], serde_json::json!([]));
+
+    ln.rotate_root(&kit.phrase()).await.unwrap();
+    assert!(
+        wait_for(30, || async {
+            status().await["alerts"]
+                .as_array()
+                .is_some_and(|a| a.iter().any(|x| x["kind"] == "phrase_replaced"))
+        })
+        .await,
+        "the keeper reports that the phrase was replaced"
+    );
+    let text = keeper::render::status(&status().await);
+    assert!(text.contains("SECURITY ALERTS"), "{text}");
+
+    Client::connect(d.control_path())
+        .await
+        .unwrap()
+        .call_raw(serde_json::json!({"cmd":"alerts_ack"}))
+        .await
+        .unwrap();
+    assert_eq!(status().await["alerts"], serde_json::json!([]));
+    d.shutdown().await.unwrap();
+}

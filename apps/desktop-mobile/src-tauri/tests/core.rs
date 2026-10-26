@@ -665,3 +665,63 @@ async fn about_names_the_version_the_source_and_the_licences() {
     assert!(text.contains("[standard MIT]"));
     core.shutdown().await.unwrap();
 }
+
+/// R1-06: a security alert raised here (the phrase was replaced on another app) is handed out
+/// once for a system notification (Android's worker, the desktop app with its window hidden), and
+/// stays in the app state as a banner until dismissed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn security_alerts_are_notified_once() {
+    let (da, db) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let a = open(da.path()).await;
+    let created = a.create_library("MacBook", "keeper").await.unwrap();
+    let b = open(db.path()).await;
+    let (b2, link, phrase) = (b.clone(), a.device_link(), created.phrase.clone());
+    let joining = tokio::spawn(async move { b2.recover(&link, &phrase, "Laptop").await });
+    assert!(
+        wait(20, || async {
+            a.app_state().await.unwrap().recovery_request.is_some()
+        })
+        .await
+    );
+    a.answer_recovery(true).unwrap();
+    joining.await.unwrap().unwrap();
+    assert!(a.take_unnotified_alerts().is_empty(), "nothing yet");
+    assert!(
+        wait(20, || async {
+            b.app_state().await.unwrap().membership == "member"
+        })
+        .await,
+        "the recovered app has synced its own certificate"
+    );
+
+    b.replace_recovery_phrase(&created.phrase).await.unwrap();
+    assert!(
+        wait(20, || async {
+            a.app_state()
+                .await
+                .unwrap()
+                .alerts
+                .iter()
+                .any(|x| x.kind == "phrase_replaced")
+        })
+        .await,
+        "the other app is told the phrase was replaced"
+    );
+    let first = a.take_unnotified_alerts();
+    assert!(
+        first.iter().any(|x| x.kind == "phrase_replaced"),
+        "{first:?}"
+    );
+    assert!(a.take_unnotified_alerts().is_empty(), "once");
+    assert!(
+        a.app_state()
+            .await
+            .unwrap()
+            .alerts
+            .iter()
+            .all(|x| x.notified),
+        "still shown as a banner, marked notified"
+    );
+    a.shutdown().await.unwrap();
+    b.shutdown().await.unwrap();
+}

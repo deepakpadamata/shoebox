@@ -50,6 +50,9 @@ ts_type! {
         pub device_id: String,
         pub device_name: String,
         pub at_ms: f64,
+        /// A system notification was shown for it (R1-06): once is enough.
+        #[serde(default)]
+        pub notified: bool,
     }
 }
 

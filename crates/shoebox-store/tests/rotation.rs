@@ -77,8 +77,10 @@ async fn revoking_a_device_moves_the_others_to_a_new_epoch() {
     })
     .await
     .expect("a returning member learns of the rotation");
+    // Both photos: it follows the move carrying only its own records, and photo 1 (written by
+    // node 0) comes back by syncing, a moment after the new one.
     wait_until(Duration::from_secs(30), || async {
-        nodes[2].store().photo(&hash(2)).await.unwrap().is_some()
+        photos_of(nodes[2].store().as_ref()).await.len() == 2
     })
     .await
     .expect("and syncs the new epoch");
@@ -190,6 +192,7 @@ async fn a_stolen_admin_is_removed_with_the_recovery_phrase() {
     // with the phrase.
     c.partition(0, 2);
     c.partition(1, 2);
+    c.partition(2, 3); // or device 3 passes the real notice on to the member before the thief's
     c.partition(0, 1);
     c.partition(1, 3);
     let real_notice = nodes[0]
@@ -287,10 +290,12 @@ async fn the_root_key_can_be_replaced_and_the_old_phrase_stops_working() {
     })
     .await
     .expect("node 0 follows the handover");
-    assert!(
-        replaced.load(std::sync::atomic::Ordering::SeqCst),
-        "a following device is told the phrase was replaced"
-    );
+    // The event follows the move by a moment (the store changes epoch first).
+    wait_until(Duration::from_secs(5), || async {
+        replaced.load(std::sync::atomic::Ordering::SeqCst)
+    })
+    .await
+    .expect("a following device is told the phrase was replaced");
     wait_until(Duration::from_secs(20), || async {
         let l = nodes[0].store().device_list().await.unwrap();
         l.devices.len() == 3
@@ -367,5 +372,44 @@ async fn the_first_valid_handover_wins() {
         .unwrap_err();
     assert!(format!("{err:#}").contains("another epoch"), "{err:#}");
     assert_eq!(nodes[2].library_id(), ours.new_cap().library);
+    c.shutdown().await;
+}
+
+/// The same notice often reaches a member from two devices at once (one pushes it, another hands
+/// on the one it keeps). Exactly one of them moves the member; the store is moved once, its data
+/// intact (R1-06 found two concurrent moves deleting the new epoch's own directory).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_same_notice_twice_at_once_moves_a_member_once() {
+    let c = Cluster::new(3).await.unwrap();
+    let (_rig, nodes) = library_nodes_roles(&c, &[Role::Keeper; 3]).await;
+    for n in &nodes {
+        n.enforce_membership().await.unwrap();
+    }
+    nodes[0].store().upsert_photo(photo(1, 10)).await.unwrap();
+    wait_until(Duration::from_secs(20), || async {
+        nodes[1].store().photo(&hash(1)).await.unwrap().is_some()
+    })
+    .await
+    .expect("in sync");
+    c.partition(0, 1); // node 1 hears of the move only from the test below
+    c.partition(1, 2);
+    let notice = nodes[0].revoke_and_rotate(&core_id(&c, 2)).await.unwrap();
+
+    // Two tasks, so the two deliveries really run in parallel.
+    let deliver = || {
+        let (n, notice) = (nodes[1].clone(), notice.clone());
+        tokio::spawn(async move { n.accept_notice_for_test(&notice).await })
+    };
+    let (a, b) = (deliver(), deliver());
+    let moved = [a.await.unwrap().unwrap(), b.await.unwrap().unwrap()];
+    assert_eq!(moved.iter().filter(|m| **m).count(), 1, "{moved:?}");
+    assert_eq!(nodes[1].library_id(), notice.new_cap.library);
+    c.heal();
+    nodes[0].store().upsert_photo(photo(2, 20)).await.unwrap();
+    wait_until(Duration::from_secs(30), || async {
+        photos_of(nodes[1].store().as_ref()).await.len() == 2
+    })
+    .await
+    .expect("the member keeps syncing on the new epoch, with every photo");
     c.shutdown().await;
 }

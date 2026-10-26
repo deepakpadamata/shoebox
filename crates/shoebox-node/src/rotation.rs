@@ -156,6 +156,7 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 
     async fn rotate_after_revocation(&self, device: &EndpointId) -> Result<RotationNotice> {
+        let _one = self.inner.epoch_lock.lock().await;
         let old = self.capability()?;
         let new = self.store().begin_rotation().await?;
         let list = self.store().device_list().await?;
@@ -191,6 +192,7 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// there). Devices that were removed are left behind. Returns the new recovery kit: show it
     /// once, it is the only copy.
     pub async fn rotate_root(&self, phrase: &str) -> Result<RecoveryKit> {
+        let _one = self.inner.epoch_lock.lock().await;
         let old_cap = self.capability()?;
         let old_root = RecoveryKit::key_from_phrase(phrase, &old_cap.root)?;
         let new_root = KeyPair::generate();
@@ -313,7 +315,8 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// Test hook: feed a notice to this node as if a peer had pushed it.
     #[doc(hidden)]
     pub async fn accept_notice_for_test(&self, notice: &RotationNotice) -> Result<bool> {
-        self.accept_notice(notice).await
+        self.accept_epoch_notice(&EpochNotice::Revocation(notice.clone()))
+            .await
     }
 
     /// Test hook: [`LibraryNode::accept_notice_for_test`] for either kind of notice.
@@ -323,6 +326,8 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 
     pub(crate) async fn accept_epoch_notice(&self, notice: &EpochNotice) -> Result<bool> {
+        // One at a time; each then checks afresh whether this device has already moved.
+        let _one = self.inner.epoch_lock.lock().await;
         match notice {
             EpochNotice::Revocation(n) => self.accept_notice(n).await,
             EpochNotice::Root(h) => self.accept_handover(h).await,

@@ -9,4 +9,8 @@ export type SecurityAlert = {
  * `admin_added` (the device below became an admin) or `phrase_replaced` (the recovery
  * phrase was replaced on another device; no device named).
  */
-kind: string, device_id: string, device_name: string, at_ms: number, };
+kind: string, device_id: string, device_name: string, at_ms: number, 
+/**
+ * A system notification was shown for it (R1-06): once is enough.
+ */
+notified: boolean, };

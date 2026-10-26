@@ -33,6 +33,15 @@ pub fn status(v: &Value) -> String {
         out.push_str("\nNot paired with a library yet.\nOn a phone or laptop choose “Add a device”, then run:\n  shoebox-keeper pair <ticket>\n");
         return out;
     }
+    let alerts = v["alerts"].as_array().cloned().unwrap_or_default();
+    if !alerts.is_empty() {
+        out.push_str("\nSECURITY ALERTS (clear with `shoebox-keeper alerts ack`):\n");
+        for a in &alerts {
+            if let Ok(a) = serde_json::from_value::<crate::alerts::Alert>(a.clone()) {
+                let _ = writeln!(out, "  ! {}", crate::alerts::describe(&a));
+            }
+        }
+    }
     let lib = &v["library"];
     let _ = writeln!(
         out,

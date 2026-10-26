@@ -251,6 +251,12 @@ impl LibraryShared {
     ) -> Result<LibraryId> {
         let mut inner = self.inner.lock().unwrap();
         let old = inner.library;
+        if old == new_epoch {
+            // Rebuilding the epoch it is in would reuse, and then delete, its own directory.
+            return Err(StoreError::Invalid(
+                "this replica is already in that epoch".into(),
+            ));
+        }
         let mut records = first;
         records.extend(inner.carried(carry));
         let mut fresh = Inner::build(

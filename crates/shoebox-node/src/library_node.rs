@@ -43,6 +43,9 @@ pub(crate) struct Inner<L: LibraryStore> {
     pub(crate) invites: Arc<Mutex<crate::pairing::Invites>>,
     pub(crate) recovery_approval: Mutex<Option<crate::recover::RecoveryDecideFn>>,
     pub(crate) admin_watch: Mutex<crate::identity::AdminWatch>,
+    /// One epoch change at a time: the same notice often arrives from two members at once, and
+    /// two concurrent moves of the store would race (R1-06 found it).
+    pub(crate) epoch_lock: tokio::sync::Mutex<()>,
 }
 
 pub struct LibraryNode<L: LibraryStore> {
@@ -97,6 +100,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 confirmations: Mutex::new(crate::freeup::Confirmations::load(&data_dir)),
                 recovery_approval: Mutex::new(None),
                 admin_watch: Mutex::new(crate::identity::AdminWatch::load(&data_dir)),
+                epoch_lock: tokio::sync::Mutex::new(()),
             }),
         };
         ln.start_sync_manager(nudge_rx);

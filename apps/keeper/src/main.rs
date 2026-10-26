@@ -81,8 +81,19 @@ enum Cmd {
     },
     /// Stop the running daemon.
     Stop,
+    /// Security alerts (a new admin, a replaced recovery phrase): list them, or `ack` to clear.
+    Alerts {
+        #[command(subcommand)]
+        action: Option<AlertsCmd>,
+    },
     /// Print the licence of this keeper, where to get its source, and the third-party notices.
     Licences,
+}
+
+#[derive(Subcommand)]
+enum AlertsCmd {
+    /// You have seen them: clear the list.
+    Ack,
 }
 
 #[derive(Subcommand)]
@@ -244,6 +255,26 @@ async fn main() -> Result<()> {
                 .call_raw(json!({"cmd":"address"}))
                 .await?;
             println!("{}", data["link"].as_str().unwrap_or(""));
+        }
+        Cmd::Alerts { action } => {
+            let mut c = client(&storage).await?;
+            match action {
+                Some(AlertsCmd::Ack) => {
+                    c.call_raw(json!({"cmd":"alerts_ack"})).await?;
+                    println!("Alerts cleared.");
+                }
+                None => {
+                    let data = c.call_raw(json!({"cmd":"alerts"})).await?;
+                    let list: Vec<keeper::alerts::Alert> =
+                        serde_json::from_value(data["alerts"].clone()).unwrap_or_default();
+                    if list.is_empty() {
+                        println!("No security alerts.");
+                    }
+                    for a in &list {
+                        println!("! {}", keeper::alerts::describe(a));
+                    }
+                }
+            }
         }
         Cmd::Status { json } => {
             let data = client(&storage).await?.status().await?;

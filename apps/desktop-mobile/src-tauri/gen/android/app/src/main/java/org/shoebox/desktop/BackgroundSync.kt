@@ -29,6 +29,7 @@ import java.util.concurrent.TimeUnit
 object BackgroundSync {
     const val UNIQUE = "shoebox-background-sync"
     const val CHANNEL = "backup"
+    const val SECURITY_CHANNEL = "security"
     private const val BUDGET_SECS = 120
 
     fun schedule(context: Context) {
@@ -65,28 +66,41 @@ class BurstWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
         }
         Log.i("ShoeboxBurst", report)
         prefs.edit().putString("last_report", report).apply()
-        val n = JSONObject(report).optJSONObject("notification")
+        val json = JSONObject(report)
+        val n = json.optJSONObject("notification")
         if (n != null) {
             notify(n.getString("title"), n.getString("body"))
             prefs.edit().putLong("last_notified_ms", System.currentTimeMillis()).apply()
         }
+        // Security alerts (a new admin, a replaced recovery phrase): each once, on their own channel.
+        val security = json.optJSONArray("security")
+        if (security != null) {
+            for (i in 0 until security.length()) {
+                val s = security.getJSONObject(i)
+                notify(s.getString("title"), s.getString("body"), security = true, id = 100 + i)
+            }
+        }
         return Result.success()
     }
 
-    private fun notify(title: String, body: String) {
+    private fun notify(title: String, body: String, security: Boolean = false, id: Int = 1) {
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.createNotificationChannel(NotificationChannel(BackgroundSync.CHANNEL, "Backup", NotificationManager.IMPORTANCE_DEFAULT))
+        val channel = if (security) BackgroundSync.SECURITY_CHANNEL else BackgroundSync.CHANNEL
+        nm.createNotificationChannel(
+            if (security) NotificationChannel(channel, "Security", NotificationManager.IMPORTANCE_HIGH)
+            else NotificationChannel(channel, "Backup", NotificationManager.IMPORTANCE_DEFAULT)
+        )
         val open = PendingIntent.getActivity(
             ctx, 0, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val n = NotificationCompat.Builder(ctx, BackgroundSync.CHANNEL)
+        val n = NotificationCompat.Builder(ctx, channel)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle(title)
             .setContentText(body)
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
-        nm.notify(1, n)
+        nm.notify(id, n)
     }
 }

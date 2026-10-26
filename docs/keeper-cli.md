@@ -16,6 +16,8 @@ be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held w
 | `devices [--json]` / `devices revoke <id>` | list devices / revoke one (this keeper must be an admin) |
 | `album list [--json]` / `album keep <id>` / `album drop <id>` / `album join <invitation>` | shared albums this keeper is in; `keep` fetches every original of the album, `drop` lets them go; ids may be shortened to a unique prefix |
 | `service install [--system] [--user U] [--print]` / `service uninstall` | systemd unit (Linux) / launchd plist (macOS) |
+| `alerts` / `alerts ack` | security alerts (a new admin, a replaced recovery phrase); `ack` clears them |
+| `licences` | this keeper's licence, where its source is, and the third-party notices |
 | `stop` | ask the daemon to shut down |
 
 ## `status --json` (schema 1)
@@ -27,6 +29,7 @@ be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held w
   "library": { "id": "<32 hex>", "photos": 0, "held_originals": 0, "at_risk": 0,
                "redundancy_target": 2, "recovery_kit_saved": false },
   "devices": 3,
+  "alerts": [ { "kind": "admin_added | phrase_replaced", "device_id": "<64 hex or empty>", "device_name": "…", "at_ms": 0 } ],
   "peers": [ { "id": "<64 hex>", "name": "Asha's phone", "path": "lan | direct | relay | none", "latency_ms": 12 } ],
   "shared_albums": [ { "id": "<32 hex>", "name": "Trip", "photos": 12, "members": 3, "keep_originals": false } ]
 }

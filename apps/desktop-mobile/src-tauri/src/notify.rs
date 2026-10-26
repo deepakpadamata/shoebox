@@ -58,6 +58,26 @@ pub fn decide(i: NotifyInput) -> Option<Notification> {
     })
 }
 
+/// The system notification for a security alert (R1-06): a new admin, or a replaced recovery
+/// phrase. Names the device only; never anything secret.
+pub fn security_notification(alert: &crate::types::SecurityAlert) -> Notification {
+    if alert.kind == "phrase_replaced" {
+        Notification {
+            title: "Recovery phrase replaced".into(),
+            body: "Your library's recovery phrase was replaced on another device. Open Shoebox if that was not you."
+                .into(),
+        }
+    } else {
+        Notification {
+            title: "New admin device".into(),
+            body: format!(
+                "\u{201c}{}\u{201d} became an admin of your library. Open Shoebox if that was not you.",
+                alert.device_name
+            ),
+        }
+    }
+}
+
 /// The in-app banner of mockup 5f: photos are at risk but nothing can be reached.
 pub fn paused_banner(at_risk: u32, peer_reachable: bool) -> Option<&'static str> {
     (at_risk > 0 && !peer_reachable)
@@ -67,6 +87,23 @@ pub fn paused_banner(at_risk: u32, peer_reachable: bool) -> Option<&'static str>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn security_notifications_name_the_device_and_nothing_secret() {
+        let alert = |kind: &str| crate::types::SecurityAlert {
+            kind: kind.into(),
+            device_id: "ab".repeat(32),
+            device_name: "Unknown tablet".into(),
+            at_ms: 1.0,
+            notified: false,
+        };
+        let n = security_notification(&alert("admin_added"));
+        assert_eq!(n.title, "New admin device");
+        assert!(n.body.contains("Unknown tablet"));
+        assert!(!n.body.contains(&"ab".repeat(32)), "no device ids");
+        let n = security_notification(&alert("phrase_replaced"));
+        assert_eq!(n.title, "Recovery phrase replaced");
+    }
 
     fn input() -> NotifyInput {
         NotifyInput {

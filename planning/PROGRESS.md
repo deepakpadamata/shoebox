@@ -133,7 +133,7 @@ Implementation status per issue. Assumptions made along the way are logged in
 | R1-03 Freeing space trusts a keeper copy | ✅ | a confirmed keeper copy is enough, like "backed up"; Storage screen and user guide say the same; A-064 settled. Storage wording not looked at in the app |
 | R1-04 Make this device an admin | ✅ | Devices → Make admin with the phrase; the new admin pairs and changes roles alone; others alert; checked in two dev instances |
 | R1-05 About screen, licences and source offer | ✅ | Settings → About (version, commit, AGPL source offer) and licence sheet, checked in a dev instance; `shoebox-keeper licences`; `scripts/licences.py` (+ CI check); source URL is the placeholder until R1-13 |
-| R1-06 Security alerts reach people when the app is closed | ⬜ | A-087, A-088 |
+| R1-06 Security alerts reach people when the app is closed | ✅ | Android worker notifies once (checked on the emulator with an injected alert), desktop notification when hidden (compiled, not seen: R1-08), keeper `status`/`alerts ack`. Also fixed: two concurrent moves to a new epoch could lose records (A-067), and three test races |
 | R1-07 How testers get updates | ⬜ |  |
 | R1-08 Run the desktop app on a real Mac | ⬜ | needs the owner: a Mac |
 | R1-09 Run Android on a physical phone | ⬜ | needs the owner: an Android phone |

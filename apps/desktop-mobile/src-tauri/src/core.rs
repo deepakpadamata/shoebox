@@ -391,6 +391,7 @@ impl AppCore {
                                 device_id: String::new(),
                                 device_name: String::new(),
                                 at_ms: now_ms() as f64,
+                                notified: false,
                             });
                         }
                         let _ = core.save();
@@ -411,6 +412,7 @@ impl AppCore {
                                     device_id: id,
                                     device_name: name,
                                     at_ms: now_ms() as f64,
+                                    notified: false,
                                 });
                             }
                             let _ = core.save();
@@ -673,6 +675,23 @@ impl AppCore {
         })?;
         let _ = pending.answer.send(accept);
         Ok(())
+    }
+
+    /// Alerts no system notification was shown for yet, marked as shown now (R1-06): the caller
+    /// shows them (Android's background worker, the desktop tray app with its window hidden).
+    pub fn take_unnotified_alerts(&self) -> Vec<crate::types::SecurityAlert> {
+        let taken: Vec<_> = {
+            let mut f = self.file.lock().unwrap();
+            let taken = f.alerts.iter().filter(|a| !a.notified).cloned().collect();
+            for a in f.alerts.iter_mut() {
+                a.notified = true;
+            }
+            taken
+        };
+        if !taken.is_empty() {
+            let _ = self.save();
+        }
+        taken
     }
 
     /// The person has seen the alert about this new admin device.

@@ -71,6 +71,7 @@ keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"], op
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-barcode-scanner = "2"

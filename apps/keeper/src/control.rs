@@ -85,6 +85,11 @@ async fn dispatch(shared: &Arc<Shared>, cmd: &str, req: &Value) -> Result<Value>
     match cmd {
         "status" => status::report(shared).await,
         "devices" => status::devices(shared).await,
+        "alerts" => Ok(json!({ "alerts": crate::alerts::load(&shared.opts.storage) })),
+        "alerts_ack" => {
+            crate::alerts::clear(&shared.opts.storage)?;
+            Ok(json!({}))
+        }
         "revoke" => {
             let id = req["device"]
                 .as_str()

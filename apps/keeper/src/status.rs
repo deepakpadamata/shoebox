@@ -94,6 +94,7 @@ pub(crate) async fn report(shared: &Shared) -> Result<Value> {
         peers.push(json!({ "id": hex::encode(d.device.0), "name": d.name, "path": path, "latency_ms": latency }));
     }
     out["paired"] = json!(true);
+    out["alerts"] = json!(crate::alerts::load(&shared.opts.storage));
     out["membership"] = json!(membership);
     out["library"] = json!({
         "id": hex::encode(ln.library_id().0),

@@ -272,8 +272,16 @@ fn run(
             eta_secs: None,
         })
         .map(|n| json!({ "title": n.title, "body": n.body }));
+        // Security alerts raised while syncing (a new admin, a replaced phrase): shown once each,
+        // whatever the backup reminder's 24-hour limit says (R1-06).
+        let security: Vec<_> = core
+            .take_unnotified_alerts()
+            .iter()
+            .map(crate::notify::security_notification)
+            .map(|n| json!({ "title": n.title, "body": n.body }))
+            .collect();
         core.shutdown().await?;
-        Ok(json!({ "backup": backup, "burst": burst, "notification": notification }))
+        Ok(json!({ "backup": backup, "burst": burst, "notification": notification, "security": security }))
     })
 }
 

@@ -21,6 +21,9 @@ background backup timing is up to the OS.
 - Checklist: join by QR, camera-roll backup with Wi-Fi/charging rules, backup with the app closed (WorkManager), a notification,
   keystore surviving a restart, gestures, a 5k-photo library's memory use.
 
+- Found on the emulator (R1-06): onboarding is not phone-aware: "Add this **computer** to an existing library", the name
+  placeholder "MacBook Pro" and Keeper as the default role on a phone. Fix while here.
+
 ## Acceptance criteria
 
 - [ ] Checklist ticked or filed.

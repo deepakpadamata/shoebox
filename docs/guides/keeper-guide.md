@@ -57,6 +57,7 @@ back up the 24-word recovery phrase separately.
 | Command | Use |
 |---|---|
 | `status [--json]` | what the keeper holds and who it talks to |
+| `alerts` / `alerts ack` | security alerts: a new admin device, or a replaced recovery phrase; `status` shows them first until you `ack` |
 | `devices` / `devices revoke <id>` | list devices, remove one (the keeper must be an admin; admin devices themselves are removed from the app with the recovery phrase) |
 | `address` | the link another device needs to recover through this keeper |
 | `album list` / `album join <invitation>` / `album keep <id>` / `album drop <id>` | shared albums the keeper is in; `keep` makes it hold every original of an album |

@@ -106,7 +106,9 @@ Everything here was tested on loopback or in a browser on one machine.
   is parsed at open (a bad URL fails fast) but not contacted until used. `peer_info` classifies the in-use addresses
   (private/link-local/loopback → LAN, other IPs → Direct, else Relay) and reports the last ping RTT and last connection time.
   mDNS between two nodes on this machine is tested; **not verified:** with the internet physically unplugged, and the manual
-  "relay → direct after hole punching" check (needs two real networks).
+  "relay → direct after hole punching" check (needs two real networks). Seen once (2026-10-26): `discovery::peer_info_reports_path_latency_and_last_seen`
+  failed its "loopback counts as LAN" check while the Android emulator was shutting down its virtual network interfaces; 15 runs
+  in a row passed afterwards. Not investigated further; watch for it in CI.
 - **A-062 · M2-04** · Pairing as built: ticket = `{inviter addr, 32-byte secret, expiry, role}` (`shoebox-pair1` + hex + checksum, same shape as the library ticket; this string is what a QR
   encodes). The secret authenticates the exchange (keyed-BLAKE3 proof over both ids and a joiner nonce; the ticket is found by a key-derived 8-byte id); the six-digit code is a keyed hash of
   secret, ids and both nonces — people compare it, and *either* side declining aborts before anything is written. The inviter consumes the ticket on a valid proof (single use), expiry
@@ -173,6 +175,14 @@ Accepted for now; for the external review and the beta.
   Limits: a device two rotations behind cannot chain notices (it rejects a notice whose `old` is not its epoch); holdings of other devices disappear until republished (the fetcher republishes on fetch only —
   a periodic republish is not implemented); apps must persist the new capability (`NodeEvent::LibraryRotated`: done for the keeper and `shoebox-dev run`); iroh-docs albums have a real bearer capability and are
   **not** rotated here (M5). Presence topics derive from the identity id so presence survives rotation. Measured: a 100k-record rotation takes 1.2 s in a release build and loses nothing (ignored test).
+  **Found 2026-10-27 (while finishing R1-06):** a member that came back often got the same notice from two devices at once
+  (one pushing it, another handing on the one it keeps), and both deliveries moved the store concurrently. The second
+  "moved" from the new epoch into itself, building the replica in the directory it then deleted as the old one, which could
+  drop records it had not carried (seen as a member missing a photo written before the rotation, about 1 run in 40 under
+  load, with "No such file or directory" and a "bad signature" rejection in the logs). Fix: epoch changes on a node run one
+  at a time (`epoch_lock`, each re-checking whether it already moved) and the Loro store refuses to move into the epoch it
+  is in. Test: `rotation.rs::the_same_notice_twice_at_once_moves_a_member_once` (fails 10 of 10 without the fix); the
+  rotation tests then passed 80 runs in parallel pairs.
 - **A-078 · M5 trust model** · A shared album is an iroh-docs namespace; its capability is the key. A *viewer* gets the read capability, so viewers truly cannot write. *Owner* and *contributor* both receive the write capability, so on every replica they are told apart only by the membership entries, which any writer could forge: a hostile contributor could rename the album, add a fake owner or delete entries. The product assumes people you invite to contribute are not hostile (the same as handing someone a shared folder with write access). Removing a member (A-081) is the repair; a fake owner entry cannot be used to move the album away (members follow only the inviter they joined through, since 2026-10-26). Invitations are enforced at the inviter: each has its own random secret, used once and for its expiry (`shared-albums.json` keeps them); a joiner that was refused cannot fetch the album's content from the inviter, but the namespace capability inside the ticket is itself a bearer secret, so an interceptor who is *faster* than the intended person still wins. Expiry is also checked by the joiner.
 - **A-079 · M5 connection gate** · A device with a library accepts only device-list peers (M2-03). Shared albums need strangers, so the gate lets three things through for anyone: pairing/recovery (as before), iroh-docs sync and gossip (guarded by the namespace capability, and the library itself no longer lives in docs), and the new `shoebox/album/0` handshake. Blob transfer (`/iroh-bytes`) is open only to *album peers*: members of an album this device is in, plus a joiner that presented a valid invitation in the last 30 minutes (until 2026-10-26 such a joiner kept blob access for good, even if it never became a member; now only members with an entry and recorded viewers count after the window, and the owner can remove a joiner that never wrote an entry). An album peer can fetch any blob whose hash it knows (hashes are unguessable and only appear in albums it can read), not just album blobs. When someone leaves the albums their open blob connections are closed. Docs sync also fetches entry content over the blob protocol, which is why a joiner needs the guest window.
 
@@ -202,8 +212,14 @@ Accepted for now; for the external review and the beta.
   raises `NodeEvent::AdminAdded` for an admin it has not seen before; the app shows a red banner ("X became an admin of your library…
   remove it in Devices") until dismissed, persisted in `app.json`; the keeper logs it. A device starts alerting after its first finished
   sync (the creator at once), so admins that existed before it joined do not alert on it; an admin let in on this device does not alert
-  here. Not done: a system notification when the app is closed (the alert waits for the next launch); the keeper `status` does not list
-  alerts; pairing a new non-admin device does not alert (it needs a ticket from inside). Root rotation followed (A-088). Tested:
+  here. Since R1-06 alerts also reach people with the app closed: Android's background worker posts each new one once on a
+  "Security" notification channel, the desktop app shows a system notification when its window is hidden, and the keeper
+  lists them in `status` until `shoebox-keeper alerts ack` (`alerts.json`). Each alert carries a `notified` mark, so a
+  notification is shown once while the banner stays until dismissed. Checked on the Android emulator (an unnotified
+  alert placed in `app.json`, the app closed, the worker run by hand): posted once on the "security" channel at high
+  importance, not again on the next run. Not verified: alerts produced live on Android (the Rust tests cover that) and the
+  desktop notification in a real window (R1-08). Not done: pairing a new non-admin device does
+  not alert (it needs a ticket from inside). Root rotation followed (A-088). Tested:
   `recovery.rs::a_recovery_waits_for_approval_on_the_member`, `recovery.rs::other_members_alert_on_a_new_admin_but_not_on_old_ones`
   (fails if a device alerts before its first sync), `core.rs::a_recovery_through_this_app_asks_first`; checked by hand in three dev
   instances (approve, refuse, alert, dismiss).

@@ -1,10 +1,13 @@
 //! Safe "free up space" (M2-08): drop this device's copy of an original only when enough *other*
 //! devices really hold it.
 //!
-//! "Really hold" means two things: the replicated holdings list them (at least the redundancy
-//! target many, counting only originals on other devices) **and** at least one of them answered a
-//! `shoebox/has/0` probe for that blob within the last 7 days. Pinned originals and blobs that a
-//! shared album still references are never freed. Keepers never free space.
+//! "Really hold" means either of two things, each confirmed: other devices' originals number at
+//! least the redundancy target (counting only originals on other devices) and at least one of
+//! them answered a `shoebox/has/0` probe for that blob within the last 7 days; **or** a keeper (a
+//! certified, non-revoked device with the Keeper role) holds the original and itself answered such
+//! a probe within 7 days. The second is the same rule as "backed up" (a keeper is the backstop),
+//! so a photo the app shows as backed up can also be freed (R1-03). Pinned originals and blobs
+//! that a shared album still references are never freed. Keepers never free space.
 
 use crate::addr::to_iroh_id;
 use crate::blobs::{BlobStore, Protection};
@@ -205,7 +208,18 @@ impl<L: LibraryStore> LibraryNode<L> {
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?;
 
-        let mut candidates: Vec<(PhotoId, u64, Vec<EndpointId>)> = vec![];
+        let keepers: HashSet<EndpointId> = self
+            .store()
+            .device_list()
+            .await?
+            .devices
+            .iter()
+            .filter(|d| d.role == Role::Keeper && !d.revoked)
+            .map(|d| d.device)
+            .collect();
+
+        // (photo, size, other holders, enough of them for the target)
+        let mut candidates: Vec<(PhotoId, u64, Vec<EndpointId>, bool)> = vec![];
         for rec in &photos {
             let hash = rec.original.hash;
             let Some(size) = self.node().blobs().size(&hash).await? else {
@@ -229,14 +243,15 @@ impl<L: LibraryStore> LibraryNode<L> {
                 .filter(|h| h.kind == BlobKind::Original && h.device != me)
                 .map(|h| h.device)
                 .collect();
-            if others.len() >= target.max(1) {
-                candidates.push((rec.id, size, others));
+            let enough = others.len() >= target.max(1);
+            if enough || others.iter().any(|d| keepers.contains(d)) {
+                candidates.push((rec.id, size, others, enough));
             }
         }
 
         // Confirm with each holder that it really has what it claims.
         let mut by_holder: HashMap<EndpointId, Vec<Blake3Hash>> = HashMap::new();
-        for (id, _, others) in &candidates {
+        for (id, _, others, _) in &candidates {
             for d in others {
                 by_holder.entry(*d).or_default().push(*id);
             }
@@ -249,8 +264,15 @@ impl<L: LibraryStore> LibraryNode<L> {
         let confirmations = self.inner.confirmations.lock().unwrap();
         Ok(candidates
             .into_iter()
-            .filter(|(id, _, others)| others.iter().any(|d| confirmations.fresh(d, id, now)))
-            .map(|(id, size, _)| (id, size))
+            .filter(|(id, _, others, enough)| {
+                let confirmed = |d: &&EndpointId| confirmations.fresh(d, id, now);
+                (*enough && others.iter().any(|d| confirmed(&d)))
+                    || others
+                        .iter()
+                        .filter(|d| keepers.contains(d))
+                        .any(|d| confirmed(&d))
+            })
+            .map(|(id, size, _, _)| (id, size))
             .collect())
     }
 

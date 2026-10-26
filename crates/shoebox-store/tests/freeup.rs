@@ -147,6 +147,13 @@ async fn dry_run_and_real_run_agree_and_pins_are_kept() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn too_few_other_copies_means_nothing_is_freed() {
     let (c, nodes, _, _) = rig(1).await; // one other copy, target 2
+                                         // That holder is no keeper (a keeper's copy alone is enough, see below): make it a phone. It
+                                         // keeps the originals it already fetched.
+    let holder = core_id(&c, 1);
+    nodes[0]
+        .set_device_role(&holder, Role::Phone)
+        .await
+        .unwrap();
     assert!(nodes[0]
         .free_up_space(true)
         .await
@@ -155,6 +162,31 @@ async fn too_few_other_copies_means_nothing_is_freed() {
         .is_empty());
     nodes[0].set_redundancy_target(1).await.unwrap();
     assert_eq!(nodes[0].free_up_space(true).await.unwrap().photos.len(), 3);
+    c.shutdown().await;
+}
+
+/// R1-03: one keeper that confirms it holds the originals is enough, whatever the target: the
+/// same rule as "backed up". Without its confirmation nothing is freed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn one_confirmed_keeper_copy_is_enough() {
+    let (c, nodes, _, bytes) = rig(1).await; // one keeper, target 2
+    let dry = nodes[0].free_up_space(true).await.unwrap();
+    assert_eq!((dry.photos.len(), dry.bytes), (3, bytes));
+    // The keeper stays away past the confirmation's 7 days: nothing any more.
+    c.take_offline(1);
+    c.clock().advance(8 * DAY);
+    assert!(nodes[0]
+        .free_up_space(true)
+        .await
+        .unwrap()
+        .photos
+        .is_empty());
+    assert!(nodes[0]
+        .free_up_space(false)
+        .await
+        .unwrap()
+        .photos
+        .is_empty());
     c.shutdown().await;
 }
 

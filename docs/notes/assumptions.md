@@ -250,18 +250,6 @@ Behaviour that will come back as features or needs a decision.
 
 - **A-014 · M0-05** · `OrSet` keeps removed tags forever (grow-only). Compaction is deferred; at personal-album
   scale this is small. `Lww` equal-HLC/different-value ties (impossible in practice) resolve by value.
-- **A-064 · M2-08** · Free-up's "≥ target copies elsewhere" is implemented literally: other devices' *originals* (replicated holdings, excluding
-  this device) must number at least the redundancy target (default 2) **and** at least one of those holders answered a `shoebox/has/0` probe for
-  that blob within 7 days (confirmations persist in `holder-confirmations.json`; a holder that denies a hash is forgotten for it). Free-up probes
-  holders itself, in dry runs too, so both runs agree. Pinned originals, blobs a shared album still references, and keepers (error) are excluded.
-  A real run releases the library/pin protection and retracts holdings; the bytes disappear when the blob store's GC runs (reported bytes = sizes
-  of the blobs released). A phone does not re-fetch freed originals only because its fetcher policy wants originals of pinned or own below-target
-  photos, and freed photos have enough other copies; revisit if a pin/own policy ever overrides that.
-  **Out of step with "backed up" since commit e72a2d9:** the at-risk count and each photo's `backed_up` flag treat one keeper holding the
-  original as enough, whatever the target, but free-up still counts copies only (`others.len() >= target` in
-  `crates/shoebox-node/src/freeup.rs`). So a photo on a phone and one keeper shows as backed up yet cannot be freed until the target is lowered
-  to 1 or a third device holds it. The user guide describes this free-up rule ("at least two other devices"). Decide whether a confirmed keeper
-  copy should also be enough to free space.
 - **A-068 · A-060 closed** · Recovery without any capability: `Node::recover(link, phrase, role, name, now)` dials a surviving member on `shoebox/recover/0` (open to unlisted devices, like pairing). The member
   sends a challenge (nonce + the library's identity id), the device answers with a root-key signature over nonce/its id/identity plus an admin cert and a device cert for itself signed with the root key; the
   member checks the key is the library's root key and both certs chain to it, lists the device (as admin) and returns the current library capability. A wrong phrase changes nothing; failures are rate limited
@@ -451,6 +439,18 @@ Not open questions, but they must be honoured by any format or protocol change, 
   the kit does not contain the library's *space capability*, so a device that lost everything cannot yet fetch data; this needs a root-proof handshake in which a surviving
   member/keeper hands the capability to a device that signs a challenge with the root key — scheduled with the pairing protocol (M2-04). `recovery_kit_saved` is the
   replicated setting `recovery_kit_saved` (`[1]`).
+- **A-064 · M2-08** · Free-up's "≥ target copies elsewhere" is implemented literally: other devices' *originals* (replicated holdings, excluding
+  this device) must number at least the redundancy target (default 2) **and** at least one of those holders answered a `shoebox/has/0` probe for
+  that blob within 7 days (confirmations persist in `holder-confirmations.json`; a holder that denies a hash is forgotten for it). Free-up probes
+  holders itself, in dry runs too, so both runs agree. Pinned originals, blobs a shared album still references, and keepers (error) are excluded.
+  A real run releases the library/pin protection and retracts holdings; the bytes disappear when the blob store's GC runs (reported bytes = sizes
+  of the blobs released). A phone does not re-fetch freed originals only because its fetcher policy wants originals of pinned or own below-target
+  photos, and freed photos have enough other copies; revisit if a pin/own policy ever overrides that.
+  **Brought in line with "backed up" by R1-03 (2026-10-26):** an original is also freeable when a certified, non-revoked
+  keeper holds it and that keeper itself answered the `has` probe within 7 days, whatever the target (`freeup.rs`). Before,
+  a photo on a phone and one keeper showed as backed up but could not be freed. Tested: Loro
+  `freeup.rs::one_confirmed_keeper_copy_is_enough` (fails without the rule); the "too few copies" test now uses a holder
+  that is no keeper. The docs-backend tests have no certificates, so no keeper, and test only the copy-count rule.
 - **A-071 · M3-03** · TypeScript bindings come from `ts-rs` (`#[ts(export)]` on the shared types, written to `ui/src/bindings` by `cargo test`, `git diff --exit-code` in CI) instead of `tauri-specta`:
   the command surface is one generic `command(name, args)` shared with the HTTP bridge, which specta's per-command generation does not fit. Argument shapes are checked at run time (`commands.rs`
   `arg`/`opt`), results are typed on the TS side. A mismatch in a *result* type fails the build; a mismatch in an *argument* only fails when called. 64-bit numbers cross as JSON numbers

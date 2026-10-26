@@ -71,7 +71,7 @@
         <p class="small">You can free <b>{bytes(health.can_free_bytes)}</b> by removing the originals of {plural(health.can_free_photos, 'photo')} from this device. Each one is safe on other devices that confirmed they have it; previews stay here.</p>
         <Button kind="primary" onclick={() => (confirm = true)}>Free up {bytes(health.can_free_bytes)}…</Button>
       {:else}
-        <p class="small muted">Nothing can be freed right now. Originals are only removed from this device when enough other devices confirmed holding them in the last week, and never ones you pinned. Keepers never free space.</p>
+        <p class="small muted">Nothing can be freed right now. An original is only removed from this device when a keeper, or enough other devices, confirmed holding it in the last week, and never one you pinned. Keepers never free space.</p>
       {/if}
     </div>
   {:else}

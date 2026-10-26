@@ -27,7 +27,8 @@ it holds counts as backed up. A photo only on a phone is one lost phone away fro
 how many photos are in that state and when they will be safe.
 
 **Photos are only ever deleted by you.** *Delete* moves a photo to Recently Deleted for 30 days on every
-device. Freeing space on a phone removes only originals that at least two other devices confirmed holding.
+device. Freeing space on a phone removes only originals that a keeper, or at least two other devices, confirmed holding
+in the last week: the same rule as "backed up".
 
 ## First run
 

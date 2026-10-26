@@ -18,8 +18,8 @@ device, you remove it from another one.
 | Viewer | previews only, never originals | a family tablet |
 
 A role is not forever: *Devices → Role* next to a device changes it, for example when an old laptop becomes the
-keeper. It takes an admin device (the first phone and the first computer are), or your recovery phrase from any
-other device. The device switches as soon as it hears about the change.
+keeper. It takes an admin device (the one you created the library on, and any device restored with the
+recovery phrase), or your recovery phrase from any other device. The device switches as soon as it hears about the change.
 
 **Copy count is the number to watch.** Every photo shows how many devices hold its original. The goal is
 two or more (you can change it in Settings), **or one copy on a keeper**: a keeper is the backstop, so a photo
@@ -61,8 +61,8 @@ device. Freeing space on a phone removes only originals that at least two other 
 ## When something goes wrong
 
 * **A device was lost or stolen.** On another device: *Devices → Remove* next to it. The remaining devices
-  move to a new library space the lost device cannot read. If the lost device was an **admin** (the first
-  phone and the first computer are), or you remove it from a device that is not one, you are asked for your
+  move to a new library space the lost device cannot read. If the lost device was an **admin** (the one
+  you created the library on is), or you remove it from a device that is not one, you are asked for your
   24-word recovery phrase: that way a thief holding an admin device cannot remove you instead.
 * **All devices were lost.** Install Shoebox, choose *I lost my devices*, enter the 24 words and the link of
   any device that still has the library. (A keeper prints its link with `shoebox-keeper address`.) If that

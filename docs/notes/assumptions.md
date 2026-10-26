@@ -192,8 +192,8 @@ Accepted for now; for the external review and the beta.
   makes it one so it can sign the rotation. In the app, removing an admin device, or removing any device from a device that is no admin,
   asks for the phrase; an admin removing an ordinary device does not. A member that already followed the thief's rotation switches to the
   real one when that notice revokes, with the root key, the admin whose notice it followed (`accept_notice`); members that know an admin is
-  revoked or expired refuse its notices. Costs and limits: removing a stolen *admin* phone needs the recovery phrase (the first phone and the
-  first desktop are admins). Devices an admin had certified briefly have no valid cert on a member that took the thief's epoch, until it
+  revoked or expired refuse its notices. Costs and limits: removing a stolen *admin* device needs the recovery phrase (admins are the device
+  that created the library and devices restored or acting with the phrase; pairing never makes one, A-062). Devices an admin had certified briefly have no valid cert on a member that took the thief's epoch, until it
   syncs the root's re-signed certs from the real admin. An admin whose admin cert *expired* can still backdate certs to before the expiry
   (no flow sets `expires_at` today). Data written before this change in which an admin revoked another admin now reads as not revoked
   (nothing has been released). Tested: `identity.rs::a_stolen_admin_cannot_backdate_its_way_back`, and

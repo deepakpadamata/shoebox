@@ -95,6 +95,19 @@ pub enum NodeEvent {
     },
     /// This device's own revocation reached it: it no longer belongs to the library.
     RemovedFromLibrary,
+    /// A device rejoined the library with the recovery phrase through this one (after approval,
+    /// where this device asks). It is now an admin.
+    RecoveryJoined {
+        device: shoebox_core::ids::EndpointId,
+        name: String,
+    },
+    /// A device became an admin of the library that this device had not seen as one before
+    /// (it can add and remove devices). Raised on every device once it has synced at least
+    /// once, so a new admin made with a leaked recovery phrase does not go unnoticed.
+    AdminAdded {
+        device: shoebox_core::ids::EndpointId,
+        name: String,
+    },
     /// This device's certified role changed (an admin or the recovery phrase changed it); the
     /// node already follows it. Persist it where the app keeps its settings.
     RoleChanged {

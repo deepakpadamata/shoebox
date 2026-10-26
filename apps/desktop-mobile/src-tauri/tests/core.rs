@@ -552,3 +552,62 @@ async fn the_app_adopts_a_library_made_by_the_dev_tool() {
         .await
         .is_err());
 }
+
+/// Rejoining with the recovery phrase through this app waits for its person: the question shows
+/// in the app state, "Allow" lets the device in (and raises no alert, it was approved here),
+/// "Refuse" leaves the other app without a library.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recovery_through_this_app_asks_first() {
+    let (da, db, dc) = (
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    let a = open(da.path()).await;
+    let created = a.create_library("MacBook", "keeper").await.unwrap();
+    let link = a.device_link();
+
+    let b = open(db.path()).await;
+    let (b2, link2, phrase2) = (b.clone(), link.clone(), created.phrase.clone());
+    let joining = tokio::spawn(async move { b2.recover(&link2, &phrase2, "Laptop").await });
+    assert!(
+        wait(20, || async {
+            a.app_state().await.unwrap().recovery_request.is_some()
+        })
+        .await,
+        "the question reaches the app"
+    );
+    let q = a.app_state().await.unwrap().recovery_request.unwrap();
+    assert_eq!(
+        (q.device_name.as_str(), q.role.as_str()),
+        ("Laptop", "keeper")
+    );
+    a.answer_recovery(true).unwrap();
+    joining.await.unwrap().unwrap();
+    assert!(b.app_state().await.unwrap().has_library);
+    let st = a.app_state().await.unwrap();
+    assert!(st.recovery_request.is_none());
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        a.app_state().await.unwrap().alerts.is_empty(),
+        "no alert for a device let in here"
+    );
+
+    let c = open(dc.path()).await;
+    let (c2, link3, phrase3) = (c.clone(), link.clone(), created.phrase.clone());
+    let refused = tokio::spawn(async move { c2.recover(&link3, &phrase3, "Unknown").await });
+    assert!(
+        wait(20, || async {
+            a.app_state().await.unwrap().recovery_request.is_some()
+        })
+        .await
+    );
+    a.answer_recovery(false).unwrap();
+    let err = refused.await.unwrap().unwrap_err();
+    assert!(format!("{err:#}").contains("not approved"), "{err:#}");
+    assert!(!c.app_state().await.unwrap().has_library);
+    assert!(
+        a.answer_recovery(true).is_err(),
+        "nothing is waiting any more"
+    );
+}

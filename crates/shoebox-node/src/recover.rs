@@ -12,10 +12,15 @@
 //!
 //! Only the holder of the root key can pass step 4, so nothing secret is exchanged in the clear
 //! and a wrong phrase changes nothing on the member. Failed attempts are rate limited.
+//!
+//! A phrase can leak, so before step 4's records are written a member with a screen asks its
+//! person to approve ([`LibraryNode::set_recovery_approval`]); a headless member (a keeper)
+//! cannot ask and lets it through. Either way [`NodeEvent::RecoveryJoined`] reports it, and every
+//! device alerts on the new admin ([`NodeEvent::AdminAdded`]).
 
 use crate::addr::{from_endpoint_addr, from_iroh_id, to_endpoint_addr};
 use crate::library_node::{Inner, LibraryNode};
-use crate::node::{Node, RECOVER_ALPN};
+use crate::node::{Node, NodeEvent, RECOVER_ALPN};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use futures::future::BoxFuture;
 use iroh::endpoint::Connection;
@@ -39,6 +44,22 @@ const PREFIX: &str = "shoebox-peer1";
 const MAX_FAILED_PER_MINUTE: usize = 10;
 const MAX_MESSAGE: usize = 1 << 20;
 const STEP_TIMEOUT: Duration = Duration::from_secs(20);
+/// How long a member waits for its person to approve a recovery.
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
+/// The whole exchange, as seen from either side: two steps plus the approval.
+const RECOVERY_TIMEOUT: Duration = Duration::from_secs(20 * 3 + 120);
+
+/// Someone is rejoining the library with the recovery phrase through this device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecoveryRequest {
+    pub device: EndpointId,
+    /// The name the device asks for (chosen by whoever holds the phrase; at most 64 characters).
+    pub name: String,
+    pub role: Role,
+}
+
+/// Asks this device's person whether to let a recovery through: `true` = allow.
+pub type RecoveryDecideFn = Arc<dyn Fn(RecoveryRequest) -> BoxFuture<'static, bool> + Send + Sync>;
 
 /// How to reach one device: what a surviving device shows so a recovering one can find it.
 /// Contains no secret.
@@ -159,7 +180,7 @@ impl<L: LibraryStore> crate::ext::ConnHandler for Responder<L> {
             };
             let (mut send, mut recv) = conn.accept_bi().await?;
             let result = tokio::time::timeout(
-                STEP_TIMEOUT,
+                RECOVERY_TIMEOUT,
                 serve(&ln, &failed, &conn, &mut send, &mut recv),
             )
             .await
@@ -195,7 +216,7 @@ async fn serve<L: LibraryStore>(
         failed.lock().unwrap().record(peer, now);
         anyhow!("{why}")
     };
-    let ToMember::Hello = read_msg(recv).await? else {
+    let ToMember::Hello = step(read_msg(recv)).await? else {
         return Err(fail("expected hello"));
     };
     let cap = ln.capability()?;
@@ -209,7 +230,7 @@ async fn serve<L: LibraryStore>(
         signature,
         admin,
         device: cert,
-    } = read_msg(recv).await?
+    } = step(read_msg(recv)).await?
     else {
         return Err(fail("expected proof"));
     };
@@ -234,7 +255,21 @@ async fn serve<L: LibraryStore>(
     {
         return Err(fail("recovery proof rejected"));
     }
-    // The proof holds: list the device (as an admin) so it can connect and sync.
+    // The proof holds, but the phrase may have leaked: ask, when there is someone to ask.
+    let name: String = cert.name.chars().take(64).collect();
+    let decide = ln.inner.recovery_approval.lock().unwrap().clone();
+    if let Some(decide) = decide {
+        let request = RecoveryRequest {
+            device,
+            name: name.clone(),
+            role: cert.role,
+        };
+        let allowed = tokio::time::timeout(APPROVAL_TIMEOUT, decide(request))
+            .await
+            .unwrap_or(false);
+        ensure!(allowed, "the recovery was not approved on that device");
+    }
+    // List the device (as an admin) so it can connect and sync.
     ln.store()
         .apply_device_change(SignedDeviceChange::Admin(admin))
         .await?;
@@ -249,7 +284,16 @@ async fn serve<L: LibraryStore>(
         },
     )
     .await?;
+    tracing::warn!("{name} rejoined the library with the recovery phrase through this device");
+    ln.node().emit(NodeEvent::RecoveryJoined { device, name });
     Ok(())
+}
+
+/// One message exchange of the handshake, bounded so a silent peer cannot hold it open.
+async fn step<T>(read: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+    tokio::time::timeout(STEP_TIMEOUT, read)
+        .await
+        .map_err(|_| anyhow!("timed out"))?
 }
 
 impl<L: LibraryStore> LibraryNode<L> {
@@ -259,6 +303,12 @@ impl<L: LibraryStore> LibraryNode<L> {
             failed: Arc::default(),
         });
         *self.node().recover_slot().lock().unwrap() = Some(responder);
+    }
+
+    /// Ask before letting a recovery through this device (`None`: let it through, as a device
+    /// without a screen must). Answer within two minutes or the recovery is refused.
+    pub fn set_recovery_approval(&self, decide: Option<RecoveryDecideFn>) {
+        *self.inner.recovery_approval.lock().unwrap() = decide;
     }
 
     /// How a recovering device can reach this one.
@@ -320,7 +370,7 @@ impl Node {
             conn.close(0u32.into(), b"done");
             Ok::<RecoverGrant, anyhow::Error>(grant)
         };
-        let grant = tokio::time::timeout(STEP_TIMEOUT, run)
+        let grant = tokio::time::timeout(RECOVERY_TIMEOUT, run)
             .await
             .map_err(|_| anyhow!("timed out"))??;
         ensure!(

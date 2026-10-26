@@ -62,6 +62,7 @@ Messages that are relayed or stored and trusted later need their own signature.
 | F12 | Dev HTTP bridge reachable from web pages (cross-site POST, DNS rebinding) | **Fixed** for the dev tool (see F3) |
 | F13 | Anyone who presented a valid invitation kept blob access permanently and could not be removed if they never wrote a membership entry | **Fixed**: after the 30-minute window only members with an entry and recorded viewers pass the blob gate; the owner can remove a joiner (A-079) |
 | F14 | Pairing and recovery failure limits were global, so any stranger could keep both refused for everyone | **Fixed**: counted per remote device (the secrets cannot be guessed, so the limit only caps wasted work) |
+| F16 | A leaked recovery phrase let anyone with a surviving device's link join silently as an admin (the root key cannot be rotated) | **Mitigated**: devices with a screen ask before letting a recovery in, and every device alerts on a new admin until the person dismisses it (A-087). A keeper still lets recoveries through (no screen), but the others alert. Root rotation is planned |
 | F15 | The album handshake and doc-digest handlers (open to outsiders) waited without limit for the peer to close | **Fixed**: 5 s cap, also on ping and has |
 | — | Album invitation secrets are compared with `==`, not in constant time | Accepted: 128-bit random secrets, single use |
 

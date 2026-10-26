@@ -44,6 +44,6 @@ pub use node::{
 };
 pub use pairing::{DecideFn, PairGrant, PairTicket, PairingCode};
 pub use presence::{DeviceStatus, PresenceConfig};
-pub use recover::{PeerLink, RecoverGrant};
+pub use recover::{PeerLink, RecoverGrant, RecoveryDecideFn, RecoveryRequest};
 pub use sync::{SyncConfig, SyncPhase};
 pub use ticket::{LibraryTicket, TicketError};

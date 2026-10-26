@@ -35,6 +35,21 @@
   let busy = $state(false);
   let kitOpen = $state(false);
   let kitDismissed = $state(false);
+  const alert = $derived(app.state?.alerts.at(-1));
+  const recovery = $derived(app.state?.recovery_request ?? null);
+  let answering = $state(false);
+  async function answerRecovery(accept: boolean) {
+    answering = true;
+    try {
+      await api.answerRecovery(accept);
+      toast(accept ? 'The device was let in' : 'The recovery was refused');
+    } catch (e) {
+      fail(e);
+    } finally {
+      answering = false;
+    }
+  }
+  const when = (ms: number) => new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   let albumName = $state('');
   let renameOpen = $state(false);
   let renameTo = $state('');
@@ -116,6 +131,8 @@
 
     {#if app.removed || app.state?.membership === 'removed'}
       <div class="banners"><Banner tone="risk" icon="⛔">This device was removed from the library. It no longer syncs; your photos on it stay until you delete them.</Banner></div>
+    {:else if alert}
+      <div class="banners"><Banner tone="risk" icon="🛡" action="Review" onaction={() => go('devices')} ondismiss={() => api.dismissAlert(alert.device_id).catch(fail)}><b>{alert.device_name}</b> became an admin of your library ({when(alert.at_ms)}). If that was not you, someone may have your recovery phrase: remove that device in Devices.</Banner></div>
     {:else if atRisk > 0 && sec !== 'health'}
       <div class="banners"><Banner tone="risk" action="View" onaction={() => go('health')}><b>{plural(atRisk, 'photo')}</b> {atRisk === 1 ? 'is' : 'are'} not backed up on enough devices yet.</Banner></div>
     {:else if app.state && !app.state.recovery_kit_saved && !kitDismissed}
@@ -159,6 +176,17 @@
 
 <Sheet open={kitOpen} title="Recovery kit" onclose={() => (kitOpen = false)} width={520}>
   <RecoveryKit onsaved={() => (kitOpen = false)} />
+</Sheet>
+
+<Sheet open={!!recovery} title="Let this device in?" onclose={() => answerRecovery(false)} width={420}>
+  {#if recovery}
+    <div class="stack">
+      <p class="small">Someone is rejoining your library with your recovery phrase, through this device, as <b>{recovery.device_name}</b> ({recovery.role}). It would become an admin and see every photo.</p>
+      <p class="small muted">Only allow this if it is you, setting up a device right now. If it is not, your recovery phrase is known to someone else.</p>
+      <Button kind="primary" block disabled={answering} onclick={() => answerRecovery(true)}>Allow</Button>
+      <Button kind="danger" block disabled={answering} onclick={() => answerRecovery(false)}>Refuse</Button>
+    </div>
+  {/if}
 </Sheet>
 
 <style>

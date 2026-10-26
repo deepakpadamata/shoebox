@@ -64,6 +64,9 @@ impl AppOptions {
 struct AppFile {
     device_name: String,
     role: Option<String>,
+    /// Unacknowledged new-admin alerts (see `SecurityAlert`).
+    #[serde(default)]
+    alerts: Vec<crate::types::SecurityAlert>,
     /// `LibraryTicket` text: the library capability plus first peers.
     ticket: Option<String>,
     relay: Option<String>,
@@ -155,6 +158,12 @@ enum PairingSlot {
 
 type PendingAnswer = Mutex<PairingSlot>;
 
+/// A recovery through this device waiting for its person's answer.
+struct PendingRecovery {
+    question: crate::types::RecoveryQuestion,
+    answer: oneshot::Sender<bool>,
+}
+
 pub struct AppCore {
     dir: PathBuf,
     opts: AppOptions,
@@ -164,6 +173,9 @@ pub struct AppCore {
     file: Mutex<AppFile>,
     events: broadcast::Sender<AppEvent>,
     pending_pairing: PendingAnswer,
+    pending_recovery: Mutex<Option<PendingRecovery>>,
+    /// Devices this person let in through a recovery here: no alert for those.
+    approved_recoveries: Mutex<Vec<shoebox_core::ids::EndpointId>>,
     pub(crate) photo_source: Mutex<Option<Arc<dyn crate::photos_source::PhotoSource>>>,
     pub(crate) backup: tokio::sync::Mutex<crate::backup::BackupState>,
     pub(crate) backup_running: tokio::sync::Mutex<()>,
@@ -224,6 +236,8 @@ impl AppCore {
             file: Mutex::new(file),
             events,
             pending_pairing: Mutex::new(PairingSlot::Idle),
+            pending_recovery: Mutex::new(None),
+            approved_recoveries: Mutex::new(vec![]),
             photo_source: Mutex::new(None),
             backup: tokio::sync::Mutex::new(backup_state),
             backup_running: tokio::sync::Mutex::new(()),
@@ -341,6 +355,26 @@ impl AppCore {
                         Some(AppEvent::PairingFailed { reason })
                     }
                     NodeEvent::RemovedFromLibrary => Some(AppEvent::RemovedFromLibrary),
+                    NodeEvent::AdminAdded { device, name } => {
+                        let approved_here =
+                            core.approved_recoveries.lock().unwrap().contains(&device);
+                        if approved_here {
+                            None
+                        } else {
+                            let id = hex::encode(device.0);
+                            {
+                                let mut f = core.file.lock().unwrap();
+                                f.alerts.retain(|a| a.device_id != id);
+                                f.alerts.push(crate::types::SecurityAlert {
+                                    device_id: id,
+                                    device_name: name,
+                                    at_ms: now_ms() as f64,
+                                });
+                            }
+                            let _ = core.save();
+                            Some(AppEvent::SecurityChanged)
+                        }
+                    }
                     NodeEvent::RoleChanged { role } => {
                         // The node already follows it; keep it for the next start.
                         core.file.lock().unwrap().role = Some(role_name(role).into());
@@ -412,6 +446,9 @@ impl AppCore {
             ln.add_peer(peer.clone())?;
         }
         ln.enforce_membership().await?;
+        // Ask before letting a recovery through. With nobody to answer (the headless Android
+        // worker) the question times out and the recovery is refused.
+        ln.set_recovery_approval(Some(self.recovery_decider()));
         if self.opts.background {
             ln.start_fetcher(FetcherConfig::default());
             ln.start_maintenance(MaintenanceConfig::default());
@@ -548,6 +585,66 @@ impl AppCore {
         })
     }
 
+    fn recovery_decider(self: &Arc<Self>) -> shoebox_node::RecoveryDecideFn {
+        let weak = Arc::downgrade(self);
+        Arc::new(move |req: shoebox_node::RecoveryRequest| {
+            let weak = weak.clone();
+            Box::pin(async move {
+                let Some(core) = weak.upgrade() else {
+                    return false;
+                };
+                let (tx, rx) = oneshot::channel();
+                *core.pending_recovery.lock().unwrap() = Some(PendingRecovery {
+                    question: crate::types::RecoveryQuestion {
+                        device_id: hex::encode(req.device.0),
+                        device_name: req.name.clone(),
+                        role: role_name(req.role).into(),
+                    },
+                    answer: tx,
+                });
+                core.emit(AppEvent::SecurityChanged);
+                // The node gives up after two minutes; so does the question.
+                let allowed = matches!(rx.await, Ok(true));
+                if allowed {
+                    core.approved_recoveries.lock().unwrap().push(req.device);
+                }
+                if core
+                    .pending_recovery
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(|p| p.question.device_id == hex::encode(req.device.0))
+                {
+                    *core.pending_recovery.lock().unwrap() = None;
+                }
+                core.emit(AppEvent::SecurityChanged);
+                allowed
+            })
+        })
+    }
+
+    /// Answer the recovery waiting on this device (`accept`: let that device in as an admin).
+    pub fn answer_recovery(&self, accept: bool) -> Result<()> {
+        let pending = self.pending_recovery.lock().unwrap().take();
+        let pending = pending.filter(|p| !p.answer.is_closed()).ok_or_else(|| {
+            anyhow!("no recovery is waiting for an answer (it may have timed out)")
+        })?;
+        let _ = pending.answer.send(accept);
+        Ok(())
+    }
+
+    /// The person has seen the alert about this new admin device.
+    pub fn dismiss_alert(&self, device_id: &str) -> Result<()> {
+        self.file
+            .lock()
+            .unwrap()
+            .alerts
+            .retain(|a| a.device_id != device_id);
+        self.save()?;
+        self.emit(AppEvent::SecurityChanged);
+        Ok(())
+    }
+
     /// Answer the code comparison of the pairing in progress.
     pub fn confirm_pairing(&self, accept: bool) -> Result<()> {
         let mut slot = self.pending_pairing.lock().unwrap();
@@ -586,13 +683,22 @@ impl AppCore {
 
     pub async fn app_state(&self) -> Result<AppState> {
         let device_id = hex::encode(self.node.id().as_bytes());
-        let (name, role) = {
+        let (name, role, alerts) = {
             let f = self.file.lock().unwrap();
             (
                 f.device_name.clone(),
                 f.role.clone().unwrap_or_else(|| "keeper".into()),
+                f.alerts.clone(),
             )
         };
+        // A question nobody waits for any more (the node gave up) is not shown.
+        let recovery_request = self
+            .pending_recovery
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|p| !p.answer.is_closed())
+            .map(|p| p.question.clone());
         let guard = self.library.read().await;
         Ok(match guard.as_ref() {
             None => AppState {
@@ -603,6 +709,8 @@ impl AppCore {
                 membership: "unknown".into(),
                 recovery_kit_saved: false,
                 library_id: None,
+                alerts: vec![],
+                recovery_request: None,
             },
             Some(ln) => AppState {
                 has_library: true,
@@ -612,6 +720,8 @@ impl AppCore {
                 membership: format!("{:?}", ln.membership().await?).to_lowercase(),
                 recovery_kit_saved: ln.recovery_kit_saved().await?,
                 library_id: Some(hex::encode(ln.library_id().0)),
+                alerts,
+                recovery_request,
             },
         })
     }
@@ -1379,6 +1489,7 @@ fn adopt_dev_library(dir: &Path) -> Result<Option<AppFile>> {
         role: Some(role_name(parse_role(&dev.role)?).to_string()),
         ticket: Some(dev.ticket),
         relay: None,
+        alerts: vec![],
     }))
 }
 

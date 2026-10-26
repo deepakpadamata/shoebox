@@ -133,7 +133,8 @@
         <input class="input" placeholder="Name this device" bind:value={name} />
         <input class="input mono" placeholder="shoebox-peer1…" bind:value={link} />
         <textarea class="input" rows="3" placeholder="24-word recovery phrase" bind:value={phrase}></textarea>
-        <Button kind="primary" block disabled={busy || !link.trim() || !phrase.trim()} onclick={recover}>{busy ? 'Restoring…' : 'Restore'}</Button>
+        <Button kind="primary" block disabled={busy || !link.trim() || !phrase.trim()} onclick={recover}>{busy ? 'Waiting for the other device…' : 'Restore'}</Button>
+        {#if busy}<p class="muted small">If that device has a screen, allow this there within two minutes. A keeper lets it through by itself.</p>{/if}
         <Button kind="ghost" block onclick={() => (step = 'welcome')}>Back</Button>
       </div>
     {/if}

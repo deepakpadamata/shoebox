@@ -11,6 +11,35 @@ use std::sync::Arc;
 
 pub const RECOVERY_KIT_SAVED_KEY: &str = "recovery_kit_saved";
 
+const ADMINS_SEEN_FILE: &str = "admins-seen.bin";
+
+/// The admins this device has seen, to alert on new ones ([`NodeEvent::AdminAdded`]). It starts
+/// alerting ("armed") after its first finished sync: before that, the admins it learns about were
+/// there before it joined.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct AdminWatch {
+    armed: bool,
+    seen: std::collections::BTreeSet<shoebox_core::ids::EndpointId>,
+}
+
+impl AdminWatch {
+    pub(crate) fn load(data_dir: &std::path::Path) -> Self {
+        std::fs::read(data_dir.join(ADMINS_SEEN_FILE))
+            .ok()
+            .and_then(|b| postcard::from_bytes(&b).ok())
+            .unwrap_or_default()
+    }
+
+    fn save(&self, data_dir: &std::path::Path) {
+        if let Ok(bytes) = postcard::to_stdvec(self) {
+            let tmp = data_dir.join("admins-seen.tmp");
+            if std::fs::write(&tmp, bytes).is_ok() {
+                let _ = std::fs::rename(&tmp, data_dir.join(ADMINS_SEEN_FILE));
+            }
+        }
+    }
+}
+
 /// What this device's replica of the device list says about this device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Membership {
@@ -33,6 +62,8 @@ impl<L: LibraryStore> LibraryNode<L> {
     ) -> Result<RecoveryKit> {
         let cap = self.capability()?;
         self.certify_self(root, role, name).await?;
+        // The first device has seen everything there is: alert on any admin from now on.
+        self.arm_admin_watch().await?;
         Ok(RecoveryKit::new(
             cap.identity_id(),
             self.now_ms(),
@@ -78,6 +109,28 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// change. Until a device list exists nothing is refused, so a fresh joiner can still sync.
     pub async fn enforce_membership(&self) -> Result<()> {
         self.apply_membership().await?;
+        if !self.inner.admin_watch.lock().unwrap().armed {
+            // Start alerting on new admins once this device has synced with someone.
+            let weak = Arc::downgrade(&self.inner);
+            let mut events = self.node().events();
+            tokio::spawn(async move {
+                loop {
+                    match events.recv().await {
+                        Ok(NodeEvent::SyncProgress {
+                            phase: crate::SyncPhase::Finished,
+                            ..
+                        }) => {
+                            if let Some(inner) = weak.upgrade() {
+                                let _ = (LibraryNode { inner }).arm_admin_watch().await;
+                            }
+                            break;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        _ => {}
+                    }
+                }
+            });
+        }
         let weak = Arc::downgrade(&self.inner);
         let mut changes = self.store().subscribe();
         tokio::spawn(async move {
@@ -138,6 +191,9 @@ impl<L: LibraryStore> LibraryNode<L> {
                 .unwrap()
                 .retain(|id, _| !list.devices.iter().any(|d| d.device == *id && d.revoked));
         }
+        if state == Membership::Member {
+            self.check_new_admins(&list);
+        }
         // A device does what its certificate says: follow a role an admin changed.
         if let Some(c) = mine.filter(|c| !c.revoked) {
             if c.role != self.node().config().role {
@@ -152,6 +208,47 @@ impl<L: LibraryStore> LibraryNode<L> {
             self.node().emit(NodeEvent::RemovedFromLibrary);
         }
         Ok(())
+    }
+
+    /// Take every admin known now as seen and alert on any later one.
+    async fn arm_admin_watch(&self) -> Result<()> {
+        let list = self.store().device_list().await?;
+        let dir = self.node().config().data_dir;
+        let mut watch = self.inner.admin_watch.lock().unwrap();
+        watch.seen.extend(list.admins.iter().map(|a| a.admin));
+        watch.armed = true;
+        watch.save(&dir);
+        Ok(())
+    }
+
+    /// Alert on admins this device has not seen before (once armed; before that, just note them).
+    fn check_new_admins(&self, list: &shoebox_core::store::SignedDeviceList) {
+        let me = self.device();
+        let dir = self.node().config().data_dir;
+        let new: Vec<_> = {
+            let mut watch = self.inner.admin_watch.lock().unwrap();
+            let armed = watch.armed;
+            let new: Vec<_> = list
+                .admins
+                .iter()
+                .map(|a| a.admin)
+                .filter(|id| watch.seen.insert(*id) && armed && *id != me)
+                .collect();
+            if !new.is_empty() || !armed {
+                watch.save(&dir);
+            }
+            new
+        };
+        for device in new {
+            let name = list
+                .devices
+                .iter()
+                .find(|d| d.device == device)
+                .map(|d| d.name.clone())
+                .unwrap_or_else(|| "an unnamed device".into());
+            tracing::warn!("new admin device in the library: {name}");
+            self.node().emit(NodeEvent::AdminAdded { device, name });
+        }
     }
 
     /// Revoke `device` (signed by this device, which must be an admin). The revocation

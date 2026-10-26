@@ -65,7 +65,11 @@ device. Freeing space on a phone removes only originals that at least two other 
   phone and the first computer are), or you remove it from a device that is not one, you are asked for your
   24-word recovery phrase: that way a thief holding an admin device cannot remove you instead.
 * **All devices were lost.** Install Shoebox, choose *I lost my devices*, enter the 24 words and the link of
-  any device that still has the library. (A keeper prints its link with `shoebox-keeper address`.)
+  any device that still has the library. (A keeper prints its link with `shoebox-keeper address`.) If that
+  device has a screen, it asks whether to let the new device in: allow it there within two minutes.
+* **"… became an admin of your library".** Shown on every device when a new admin appears, for example when
+  someone restores with the recovery phrase. If it was not you, someone has your phrase: remove that device
+  (Devices → Remove, with the phrase) and keep the phrase somewhere safer.
 * **Photos show "not backed up".** You need another device online. Add a keeper, or open the app on your
   laptop while it is on the same Wi-Fi.
 * **Ask for help.** *Settings → Help → Create a diagnostics report* makes a text with versions, counts and

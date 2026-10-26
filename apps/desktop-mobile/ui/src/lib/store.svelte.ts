@@ -88,6 +88,8 @@ function handle(e: AppEvent) {
     refreshPeers().catch(() => {});
     // This device's own name or role may be what changed.
     refreshState().catch(() => {});
+  } else if (e === 'SecurityChanged') {
+    refreshState().catch(() => {});
   } else if (e === 'RemovedFromLibrary') {
     app.removed = true;
   } else if (e === 'PairingDone') {

@@ -199,6 +199,20 @@ Accepted for now; for the external review and the beta.
   (nothing has been released). Tested: `identity.rs::a_stolen_admin_cannot_backdate_its_way_back`, and
   `rotation.rs::a_stolen_admin_is_removed_with_the_recovery_phrase` end to end (fails without the epoch switch).
 
+- **A-087 · detecting a leaked recovery phrase (2026-10-26)** · The phrase holds the root key, which cannot be rotated yet, so a leak
+  must at least not go unnoticed. (1) *Approval:* a recovery through a device that has a screen waits up to two minutes for its person
+  ("Let this device in?"); nothing is written before the answer, and no answer means no (`LibraryNode::set_recovery_approval`, the app
+  always sets it; the headless Android worker cannot answer, so recoveries through it are refused). A keeper has no screen and lets
+  recoveries through, logging a warning. The recovering device's screen says to approve on the other device. (2) *Alerts:* every device
+  raises `NodeEvent::AdminAdded` for an admin it has not seen before; the app shows a red banner ("X became an admin of your library…
+  remove it in Devices") until dismissed, persisted in `app.json`; the keeper logs it. A device starts alerting after its first finished
+  sync (the creator at once), so admins that existed before it joined do not alert on it; an admin let in on this device does not alert
+  here. Not done: a system notification when the app is closed (the alert waits for the next launch); the keeper `status` does not list
+  alerts; pairing a new non-admin device does not alert (it needs a ticket from inside). Root rotation is the next step. Tested:
+  `recovery.rs::a_recovery_waits_for_approval_on_the_member`, `recovery.rs::other_members_alert_on_a_new_admin_but_not_on_old_ones`
+  (fails if a device alerts before its first sync), `core.rs::a_recovery_through_this_app_asks_first`; checked by hand in three dev
+  instances (approve, refuse, alert, dismiss).
+
 ### Product gaps and open decisions
 
 Behaviour that will come back as features or needs a decision.

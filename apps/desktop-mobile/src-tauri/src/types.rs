@@ -31,6 +31,29 @@ ts_type! {
         pub membership: String,
         pub recovery_kit_saved: bool,
         pub library_id: Option<String>,
+        /// New admin devices this person has not acknowledged yet (newest last).
+        pub alerts: Vec<SecurityAlert>,
+        /// Someone is rejoining through this device with the recovery phrase and waits for an
+        /// answer (`answer_recovery`).
+        pub recovery_request: Option<RecoveryQuestion>,
+    }
+}
+
+ts_type! {
+    /// A device became an admin of the library (it can add and remove devices). Shown until
+    /// dismissed: if it was not this person, their recovery phrase may be known to someone else.
+    pub struct SecurityAlert {
+        pub device_id: String,
+        pub device_name: String,
+        pub at_ms: f64,
+    }
+}
+
+ts_type! {
+    pub struct RecoveryQuestion {
+        pub device_id: String,
+        pub device_name: String,
+        pub role: String,
     }
 }
 
@@ -281,6 +304,8 @@ ts_type! {
         PairingFailed { reason: String },
         RemovedFromLibrary,
         LibraryRotated,
+        /// A recovery waits for this device's answer, or an alert was added: reload the state.
+        SecurityChanged,
         BackupProgress { done: u32, total: u32 },
         BackupPaused { reason: Option<String> },
         /// Something changed in a shared album (new photos, members, downloads).

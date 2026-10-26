@@ -101,6 +101,9 @@ export const api = {
   join: (ticket: string, device_name: string) => call<{}>('join', { ticket, device_name }),
   recover: (link: string, phrase: string, device_name: string) => call<{}>('recover', { link, phrase, device_name }),
   confirmPairing: (accept: boolean) => call<{}>('confirm_pairing', { accept }),
+  /** Let in (or refuse) the device rejoining through this one with the recovery phrase. */
+  answerRecovery: (accept: boolean) => call<{}>('answer_recovery', { accept }),
+  dismissAlert: (device_id: string) => call<{}>('dismiss_alert', { device_id }),
   pairStart: (role: string) => call<PairStart>('pair_start', { role }),
   markRecoveryKitSaved: () => call<{}>('mark_recovery_kit_saved'),
   libraryPage: (cursor: PageCursor | null, limit = 500) => call<PhotoPage>('library_page', { cursor, limit }),

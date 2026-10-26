@@ -41,6 +41,8 @@ pub(crate) struct Inner<L: LibraryStore> {
     pub(crate) notice: Mutex<Option<shoebox_core::identity::RotationNotice>>,
     pub(crate) notice_acked: Mutex<std::collections::HashSet<EndpointId>>,
     pub(crate) invites: Arc<Mutex<crate::pairing::Invites>>,
+    pub(crate) recovery_approval: Mutex<Option<crate::recover::RecoveryDecideFn>>,
+    pub(crate) admin_watch: Mutex<crate::identity::AdminWatch>,
 }
 
 pub struct LibraryNode<L: LibraryStore> {
@@ -93,6 +95,8 @@ impl<L: LibraryStore> LibraryNode<L> {
                 notice: Mutex::new(crate::rotation::load_notice(&data_dir)),
                 notice_acked: Default::default(),
                 confirmations: Mutex::new(crate::freeup::Confirmations::load(&data_dir)),
+                recovery_approval: Mutex::new(None),
+                admin_watch: Mutex::new(crate::identity::AdminWatch::load(&data_dir)),
             }),
         };
         ln.start_sync_manager(nudge_rx);

@@ -435,3 +435,102 @@ impl RotationNotice {
         chain.check_device_cert(&self.revocation)
     }
 }
+
+/// Moves trust from one root key to another (a new recovery phrase), for when the old phrase may
+/// have leaked. Signed by both: the old root (only the current root may hand over) and the new one
+/// (proof that whoever hands over holds it). The handover opens a new epoch whose capability names
+/// the new root; there, every certificate is re-signed by the new root and nothing the old root
+/// signs counts any more, whatever date it claims. Members follow the first valid handover from
+/// the epoch they are in; a second one, from the same old root, is for an epoch they left.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct RootHandover {
+    /// The epoch this handover leaves.
+    pub old: LibraryId,
+    /// The new epoch; its `root` is the new root key.
+    pub new_cap: crate::store::LibraryCapability,
+    pub old_root: RootPublicKey,
+    pub old_signature: Vec<u8>,
+    pub new_signature: Vec<u8>,
+}
+
+fn handover_bytes(identity: LibraryId, h: &RootHandover) -> Vec<u8> {
+    signing_bytes(
+        "shoebox/root-handover/v1",
+        identity,
+        &(&h.old, &h.new_cap, &h.old_root),
+    )
+}
+
+/// Hand the library `identity` over from `old_root` to `new_root`, leaving epoch `old` for
+/// `new_cap` (whose `root` must be `new_root`'s public key).
+pub fn issue_root_handover(
+    old_root: &KeyPair,
+    new_root: &KeyPair,
+    identity: LibraryId,
+    old: LibraryId,
+    new_cap: crate::store::LibraryCapability,
+) -> RootHandover {
+    let mut h = RootHandover {
+        old,
+        new_cap,
+        old_root: old_root.root_public(),
+        old_signature: vec![],
+        new_signature: vec![],
+    };
+    let msg = handover_bytes(identity, &h);
+    h.old_signature = old_root.sign(&msg);
+    h.new_signature = new_root.sign(&msg);
+    h
+}
+
+impl RootHandover {
+    /// Check the handover against the root this device trusts now and the library's identity.
+    pub fn verify(
+        &self,
+        current_root: &RootPublicKey,
+        identity: LibraryId,
+    ) -> Result<(), IdentityError> {
+        if self.old_root != *current_root
+            || self.new_cap.identity_id() != identity
+            || self.new_cap.root == *current_root
+        {
+            return Err(IdentityError::BadSignature);
+        }
+        let msg = handover_bytes(identity, self);
+        if verify_signature(&self.old_root.0, &msg, &self.old_signature)
+            && verify_signature(&self.new_cap.root.0, &msg, &self.new_signature)
+        {
+            Ok(())
+        } else {
+            Err(IdentityError::BadSignature)
+        }
+    }
+}
+
+/// Why a library moved to a new epoch: a device was revoked, or the root key was handed over.
+/// Members keep the latest one and hand it to devices that were away.
+// One notice per epoch change, kept and forwarded rarely: the size difference does not matter.
+#[allow(clippy::large_enum_variant)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub enum EpochNotice {
+    Revocation(RotationNotice),
+    Root(RootHandover),
+}
+
+impl EpochNotice {
+    /// The epoch the notice leaves.
+    pub fn old(&self) -> LibraryId {
+        match self {
+            Self::Revocation(n) => n.old,
+            Self::Root(h) => h.old,
+        }
+    }
+
+    /// The epoch it moves to.
+    pub fn new_cap(&self) -> &crate::store::LibraryCapability {
+        match self {
+            Self::Revocation(n) => &n.new_cap,
+            Self::Root(h) => &h.new_cap,
+        }
+    }
+}

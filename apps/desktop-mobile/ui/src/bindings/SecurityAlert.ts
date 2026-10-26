@@ -4,4 +4,9 @@
  * A device became an admin of the library (it can add and remove devices). Shown until
  * dismissed: if it was not this person, their recovery phrase may be known to someone else.
  */
-export type SecurityAlert = { device_id: string, device_name: string, at_ms: number, };
+export type SecurityAlert = { 
+/**
+ * `admin_added` (the device below became an admin) or `phrase_replaced` (the recovery
+ * phrase was replaced on another device; no device named).
+ */
+kind: string, device_id: string, device_name: string, at_ms: number, };

@@ -4,10 +4,12 @@
 mod common;
 
 use common::*;
+use shoebox_core::clock::Clock;
 use shoebox_core::model::Role;
 use shoebox_core::store::*;
 use shoebox_node::NodeEvent;
 use shoebox_testkit::{wait_until, Cluster};
+use std::sync::Arc;
 use std::time::Duration;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -111,7 +113,6 @@ async fn only_admins_can_rotate_and_forged_notices_are_ignored() {
 /// member that already followed the thief's own rotation switches to the real one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_stolen_admin_is_removed_with_the_recovery_phrase() {
-    use shoebox_core::clock::Clock;
     use shoebox_core::identity::{issue_admin_cert, issue_device_cert};
     use shoebox_core::Hlc;
     // 0: the real admin, 1: the stolen admin phone, 2: a member that is away, 3: a device the
@@ -238,4 +239,133 @@ async fn a_stolen_admin_is_removed_with_the_recovery_phrase() {
 
 fn rig_phrase(rig: &Rig) -> String {
     shoebox_core::recovery::RecoveryKit::new(rig.cap.library, 0, rig.root.clone()).phrase()
+}
+
+/// Root rotation (the recovery phrase may have leaked): a device that is no admin, with the
+/// current phrase, hands the library over to a new root. Everyone who is a member now follows,
+/// also one that was away; the photos are still there; the old phrase opens nothing any more and
+/// the new one does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_root_key_can_be_replaced_and_the_old_phrase_stops_working() {
+    let c = Cluster::new(3).await.unwrap();
+    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Phone, Role::Phone]).await;
+    for n in &nodes {
+        n.enforce_membership().await.unwrap();
+    }
+    nodes[0].store().upsert_photo(photo(1, 10)).await.unwrap();
+    wait_until(Duration::from_secs(20), || async {
+        nodes[2].store().photo(&hash(1)).await.unwrap().is_some()
+    })
+    .await
+    .expect("in sync");
+    let old_phrase = rig_phrase(&rig);
+    let old_root = rig.cap.root;
+
+    c.take_offline(2);
+    let replaced = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut events = c.node(0).events();
+    let flag = replaced.clone();
+    tokio::spawn(async move {
+        while let Ok(ev) = events.recv().await {
+            if ev == shoebox_node::NodeEvent::RecoveryPhraseReplaced {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+    });
+    let kit = nodes[1].rotate_root(&old_phrase).await.unwrap();
+    assert_ne!(kit.phrase(), old_phrase);
+    let new_root = kit.root().root_public();
+    assert_ne!(new_root, old_root);
+    assert!(
+        !nodes[1].recovery_kit_saved().await.unwrap(),
+        "the new kit still has to be saved"
+    );
+
+    // Node 0 follows at once; everything there is certified by the new root.
+    wait_until(Duration::from_secs(20), || async {
+        nodes[0].library_id() == nodes[1].library_id()
+    })
+    .await
+    .expect("node 0 follows the handover");
+    assert!(
+        replaced.load(std::sync::atomic::Ordering::SeqCst),
+        "a following device is told the phrase was replaced"
+    );
+    wait_until(Duration::from_secs(20), || async {
+        let l = nodes[0].store().device_list().await.unwrap();
+        l.devices.len() == 3
+            && l.devices
+                .iter()
+                .all(|d| d.added_by.0 == new_root.0 && !d.revoked)
+    })
+    .await
+    .expect("every member re-certified by the new root");
+    let admins = nodes[0].store().device_list().await.unwrap().admins;
+    assert!(admins.iter().any(|a| a.admin == core_id(&c, 0)));
+    assert!(
+        admins.iter().any(|a| a.admin == core_id(&c, 1)),
+        "the device that held the phrase became an admin"
+    );
+    assert!(nodes[0].store().photo(&hash(1)).await.unwrap().is_some());
+
+    // The device that was away catches up when it is back.
+    c.bring_online(2);
+    wait_until(Duration::from_secs(30), || async {
+        nodes[2].library_id() == nodes[1].library_id()
+            && nodes[2].store().photo(&hash(1)).await.unwrap().is_some()
+    })
+    .await
+    .expect("the away device follows and keeps the photos");
+
+    // The old phrase opens nothing: no recovery, no removal. The new one works.
+    let o = Cluster::new(1).await.unwrap();
+    o.node(0).add_peer_addr(c.node(0).addr());
+    c.node(0).add_peer_addr(o.node(0).addr());
+    let link = nodes[0].peer_link();
+    let err = o
+        .node(0)
+        .recover(&link, &old_phrase, Role::Keeper, "x", c.clock().now_ms())
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("rejected"), "{err:#}");
+    assert!(nodes[0]
+        .revoke_and_rotate_with_phrase(&old_phrase, &core_id(&c, 2))
+        .await
+        .is_err());
+    o.node(0)
+        .recover(&link, &kit.phrase(), Role::Keeper, "y", c.clock().now_ms())
+        .await
+        .unwrap();
+    o.shutdown().await;
+    c.shutdown().await;
+}
+
+/// Whoever else has the old phrase can hand over too; each member follows the first valid
+/// handover it sees and refuses the other.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_first_valid_handover_wins() {
+    let c = Cluster::new(3).await.unwrap();
+    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Phone, Role::Phone]).await;
+    for n in &nodes {
+        n.enforce_membership().await.unwrap();
+    }
+    let phrase = rig_phrase(&rig);
+    // Two holders of the phrase act at once, each unaware of the other; node 2 hears neither yet.
+    c.partition(0, 1);
+    c.partition(0, 2);
+    c.partition(1, 2);
+    nodes[0].rotate_root(&phrase).await.unwrap();
+    nodes[1].rotate_root(&phrase).await.unwrap();
+    let ours = nodes[0].epoch_notice().unwrap();
+    let theirs = nodes[1].epoch_notice().unwrap();
+    assert_ne!(ours.new_cap().library, theirs.new_cap().library);
+
+    assert!(nodes[2].accept_epoch_notice_for_test(&ours).await.unwrap());
+    let err = nodes[2]
+        .accept_epoch_notice_for_test(&theirs)
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("another epoch"), "{err:#}");
+    assert_eq!(nodes[2].library_id(), ours.new_cap().library);
+    c.shutdown().await;
 }

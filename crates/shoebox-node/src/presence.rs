@@ -1,8 +1,8 @@
 //! Gossip presence (M1-10): one iroh-gossip topic per library carries `Hello`, `Heartbeat` and
 //! `NewItems` messages, giving a live "who is online" table and a push nudge for new photos.
 //!
-//! The topic is derived from the library's identity id and root key, so devices of other
-//! libraries never share it. Gossip relays messages through other peers, and the gossip protocol is
+//! The topic is derived from the library's identity id, so devices of other libraries never
+//! share it. Gossip relays messages through other peers, and the gossip protocol is
 //! open to devices outside the device list (shared albums need it), so every message is signed
 //! with the sender's device key, bound to this topic, and accepted only from a listed, non-revoked
 //! device (or, before a library has any device list, from whoever signed it, the same rule as the
@@ -106,10 +106,10 @@ pub(crate) struct PresenceState {
 
 fn topic_id(cap: &LibraryCapability) -> TopicId {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"shoebox/presence/1");
-    // The identity id, not the epoch: presence survives a rotation (M2-03b).
+    hasher.update(b"shoebox/presence/2");
+    // The identity id, not the epoch or the root key: presence survives a rotation (M2-03b) and
+    // a root handover. Knowing the topic gains nothing: messages are signed by listed devices.
     hasher.update(&cap.identity_id().0);
-    hasher.update(&cap.root.0);
     TopicId::from_bytes(*hasher.finalize().as_bytes())
 }
 
@@ -547,12 +547,12 @@ mod tests {
             topic_id(&cap(1, 2, Capability::Write)),
             topic_id(&cap(1, 2, Capability::Read))
         );
-        // Different library or root: different topic.
+        // Different library: different topic. A new root key (a handover) keeps the topic.
         assert_ne!(
             topic_id(&cap(1, 2, Capability::Write)),
             topic_id(&cap(9, 2, Capability::Write))
         );
-        assert_ne!(
+        assert_eq!(
             topic_id(&cap(1, 2, Capability::Write)),
             topic_id(&cap(1, 3, Capability::Write))
         );

@@ -285,6 +285,19 @@ impl AppCore {
         self.node.shutdown().await
     }
 
+    /// Replace the recovery phrase (the library's root key), for when the current one may have
+    /// leaked. Every current member follows; the old phrase opens nothing any more. What comes
+    /// back is the only copy of the new kit.
+    pub async fn replace_recovery_phrase(&self, phrase: &str) -> Result<CreatedLibrary> {
+        let ln = self.ln().await?;
+        let kit = ln.rotate_root(phrase.trim()).await?;
+        Ok(CreatedLibrary {
+            phrase: kit.phrase(),
+            kit_text: kit.to_text(),
+            library_id: hex::encode(ln.library_id().0),
+        })
+    }
+
     /// The link another device needs to recover through this one (`shoebox-peer1…`).
     pub fn device_link(&self) -> String {
         shoebox_node::PeerLink(shoebox_node::from_endpoint_addr(&self.node.addr())).to_string()
@@ -355,6 +368,20 @@ impl AppCore {
                         Some(AppEvent::PairingFailed { reason })
                     }
                     NodeEvent::RemovedFromLibrary => Some(AppEvent::RemovedFromLibrary),
+                    NodeEvent::RecoveryPhraseReplaced => {
+                        {
+                            let mut f = core.file.lock().unwrap();
+                            f.alerts.retain(|a| a.kind != "phrase_replaced");
+                            f.alerts.push(crate::types::SecurityAlert {
+                                kind: "phrase_replaced".into(),
+                                device_id: String::new(),
+                                device_name: String::new(),
+                                at_ms: now_ms() as f64,
+                            });
+                        }
+                        let _ = core.save();
+                        Some(AppEvent::SecurityChanged)
+                    }
                     NodeEvent::AdminAdded { device, name } => {
                         let approved_here =
                             core.approved_recoveries.lock().unwrap().contains(&device);
@@ -366,6 +393,7 @@ impl AppCore {
                                 let mut f = core.file.lock().unwrap();
                                 f.alerts.retain(|a| a.device_id != id);
                                 f.alerts.push(crate::types::SecurityAlert {
+                                    kind: "admin_added".into(),
                                     device_id: id,
                                     device_name: name,
                                     at_ms: now_ms() as f64,

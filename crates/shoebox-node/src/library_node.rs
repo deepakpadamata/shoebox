@@ -38,7 +38,7 @@ pub(crate) struct Inner<L: LibraryStore> {
     pub(crate) ingest: tokio::sync::RwLock<()>,
     pub(crate) membership: Mutex<crate::identity::Membership>,
     pub(crate) confirmations: Mutex<crate::freeup::Confirmations>,
-    pub(crate) notice: Mutex<Option<shoebox_core::identity::RotationNotice>>,
+    pub(crate) notice: Mutex<Option<shoebox_core::identity::EpochNotice>>,
     pub(crate) notice_acked: Mutex<std::collections::HashSet<EndpointId>>,
     pub(crate) invites: Arc<Mutex<crate::pairing::Invites>>,
     pub(crate) recovery_approval: Mutex<Option<crate::recover::RecoveryDecideFn>>,

@@ -143,8 +143,8 @@ Everything here was tested on loopback or in a browser on one machine.
 
 Accepted for now; for the external review and the beta.
 
-- **A-045 · M1-10** · Presence is per library: topic = blake3(`shoebox/presence/1` ‖ identity id ‖ root public key) (the identity id, not the
-  epoch, so presence survives a rotation), so read-only and write devices share it and other libraries do not. Defaults: heartbeat 10 s, offline
+- **A-045 · M1-10** · Presence is per library: topic = blake3(`shoebox/presence/2` ‖ identity id) (not the epoch or the root key, so presence
+  survives a rotation and a root handover; the root key was dropped from it with A-088), so read-only and write devices share it and other libraries do not. Defaults: heartbeat 10 s, offline
   after 35 s (the issue's budget is 60 s). A `NewItems` nudge makes the receiver sync with the announcing device (only if it is a known library
   peer); imports announce automatically. `start_presence` must be called explicitly after `with_capability`.
   **Signed (2026-10-26).** Gossip relays messages through other peers and has been open to devices outside the device list since M5 (A-079),
@@ -153,8 +153,8 @@ Accepted for now; for the external review and the beta.
   accepts any signer, like the connection gate, A-061), and its send time is later than the last one accepted from that device (replays). The
   sender keeps its send times increasing even within one millisecond or when its clock steps back; after a restart with a clock that went back,
   receivers ignore it until its clock passes the last time they saw (at most the size of the step). Names over 64 characters and versions over
-  32 are cut. Still open: anyone who knows the topic can *read* presence (device names, roles, app versions); the topic needs the identity id
-  (sent to anyone who dials `shoebox/recover/0`, A-068) and the root public key. The topic and message format changed with no N-1 overlap:
+  32 are cut. Still open: anyone who knows the topic can *read* presence (device names, roles, app versions); the topic needs only the identity id
+  (sent to anyone who dials `shoebox/recover/0`, A-068). The topic and message format changed with no N-1 overlap:
   nothing has been released. Tested: `presence.rs` unit tests (forgery, wrong topic, non-member, replay) and
   `failures.rs::presence_from_outside_the_device_list_is_ignored` (an outsider on the topic never appears; the test fails without the check).
 - **A-057 · M2-01** · `LibraryState` verifies certs only when it knows the root (`with_root`; all three backends pass `cap.root`/`cap.library`). Local API calls
@@ -208,10 +208,29 @@ Accepted for now; for the external review and the beta.
   remove it in Devices") until dismissed, persisted in `app.json`; the keeper logs it. A device starts alerting after its first finished
   sync (the creator at once), so admins that existed before it joined do not alert on it; an admin let in on this device does not alert
   here. Not done: a system notification when the app is closed (the alert waits for the next launch); the keeper `status` does not list
-  alerts; pairing a new non-admin device does not alert (it needs a ticket from inside). Root rotation is the next step. Tested:
+  alerts; pairing a new non-admin device does not alert (it needs a ticket from inside). Root rotation followed (A-088). Tested:
   `recovery.rs::a_recovery_waits_for_approval_on_the_member`, `recovery.rs::other_members_alert_on_a_new_admin_but_not_on_old_ones`
   (fails if a device alerts before its first sync), `core.rs::a_recovery_through_this_app_asks_first`; checked by hand in three dev
   instances (approve, refuse, alert, dismiss).
+
+- **A-088 · replacing the recovery phrase (root rotation, 2026-10-26)** · *Settings → Replace recovery phrase*, with the current phrase,
+  on any member device (`LibraryNode::rotate_root`). A new root key is made and the library moves to a new epoch whose capability names it
+  (`LibraryStore::begin_root_rotation`): every current admin and member is re-certified by the new root (the device doing it becomes an
+  admin), photos, albums and settings are carried, the old certificates are not. So nothing the old root signs counts there, whatever
+  date it claims, and the old phrase opens nothing (recovery, removal, role changes, another replacement). Members follow a `RootHandover`
+  signed by the old root (only the current root may hand over) and the new one (whoever hands over holds it), delivered like a revocation
+  notice (`EpochNotice`, also to devices that were away). Each member follows the first valid handover from the epoch it is in and refuses
+  any other ("another epoch"): if someone else holds the old phrase it is a race, which the person wins on every device that hears from
+  them first. Following devices raise `NodeEvent::RecoveryPhraseReplaced` (app banner "your recovery phrase was replaced on another
+  device"); the new kit is shown once and has to be confirmed saved again. Limits: devices that were removed are not re-certified, so the
+  removal itself is not carried (they are simply not members; pairing them again works as for any device); a device two epoch changes
+  behind cannot follow (A-067); someone who had joined with the old phrase before the replacement stays a member unless removed first
+  (the screen says so), and what they already downloaded cannot be taken back; the keeper CLI cannot start a replacement (it follows). The
+  presence topic no longer includes the root key (A-045). Tested: `core rotation.rs::a_root_handover_needs_both_roots_and_the_current_one`,
+  `rotation.rs::the_root_key_can_be_replaced_and_the_old_phrase_stops_working` (a non-admin replaces it, a member follows, one that was
+  away catches up, photos stay, old phrase refused, new phrase works), `rotation.rs::the_first_valid_handover_wins` (fails without the
+  epoch rule), `core.rs::the_recovery_phrase_can_be_replaced` (new kit once, saved flag reset, library reopens after a restart); checked by
+  hand in two dev instances.
 
 ### Product gaps and open decisions
 

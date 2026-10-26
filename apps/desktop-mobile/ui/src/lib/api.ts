@@ -103,6 +103,8 @@ export const api = {
   confirmPairing: (accept: boolean) => call<{}>('confirm_pairing', { accept }),
   /** Let in (or refuse) the device rejoining through this one with the recovery phrase. */
   answerRecovery: (accept: boolean) => call<{}>('answer_recovery', { accept }),
+  /** Make a new recovery phrase; `phrase` is the current one. The result is the only copy. */
+  replaceRecoveryPhrase: (phrase: string) => call<CreatedLibrary>('replace_recovery_phrase', { phrase }),
   dismissAlert: (device_id: string) => call<{}>('dismiss_alert', { device_id }),
   pairStart: (role: string) => call<PairStart>('pair_start', { role }),
   markRecoveryKitSaved: () => call<{}>('mark_recovery_kit_saved'),

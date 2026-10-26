@@ -67,6 +67,11 @@ device. Freeing space on a phone removes only originals that at least two other 
 * **All devices were lost.** Install Shoebox, choose *I lost my devices*, enter the 24 words and the link of
   any device that still has the library. (A keeper prints its link with `shoebox-keeper address`.) If that
   device has a screen, it asks whether to let the new device in: allow it there within two minutes.
+* **Someone may have seen your recovery phrase.** *Settings → Replace recovery phrase*, enter the current one,
+  and save the new kit it shows (once). Your devices switch to the new phrase as soon as they are in touch, and
+  the old one opens nothing. Remove any device you do not recognise first.
+* **"Your library's recovery phrase was replaced".** Shown on your other devices after a replacement. If it
+  was you, get the new phrase to wherever you keep it; if not, check Devices for devices you do not know.
 * **"… became an admin of your library".** Shown on every device when a new admin appears, for example when
   someone restores with the recovery phrase. If it was not you, someone has your phrase: remove that device
   (Devices → Remove, with the phrase) and keep the phrase somewhere safer.

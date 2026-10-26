@@ -108,3 +108,49 @@ fn tampered_forged_and_misdirected_notices_fail() {
     n.revocation.revoked = false;
     assert!(n.verify(&root.root_public(), IDENTITY).is_err());
 }
+
+#[test]
+fn a_root_handover_needs_both_roots_and_the_current_one() {
+    use shoebox_core::store::{Capability, LibraryCapability, LibraryId};
+    let identity = LibraryId([1; 16]);
+    let (old_root, new_root, stranger) = (
+        KeyPair::generate(),
+        KeyPair::generate(),
+        KeyPair::generate(),
+    );
+    let cap = |root: &KeyPair| LibraryCapability {
+        library: LibraryId([2; 16]),
+        root: root.root_public(),
+        mode: Capability::Write,
+        backend: [&[2u8][..], &identity.0[..]].concat(),
+    };
+    let h = issue_root_handover(
+        &old_root,
+        &new_root,
+        identity,
+        LibraryId([9; 16]),
+        cap(&new_root),
+    );
+    assert_eq!(h.verify(&old_root.root_public(), identity), Ok(()));
+    // Only from the root this device trusts now, and for this library.
+    assert!(h.verify(&stranger.root_public(), identity).is_err());
+    assert!(h
+        .verify(&old_root.root_public(), LibraryId([7; 16]))
+        .is_err());
+    // Both signatures count: a handover to a key nobody holds, or a tampered one, fails.
+    let mut no_new = h.clone();
+    no_new.new_signature = stranger.sign(b"x");
+    assert!(no_new.verify(&old_root.root_public(), identity).is_err());
+    let mut moved = h.clone();
+    moved.new_cap = cap(&stranger);
+    assert!(moved.verify(&old_root.root_public(), identity).is_err());
+    // Someone holding only a new key cannot hand over from the old one.
+    let forged = issue_root_handover(
+        &stranger,
+        &new_root,
+        identity,
+        LibraryId([9; 16]),
+        cap(&new_root),
+    );
+    assert!(forged.verify(&old_root.root_public(), identity).is_err());
+}

@@ -43,10 +43,18 @@ ts_type! {
     /// A device became an admin of the library (it can add and remove devices). Shown until
     /// dismissed: if it was not this person, their recovery phrase may be known to someone else.
     pub struct SecurityAlert {
+        /// `admin_added` (the device below became an admin) or `phrase_replaced` (the recovery
+        /// phrase was replaced on another device; no device named).
+        #[serde(default = "admin_added")]
+        pub kind: String,
         pub device_id: String,
         pub device_name: String,
         pub at_ms: f64,
     }
+}
+
+fn admin_added() -> String {
+    "admin_added".into()
 }
 
 ts_type! {

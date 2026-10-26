@@ -389,6 +389,27 @@ pub trait LibraryStore: Send + Sync + 'static {
         ))
     }
 
+    /// Like [`LibraryStore::begin_rotation`], but the new epoch trusts `new_root` instead of the
+    /// current root key: the old certificates are left behind and `certs` (signed by `new_root`)
+    /// take their place. Returns the new epoch's capability.
+    async fn begin_root_rotation(
+        &self,
+        _new_root: RootPublicKey,
+        _certs: Vec<SignedDeviceChange>,
+    ) -> Result<LibraryCapability> {
+        Err(StoreError::Backend(
+            "this backend cannot rotate a library".into(),
+        ))
+    }
+
+    /// Follow a root handover to `new` (whose `root` is the new root key): like
+    /// [`LibraryStore::adopt_rotation`], without carrying the old certificates.
+    async fn adopt_root_rotation(&self, _new: &LibraryCapability) -> Result<()> {
+        Err(StoreError::Backend(
+            "this backend cannot rotate a library".into(),
+        ))
+    }
+
     /// `true` if local writes only reach other devices when someone syncs (no live replication
     /// underneath), so the node should sync with its peers after local changes.
     fn replicates_by_push(&self) -> bool {

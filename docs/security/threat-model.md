@@ -10,7 +10,7 @@ recommended before the public release (see "Not covered").
 | Photo and video bytes | each device's blob store | the whole point |
 | Library metadata (dates, places in EXIF summaries, albums, favorites) | Loro document on each device | reveals habits and places |
 | Device key (iroh endpoint secret) | OS keystore (macOS Keychain, Windows Credential Manager, Secret Service, Android Keystore-wrapped), file fallback `0600` | it is the device's identity; anyone with it can pose as the device |
-| Library root key | **nowhere**: shown once as the 24-word recovery phrase, re-derived only to sign | can add admins and devices |
+| Library root key | **nowhere**: shown once as the 24-word recovery phrase, re-derived only to sign; replaceable (A-088) | can add admins and devices |
 | Admin/device certificates | in the library, signed by the root | decide who may sync |
 | Shared-album capabilities | `shared-albums.json` (`0600`), inside invitations | the key to an album |
 | Invitations and pairing tickets | on screen / pasted | bearer secrets until used |
@@ -62,7 +62,8 @@ Messages that are relayed or stored and trusted later need their own signature.
 | F12 | Dev HTTP bridge reachable from web pages (cross-site POST, DNS rebinding) | **Fixed** for the dev tool (see F3) |
 | F13 | Anyone who presented a valid invitation kept blob access permanently and could not be removed if they never wrote a membership entry | **Fixed**: after the 30-minute window only members with an entry and recorded viewers pass the blob gate; the owner can remove a joiner (A-079) |
 | F14 | Pairing and recovery failure limits were global, so any stranger could keep both refused for everyone | **Fixed**: counted per remote device (the secrets cannot be guessed, so the limit only caps wasted work) |
-| F16 | A leaked recovery phrase let anyone with a surviving device's link join silently as an admin (the root key cannot be rotated) | **Mitigated**: devices with a screen ask before letting a recovery in, and every device alerts on a new admin until the person dismisses it (A-087). A keeper still lets recoveries through (no screen), but the others alert. Root rotation is planned |
+| F16 | A leaked recovery phrase let anyone with a surviving device's link join silently as an admin (the root key cannot be rotated) | **Mitigated**: devices with a screen ask before letting a recovery in, and every device alerts on a new admin until the person dismisses it (A-087). A keeper still lets recoveries through (no screen), but the others alert |
+| F17 | A leaked recovery phrase was permanent | **Fixed**: the phrase can be replaced (root rotation into a new epoch; the old root's signatures count for nothing there). Someone else holding the old phrase can race a replacement of their own: each device follows the first valid one it hears (A-088) |
 | F15 | The album handshake and doc-digest handlers (open to outsiders) waited without limit for the peer to close | **Fixed**: 5 s cap, also on ping and has |
 | — | Album invitation secrets are compared with `==`, not in constant time | Accepted: 128-bit random secrets, single use |
 

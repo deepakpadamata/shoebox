@@ -611,3 +611,41 @@ async fn a_recovery_through_this_app_asks_first() {
         "nothing is waiting any more"
     );
 }
+
+/// Replacing the recovery phrase hands out a new kit once, asks for it to be saved again, and the
+/// library opens under the new root after a restart with every photo; the old phrase opens
+/// nothing (a second replacement with it fails).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_recovery_phrase_can_be_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = open(dir.path()).await;
+    let created = core.create_library("MacBook", "keeper").await.unwrap();
+    core.import_paths(&[sample("photo-gps.jpg"), sample("IMG_0001.jpg")])
+        .await
+        .unwrap();
+    core.mark_recovery_kit_saved().await.unwrap();
+    let before = core.app_state().await.unwrap().library_id;
+
+    assert!(core
+        .replace_recovery_phrase("not the phrase")
+        .await
+        .is_err());
+    let new = core.replace_recovery_phrase(&created.phrase).await.unwrap();
+    assert_ne!(new.phrase, created.phrase);
+    assert_eq!(new.phrase.split(' ').count(), 24);
+    let st = core.app_state().await.unwrap();
+    assert!(!st.recovery_kit_saved, "the new kit has to be saved again");
+    assert_ne!(st.library_id, before, "a new epoch");
+    assert!(
+        core.replace_recovery_phrase(&created.phrase).await.is_err(),
+        "the old phrase opens nothing"
+    );
+    core.shutdown().await.unwrap();
+
+    let again = open(dir.path()).await;
+    let st = again.app_state().await.unwrap();
+    assert!(st.has_library && st.membership == "member", "{st:?}");
+    assert_eq!(again.counts().await.unwrap().photos, 2);
+    assert!(again.replace_recovery_phrase(&new.phrase).await.is_ok());
+    again.shutdown().await.unwrap();
+}

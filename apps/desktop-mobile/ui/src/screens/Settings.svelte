@@ -9,6 +9,7 @@
   import Segmented from '../components/Segmented.svelte';
   import BackupCard from '../components/BackupCard.svelte';
   import Sheet from '../components/Sheet.svelte';
+  import RecoveryKit from './RecoveryKit.svelte';
   import { canPick, pickFolder } from '../lib/pick';
   import { applyTextSize, savedTextSize } from '../lib/textsize';
 
@@ -28,6 +29,23 @@
     applyTextSize(v);
   }
   let diag = $state<{ file_name: string; text: string } | null>(null);
+  // Replacing the recovery phrase: the current one in, the new kit out (shown once).
+  let replaceOpen = $state(false);
+  let oldPhrase = $state('');
+  let replacing = $state(false);
+  let newKit = $state<{ phrase: string; kit_text: string } | null>(null);
+  async function replacePhrase() {
+    replacing = true;
+    try {
+      newKit = await api.replaceRecoveryPhrase(oldPhrase);
+      oldPhrase = '';
+      await refreshState();
+    } catch (e) {
+      fail(e);
+    } finally {
+      replacing = false;
+    }
+  }
 
   async function showDiagnostics() {
     try { diag = await api.diagnostics(); } catch (e) { fail(e); }
@@ -155,11 +173,27 @@
       {#if app.state?.recovery_kit_saved}✓ You confirmed the recovery kit is saved.{:else}The recovery kit has not been confirmed as saved.{/if}
       <div class="muted">If every other device is lost, a new device recovers the library with the 24 words plus this device's link.</div>
       <div><Button size="sm" onclick={async () => { try { const l = await api.deviceLink(); await navigator.clipboard.writeText(l); toast('This device’s link was copied'); } catch (e) { fail(e); } }}>Copy this device’s link</Button></div>
+      <div class="muted">If someone else may have seen your phrase, replace it: the old one stops working on every device.</div>
+      <div><Button size="sm" onclick={() => { replaceOpen = true; newKit = null; oldPhrase = ''; }}>Replace recovery phrase…</Button></div>
     </div>
   {:else}
     <span class="muted">Loading…</span>
   {/if}
 </div>
+
+<Sheet open={replaceOpen} title={newKit ? 'Your new recovery kit' : 'Replace recovery phrase'} onclose={() => { if (!newKit) { replaceOpen = false; oldPhrase = ''; } }} width={560}>
+  {#if newKit}
+    <RecoveryKit phrase={newKit.phrase} kitText={newKit.kit_text} onsaved={() => { replaceOpen = false; newKit = null; }} />
+  {:else}
+    <div class="stack">
+      <p class="small">A new 24-word phrase replaces the current one. Your devices switch to it as soon as they are in touch; the old phrase then opens nothing. Devices you removed stay removed.</p>
+      <p class="small muted">If you see a device in Devices you do not know, remove it first. Then keep the new phrase somewhere only you can reach.</p>
+      <textarea class="phrase" rows="3" placeholder="Current 24-word recovery phrase" autocomplete="off" spellcheck="false" bind:value={oldPhrase}></textarea>
+      <Button kind="primary" block disabled={replacing || !oldPhrase.trim()} onclick={replacePhrase}>{replacing ? 'Replacing…' : 'Replace'}</Button>
+      <Button block onclick={() => { replaceOpen = false; oldPhrase = ''; }}>Cancel</Button>
+    </div>
+  {/if}
+</Sheet>
 
 <Sheet open={diag !== null} title="Diagnostics report" onclose={() => (diag = null)} width={640}>
   {#if diag}
@@ -181,5 +215,6 @@
   .section { font-size: 12px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; margin: 20px 0 8px; }
   .section:first-child { margin-top: 0; }
   .pad { padding: 14px; }
+  .phrase { width: 100%; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 10px 12px; color: var(--ink); font: inherit; resize: none; }
   .input { height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); padding: 0 12px; color: var(--ink); font: inherit; }
 </style>

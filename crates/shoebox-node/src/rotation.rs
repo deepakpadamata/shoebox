@@ -14,22 +14,26 @@ use crate::LibraryNode;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use futures::future::BoxFuture;
 use iroh::endpoint::Connection;
-use shoebox_core::identity::{issue_rotation_notice, KeyPair, RotationNotice};
+use shoebox_core::identity::{
+    issue_admin_cert, issue_device_cert, issue_root_handover, issue_rotation_notice, EpochNotice,
+    KeyPair, RootHandover, RotationNotice,
+};
 use shoebox_core::ids::EndpointId;
+use shoebox_core::recovery::RecoveryKit;
 use shoebox_core::store::{LibraryStore, SignedDeviceChange};
 use std::path::Path;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-const FILE: &str = "rotation-notice.bin";
+const FILE: &str = "epoch-notice.bin";
 const MAX_NOTICE: usize = 1 << 20;
 const PUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub(crate) fn load_notice(data_dir: &Path) -> Option<RotationNotice> {
+pub(crate) fn load_notice(data_dir: &Path) -> Option<EpochNotice> {
     postcard::from_bytes(&std::fs::read(data_dir.join(FILE)).ok()?).ok()
 }
 
-fn save_notice(data_dir: &Path, notice: &RotationNotice) {
+fn save_notice(data_dir: &Path, notice: &EpochNotice) {
     if let Ok(bytes) = postcard::to_stdvec(notice) {
         let tmp = data_dir.join("rotation-notice.tmp");
         if std::fs::write(&tmp, bytes).is_ok() {
@@ -49,8 +53,8 @@ impl<L: LibraryStore> crate::ext::ConnHandler for Responder<L> {
             };
             let (mut send, mut recv) = conn.accept_bi().await?;
             let bytes = recv.read_to_end(MAX_NOTICE).await?;
-            let reply: &[u8] = match postcard::from_bytes::<RotationNotice>(&bytes) {
-                Ok(notice) => match ln.accept_notice(&notice).await {
+            let reply: &[u8] = match postcard::from_bytes::<EpochNotice>(&bytes) {
+                Ok(notice) => match ln.accept_epoch_notice(&notice).await {
                     Ok(true) => b"1",
                     Ok(false) => b"0",
                     Err(e) => {
@@ -95,9 +99,17 @@ impl<L: LibraryStore> LibraryNode<L> {
         });
     }
 
-    /// The notice for the latest rotation this device took part in, if any.
-    pub fn rotation_notice(&self) -> Option<RotationNotice> {
+    /// The notice for the latest epoch change this device took part in, if any.
+    pub fn epoch_notice(&self) -> Option<EpochNotice> {
         self.inner.notice.lock().unwrap().clone()
+    }
+
+    /// [`LibraryNode::epoch_notice`] when the latest change was a revocation.
+    pub fn rotation_notice(&self) -> Option<RotationNotice> {
+        match self.epoch_notice()? {
+            EpochNotice::Revocation(n) => Some(n),
+            EpochNotice::Root(_) => None,
+        }
     }
 
     fn set_capability(&self, cap: shoebox_core::store::LibraryCapability) {
@@ -105,7 +117,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         self.node().emit(NodeEvent::LibraryRotated { cap });
     }
 
-    fn remember_notice(&self, notice: &RotationNotice) {
+    fn remember_notice(&self, notice: &EpochNotice) {
         *self.inner.notice.lock().unwrap() = Some(notice.clone());
         self.inner.notice_acked.lock().unwrap().clear();
         save_notice(&self.node().config().data_dir, notice);
@@ -167,10 +179,76 @@ impl<L: LibraryStore> LibraryNode<L> {
             revocation,
             admin,
         );
-        self.remember_notice(&notice);
+        self.remember_notice(&EpochNotice::Revocation(notice.clone()));
         self.set_capability(new);
         self.announce_notice();
         Ok(notice)
+    }
+
+    /// Replace the library's root key, for when the recovery phrase may have leaked. `phrase` is
+    /// the current one. A new root key is made; every device and admin that is a member now is
+    /// re-certified by it in a new epoch, which the others follow (the old phrase opens nothing
+    /// there). Devices that were removed are left behind. Returns the new recovery kit: show it
+    /// once, it is the only copy.
+    pub async fn rotate_root(&self, phrase: &str) -> Result<RecoveryKit> {
+        let old_cap = self.capability()?;
+        let old_root = RecoveryKit::key_from_phrase(phrase, &old_cap.root)?;
+        let new_root = KeyPair::generate();
+        let identity = old_cap.identity_id();
+        let me = self.device();
+        let list = self.store().device_list().await?;
+        anyhow::ensure!(
+            list.devices.iter().any(|d| d.device == me && !d.revoked),
+            "this device is not a member of the library"
+        );
+        // Who is an admin and who is a member now, signed by the new root.
+        let mut certs = vec![];
+        let mut admins: Vec<EndpointId> = list.admins.iter().map(|a| a.admin).collect();
+        if !admins.contains(&me) {
+            admins.push(me); // whoever holds the phrase can act on what follows
+        }
+        for admin in admins {
+            let expires = list
+                .admins
+                .iter()
+                .find(|a| a.admin == admin)
+                .and_then(|a| a.expires_at);
+            certs.push(SignedDeviceChange::Admin(issue_admin_cert(
+                &new_root,
+                identity,
+                admin,
+                self.holdings_hlc(),
+                expires,
+            )));
+        }
+        for d in list.devices.iter().filter(|d| !d.revoked) {
+            certs.push(SignedDeviceChange::Device(issue_device_cert(
+                &new_root,
+                identity,
+                d.device,
+                d.role,
+                &d.name,
+                self.holdings_hlc(),
+                false,
+            )));
+        }
+        let new_cap = self
+            .store()
+            .begin_root_rotation(new_root.root_public(), certs)
+            .await?;
+        let handover = issue_root_handover(
+            &old_root,
+            &new_root,
+            identity,
+            old_cap.library,
+            new_cap.clone(),
+        );
+        // The new phrase has not been saved yet.
+        self.set_recovery_kit_saved(false).await?;
+        self.remember_notice(&EpochNotice::Root(handover));
+        self.set_capability(new_cap);
+        self.announce_notice();
+        Ok(RecoveryKit::new(identity, self.now_ms(), new_root))
     }
 
     /// Push the current notice to every non-revoked member (in the background).
@@ -195,7 +273,7 @@ impl<L: LibraryStore> LibraryNode<L> {
 
     /// Offer the current notice to `peer`; returns whether it moved because of it.
     pub(crate) async fn push_notice(&self, peer: &EndpointId) -> Result<bool> {
-        let Some(notice) = self.rotation_notice() else {
+        let Some(notice) = self.epoch_notice() else {
             return Ok(false);
         };
         if self.inner.notice_acked.lock().unwrap().contains(peer) {
@@ -236,6 +314,45 @@ impl<L: LibraryStore> LibraryNode<L> {
     #[doc(hidden)]
     pub async fn accept_notice_for_test(&self, notice: &RotationNotice) -> Result<bool> {
         self.accept_notice(notice).await
+    }
+
+    /// Test hook: [`LibraryNode::accept_notice_for_test`] for either kind of notice.
+    #[doc(hidden)]
+    pub async fn accept_epoch_notice_for_test(&self, notice: &EpochNotice) -> Result<bool> {
+        self.accept_epoch_notice(notice).await
+    }
+
+    pub(crate) async fn accept_epoch_notice(&self, notice: &EpochNotice) -> Result<bool> {
+        match notice {
+            EpochNotice::Revocation(n) => self.accept_notice(n).await,
+            EpochNotice::Root(h) => self.accept_handover(h).await,
+        }
+    }
+
+    /// Follow a root handover: from the epoch this device is in, signed by the root it trusts
+    /// now and by the new one. The first valid handover wins: once this device has moved, a
+    /// competing one (from the same old root) is for an epoch it has left.
+    async fn accept_handover(&self, handover: &RootHandover) -> Result<bool> {
+        let cap = self.capability()?;
+        if handover.new_cap.library == cap.library {
+            return Ok(false); // already there
+        }
+        ensure!(
+            handover.old == cap.library,
+            "the handover is for another epoch of this library"
+        );
+        handover
+            .verify(&cap.root, cap.identity_id())
+            .map_err(|e| anyhow!("invalid root handover: {e}"))?;
+        self.store().adopt_root_rotation(&handover.new_cap).await?;
+        self.remember_notice(&EpochNotice::Root(handover.clone()));
+        self.set_capability(handover.new_cap.clone());
+        self.node().emit(NodeEvent::RecoveryPhraseReplaced);
+        tracing::warn!("the library's recovery phrase was replaced on another device");
+        for id in self.peers() {
+            let _ = self.inner.nudge.send(id);
+        }
+        Ok(true)
     }
 
     /// Verify and follow a rotation announced by an admin. `Ok(true)` if this device moved.
@@ -286,7 +403,7 @@ impl<L: LibraryStore> LibraryNode<L> {
             .apply_device_change(SignedDeviceChange::Device(notice.revocation.clone()))
             .await?;
         store.adopt_rotation(&notice.new_cap).await?;
-        self.remember_notice(notice);
+        self.remember_notice(&EpochNotice::Revocation(notice.clone()));
         self.set_capability(notice.new_cap.clone());
         // Everything else comes back from the others.
         for id in self.peers() {

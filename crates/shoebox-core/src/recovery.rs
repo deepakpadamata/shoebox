@@ -9,7 +9,7 @@ use bip39::Mnemonic;
 pub enum RecoveryError {
     #[error("that is not a valid 24-word recovery phrase")]
     BadPhrase,
-    #[error("the phrase is valid but belongs to a different library")]
+    #[error("that is not this library's current recovery phrase (it belongs to another library, or it was replaced)")]
     WrongLibrary,
 }
 

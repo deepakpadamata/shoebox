@@ -35,7 +35,8 @@
   let busy = $state(false);
   let kitOpen = $state(false);
   let kitDismissed = $state(false);
-  const alert = $derived(app.state?.alerts.at(-1));
+  // A replaced phrase matters most (the person's own copy is dead); then the newest alert.
+  const alert = $derived(app.state?.alerts.find((a) => a.kind === 'phrase_replaced') ?? app.state?.alerts.at(-1));
   const recovery = $derived(app.state?.recovery_request ?? null);
   let answering = $state(false);
   async function answerRecovery(accept: boolean) {
@@ -131,6 +132,8 @@
 
     {#if app.removed || app.state?.membership === 'removed'}
       <div class="banners"><Banner tone="risk" icon="⛔">This device was removed from the library. It no longer syncs; your photos on it stay until you delete them.</Banner></div>
+    {:else if alert?.kind === 'phrase_replaced'}
+      <div class="banners"><Banner tone="risk" icon="🛡" action="Review" onaction={() => go('devices')} ondismiss={() => api.dismissAlert(alert.device_id).catch(fail)}>Your library's <b>recovery phrase was replaced</b> on another device ({when(alert.at_ms)}). Your old phrase no longer works; get the new one from whoever replaced it. If nobody you know did, check Devices for devices you do not know.</Banner></div>
     {:else if alert}
       <div class="banners"><Banner tone="risk" icon="🛡" action="Review" onaction={() => go('devices')} ondismiss={() => api.dismissAlert(alert.device_id).catch(fail)}><b>{alert.device_name}</b> became an admin of your library ({when(alert.at_ms)}). If that was not you, someone may have your recovery phrase: remove that device in Devices.</Banner></div>
     {:else if atRisk > 0 && sec !== 'health'}

@@ -63,6 +63,10 @@ pub(crate) enum Carry {
     All,
     /// What this device wrote itself plus the device list (members following a rotation).
     Own,
+    /// [`Carry::All`] without certificates: the new epoch trusts another root (a handover).
+    AllButCerts,
+    /// [`Carry::Own`] without certificates, for the same reason.
+    OwnButCerts,
 }
 
 /// The capability of a rotated library: a new epoch id, the original identity in the payload.
@@ -137,7 +141,18 @@ impl Inner {
 
     /// The records that follow this replica into a new epoch.
     fn carried(&self, carry: Carry) -> Vec<StateEntry> {
+        let certs = |e: &StateEntry| matches!(e, StateEntry::Device(_) | StateEntry::Admin(_));
         match carry {
+            Carry::AllButCerts => self
+                .carried(Carry::All)
+                .into_iter()
+                .filter(|e| !certs(e))
+                .collect(),
+            Carry::OwnButCerts => self
+                .carried(Carry::Own)
+                .into_iter()
+                .filter(|e| !certs(e))
+                .collect(),
             Carry::All => self
                 .state
                 .all_entries()
@@ -221,12 +236,26 @@ impl LibraryShared {
     /// Replace the replica by a fresh one for `new_epoch`, carrying `carry`; returns the old
     /// epoch's id. The old on-disk replica is removed once the new one holds the records.
     pub(crate) fn rotate(&self, new_epoch: LibraryId, carry: Carry) -> Result<LibraryId> {
+        let root = self.inner.lock().unwrap().root;
+        self.rotate_to(new_epoch, root, carry, vec![])
+    }
+
+    /// [`LibraryShared::rotate`] into an epoch that trusts `root`, writing `first` (its
+    /// certificates) before the carried records.
+    pub(crate) fn rotate_to(
+        &self,
+        new_epoch: LibraryId,
+        root: RootPublicKey,
+        carry: Carry,
+        first: Vec<StateEntry>,
+    ) -> Result<LibraryId> {
         let mut inner = self.inner.lock().unwrap();
         let old = inner.library;
-        let records = inner.carried(carry);
+        let mut records = first;
+        records.extend(inner.carried(carry));
         let mut fresh = Inner::build(
             inner.device,
-            inner.root,
+            root,
             inner.identity,
             new_epoch,
             inner.signer.clone(),
@@ -766,6 +795,39 @@ impl LibraryStore for LoroLibrary {
     async fn adopt_rotation(&self, new: &LibraryCapability) -> Result<()> {
         self.writable()?;
         let old = self.shared.rotate(new.library, Carry::Own)?;
+        self.transport.rotated(old, new.library, &self.shared);
+        Ok(())
+    }
+
+    async fn begin_root_rotation(
+        &self,
+        new_root: RootPublicKey,
+        certs: Vec<SignedDeviceChange>,
+    ) -> Result<LibraryCapability> {
+        self.writable()?;
+        let mut id = [0u8; 16];
+        getrandom::fill(&mut id).expect("operating system randomness");
+        let new = LibraryId(id);
+        let identity = self.shared.inner.lock().unwrap().identity_id();
+        let first = certs
+            .into_iter()
+            .map(|c| match c {
+                SignedDeviceChange::Admin(a) => StateEntry::Admin(a),
+                SignedDeviceChange::Device(d) => StateEntry::Device(d),
+            })
+            .collect();
+        let old = self
+            .shared
+            .rotate_to(new, new_root, Carry::AllButCerts, first)?;
+        self.transport.rotated(old, new, &self.shared);
+        Ok(rotated_capability(new, identity, new_root))
+    }
+
+    async fn adopt_root_rotation(&self, new: &LibraryCapability) -> Result<()> {
+        self.writable()?;
+        let old = self
+            .shared
+            .rotate_to(new.library, new.root, Carry::OwnButCerts, vec![])?;
         self.transport.rotated(old, new.library, &self.shared);
         Ok(())
     }

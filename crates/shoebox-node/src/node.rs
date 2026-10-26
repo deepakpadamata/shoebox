@@ -108,6 +108,9 @@ pub enum NodeEvent {
         device: shoebox_core::ids::EndpointId,
         name: String,
     },
+    /// This device followed a root handover: the library's recovery phrase was replaced on
+    /// another device, and the old phrase no longer opens it.
+    RecoveryPhraseReplaced,
     /// This device's certified role changed (an admin or the recovery phrase changed it); the
     /// node already follows it. Persist it where the app keeps its settings.
     RoleChanged {

@@ -63,16 +63,12 @@ debug = "line-tables-only"
 # The incremental cache alone grew past 4 GB here; builds are fast enough without it.
 incremental = false
 
+# Dependencies are built optimised even in debug builds; our own crates stay quick to rebuild.
+# Unoptimised crypto, hashing and iroh-docs' database made tests ten times slower on x86 Linux than
+# on Apple silicon (a 1,500-record sync: 35 s against 0.4 s optimised), so they failed on CI and on
+# the keeper box; and a debug phone build read video at 3 MB/s, slower than the video plays.
 [profile.dev.package."*"]
 debug = false
-
-# Reading blobs (bao verification) unoptimised made a debug phone build read a 4 MB piece of a
-# video in over a second, slower than the video plays; the release build takes milliseconds.
-[profile.dev.package.iroh-blobs]
-opt-level = 2
-[profile.dev.package.bao-tree]
-opt-level = 2
-[profile.dev.package.blake3]
 opt-level = 2
 
 [workspace.lints.rust]

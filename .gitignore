@@ -4,3 +4,6 @@
 /fixtures-out/
 node_modules/
 dist/
+
+# Local dev-server and preview configs: they hold this machine's paths.
+.claude/launch.json

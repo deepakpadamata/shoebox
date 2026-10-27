@@ -22,12 +22,18 @@ anything without a valid minisign signature (A-065).
 - Put the real minisign public key into the install script.
 - Tag `v0.1.0-rc.1` and let the workflows build: macOS universal (notarised), Android APK, keeper for x86_64/aarch64/macOS.
 - Install each artifact from scratch on a clean machine; the keeper through `install-keeper.sh` on the Linux box.
+- **Size.** The workspace has no `[profile.release]` settings. Try thin or fat LTO, `codegen-units = 1`,
+  `strip = "symbols"` (keep a symbol file per release for crash reports) and `panic = "abort"` if nothing relies on
+  unwinding, and measure the APK, the app bundle and the keeper before and after. For scale (2026-10-27): the S25's
+  debug APK was 361 MB (173 MB of it gaps left by in-place rebuilds, plus a 179 MB debug Rust library that is 77 MB
+  stripped); the Mac's release binary is 57 MB with 28.5 MB of code.
 
 ## Acceptance criteria
 
 - [ ] The macOS app opens without a Gatekeeper warning.
 - [ ] The APK installs on a phone that has never had a dev build.
 - [ ] `install-keeper.sh` verifies the real signature and installs on the Linux box.
+- [ ] The installed Android app is under 60 MB, with the before/after sizes recorded in the release notes.
 
 ---
 _Depends on: R1-13 · Estimate: 2d · Features: —_

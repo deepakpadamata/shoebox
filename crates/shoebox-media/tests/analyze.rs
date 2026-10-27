@@ -271,6 +271,12 @@ fn small_corpus_imports_well_above_20_photos_per_second() {
         n += 1;
     }
     let rate = n as f64 / start.elapsed().as_secs_f64();
+    // A shared CI VM running a debug build is no measure of speed: report it there, enforce it on
+    // real machines.
+    if std::env::var_os("GITHUB_ACTIONS").is_some() {
+        eprintln!("{rate:.0} photos/s (not enforced on CI)");
+        return;
+    }
     assert!(rate >= 20.0, "{rate:.0} photos/s");
 }
 

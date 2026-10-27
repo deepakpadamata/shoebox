@@ -145,6 +145,12 @@ impl BlobStore {
         Ok(hash)
     }
 
+    /// Stored, and something still keeps it: a blob whose protections were all dropped is only
+    /// waiting for collection (a released gallery reference may not be readable any more).
+    pub async fn kept(&self, hash: &Blake3Hash) -> Result<bool> {
+        Ok(self.has(hash).await? && !self.protections(hash).await?.is_empty())
+    }
+
     pub async fn has(&self, hash: &Blake3Hash) -> Result<bool> {
         Ok(self.size(hash).await?.is_some())
     }

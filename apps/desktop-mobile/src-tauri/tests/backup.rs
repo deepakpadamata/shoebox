@@ -7,29 +7,22 @@ use desktop_mobile::{pause_reason, AppCore, AppOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// A phone gallery of 100 distinct photos, each larger than what the blob store keeps inline
+/// (16 KiB), so referencing is really exercised: the sample JPEGs with a unique trailer.
 fn corpus(dir: &Path) -> Vec<PathBuf> {
-    let out = dir.join("corpus");
-    xtask::corpus::generate(&xtask::corpus::Options {
-        preset: xtask::corpus::Preset::Small,
-        out_dir: out.clone(),
-        seed: 11,
-        metadata_only: None,
-    })
-    .unwrap();
-    fn walk(d: &Path, out: &mut Vec<PathBuf>) {
-        for e in std::fs::read_dir(d).unwrap().flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                walk(&p, out);
-            } else {
-                out.push(p);
-            }
-        }
-    }
-    let mut files = vec![];
-    walk(&out.join("photos"), &mut files);
-    files.sort();
-    files
+    let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/samples");
+    let bases = ["photo-gps.jpg", "IMG_0001.jpg"].map(|f| std::fs::read(samples.join(f)).unwrap());
+    let out = dir.join("DCIM").join("Camera");
+    std::fs::create_dir_all(&out).unwrap();
+    (0..100)
+        .map(|i| {
+            let mut bytes = bases[i % 2].clone();
+            bytes.extend_from_slice(format!("shoebox test photo {i}").as_bytes());
+            let p = out.join(format!("IMG_{i:04}.jpg"));
+            std::fs::write(&p, bytes).unwrap();
+            p
+        })
+        .collect()
 }
 
 fn policy(wifi: bool, charging: bool) -> BackupPolicy {
@@ -413,7 +406,6 @@ async fn many_photos_gone_at_once_wait_for_the_person() {
     }
     r.core.backup_configure(policy(false, false)).await.unwrap();
     r.core.backup_run(true).await.unwrap();
-    // The corpus has a few files that are not photos, or the same photo twice.
     let n = photos(&r.core).await;
     let tracked = r.core.backup_status().await.unwrap().imported;
     assert!(n > 70);
@@ -443,10 +435,9 @@ async fn many_photos_gone_at_once_wait_for_the_person() {
     r.core.shutdown().await.unwrap();
 }
 
-/// With only some photos shared, a file the app cannot see may just be one no longer shared:
-/// nothing is deleted. Backup turned off still follows the gallery.
+/// Without photo access nothing is checked; backup turned off still follows the gallery.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn only_full_access_lets_the_gallery_delete() {
+async fn the_gallery_is_followed_with_backup_off_but_not_without_access() {
     let r = rig().await;
     r.source.put("a", &r.files[0], 1);
     r.source.put("b", &r.files[1], 2);
@@ -460,12 +451,81 @@ async fn only_full_access_lets_the_gallery_delete() {
         .await
         .unwrap();
     std::fs::remove_file(&r.files[0]).unwrap();
-    r.source.set_permission(Permission::Limited);
+    r.source.set_permission(Permission::Denied);
     r.core.gallery_check().await.unwrap();
     assert_eq!(photos(&r.core).await, 2);
     r.source.set_permission(Permission::Granted);
     r.core.gallery_check().await.unwrap();
     assert_eq!(photos(&r.core).await, 1);
+    r.core.shutdown().await.unwrap();
+}
+
+/// With only some photos shared, Android hides every other file, so a deleted file and an
+/// unshared one look alike. A disappearance is a deletion, except across a change of access:
+/// Shoebox's own "share more" prompt, or access narrowed from all photos to some. Those photos
+/// were unshared and stay in the library.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn with_some_photos_shared_deletions_count_and_unshares_do_not() {
+    let r = rig().await;
+    r.source.set_permission(Permission::Limited);
+    for i in 0..6 {
+        r.source.put(&format!("a{i}"), &r.files[i], 1);
+    }
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+    r.core.backup_run(true).await.unwrap();
+    let n = photos(&r.core).await;
+    assert_eq!(n, 6);
+
+    // Deleted in the gallery: deleted from the library.
+    std::fs::remove_file(&r.files[0]).unwrap();
+    r.core.backup_run(true).await.unwrap();
+    assert_eq!(photos(&r.core).await, 5);
+
+    // Unshared at Shoebox's own prompt: kept, no longer held here.
+    r.source.answer_request(Permission::Limited);
+    r.source.unshare_on_request(vec![r.files[1].clone()]);
+    r.core.import_picked(false).await.unwrap();
+    assert_eq!(photos(&r.core).await, 5);
+    assert_eq!(r.core.backup_status().await.unwrap().imported, 4);
+    assert_eq!(r.core.device_storage().await.unwrap()[0].originals, 4);
+
+    // Full access, then narrowed in the system settings: what vanished was unshared.
+    r.source.set_permission(Permission::Granted);
+    r.core.backup_run(true).await.unwrap();
+    r.source.set_permission(Permission::Limited);
+    std::fs::remove_file(&r.files[2]).unwrap();
+    r.core.backup_run(true).await.unwrap();
+    assert_eq!(photos(&r.core).await, 5);
+    assert_eq!(r.core.backup_status().await.unwrap().imported, 3);
+
+    // Later disappearances are deletions again.
+    std::fs::remove_file(&r.files[3]).unwrap();
+    r.core.backup_run(true).await.unwrap();
+    assert_eq!(photos(&r.core).await, 4);
+    r.core.shutdown().await.unwrap();
+}
+
+/// The viewer asks for an original whose gallery file cannot be read (here: cut short). The
+/// photo stays, this phone stops holding it, and the original is reported as not here so the
+/// viewer gets it from another device instead of breaking.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_unreadable_gallery_file_is_let_go_not_served() {
+    let r = rig().await;
+    r.source.put("a", &r.files[0], 1);
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+    r.core.backup_run(true).await.unwrap();
+    let id = r.core.library_page(None, 10).await.unwrap().items[0]
+        .id
+        .clone();
+    assert!(r.core.photo_detail(&id).await.unwrap().has_original);
+    std::fs::write(&r.files[0], b"cut").unwrap();
+    let got = desktop_mobile::blob::serve(&r.core, &id, "original", None)
+        .await
+        .unwrap();
+    assert!(got.is_none(), "not served from a broken file");
+    assert_eq!(photos(&r.core).await, 1, "the photo stays");
+    assert!(!r.core.photo_detail(&id).await.unwrap().has_original);
+    assert_eq!(r.core.backup_status().await.unwrap().imported, 0);
     r.core.shutdown().await.unwrap();
 }
 

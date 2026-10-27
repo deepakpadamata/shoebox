@@ -102,6 +102,8 @@ struct FakeState {
     removed: Vec<(String, u64)>,
     /// What the next [`PhotoSource::pick`] returns.
     picks: Vec<Picked>,
+    /// Files the person stops sharing at the next prompt (deleted here, as Android hides them).
+    unshare_on_request: Vec<PathBuf>,
 }
 
 impl FakePhotoSource {
@@ -120,6 +122,7 @@ impl FakePhotoSource {
                 assets: vec![],
                 removed: vec![],
                 picks: vec![],
+                unshare_on_request: vec![],
             }),
         }
     }
@@ -173,6 +176,12 @@ impl FakePhotoSource {
         self.state.lock().unwrap().conditions = c;
     }
 
+    /// At the next prompt the person unshares these files: Android then hides them from the app,
+    /// which the fake shows by deleting them.
+    pub fn unshare_on_request(&self, files: Vec<PathBuf>) {
+        self.state.lock().unwrap().unshare_on_request = files;
+    }
+
     /// The app may see the asset but not read its file where it is.
     pub fn make_unreadable(&self, id: &str) {
         let mut s = self.state.lock().unwrap();
@@ -198,6 +207,9 @@ impl PhotoSource for FakePhotoSource {
             let mut s = self.state.lock().unwrap();
             if let Some(p) = s.on_request.take() {
                 s.permission = p;
+            }
+            for f in std::mem::take(&mut s.unshare_on_request) {
+                let _ = std::fs::remove_file(f);
             }
             Ok(s.permission)
         })

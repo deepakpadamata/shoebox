@@ -69,6 +69,10 @@ pub(crate) struct BackupState {
     /// Gallery deletions waiting for the person to confirm (asset ids), see [`MASS_DELETION`].
     #[serde(default)]
     pub held_deletions: Vec<String>,
+    /// The photo access the last gallery check ran with: a file that vanishes when access
+    /// shrinks was unshared, not deleted.
+    #[serde(default)]
+    pub last_permission: Option<Permission>,
     pub last_scan_ms: u64,
     pub last_error: Option<String>,
 }
@@ -382,16 +386,35 @@ impl AppCore {
         self.check_gallery(&*source, &ln).await
     }
 
-    /// Photos whose gallery file is gone are deleted from the library. Only with access to every
-    /// photo: when only some are shared, a file the app cannot see may just be one no longer
-    /// shared. A file on a card that is not mounted is not gone.
+    /// Photos whose gallery file is gone are deleted from the library. A file on a card that is not
+    /// mounted is not gone.
+    ///
+    /// With only some photos shared, Android hides every other file, so a deleted file and an
+    /// unshared one look the same. A shared file stops being visible when the person deletes it
+    /// or unshares it, and unsharing happens when access changes: through Shoebox's own "share
+    /// more" prompt (see [`AppCore::import_picked`]) or by narrowing access in the system
+    /// settings. Files that vanish across such a change are unshared: they stay in the library
+    /// and this phone stops holding them. Any other disappearance is a deletion. Without access,
+    /// nothing is checked.
     async fn check_gallery(
         &self,
         source: &dyn PhotoSource,
         ln: &LibraryNode<Library>,
     ) -> Result<()> {
-        if source.permission().await? != Permission::Granted {
+        let permission = source.permission().await?;
+        if permission == Permission::Denied {
             return Ok(());
+        }
+        let narrowed = {
+            let mut st = self.backup.lock().await;
+            let before = st.last_permission.replace(permission);
+            if before != Some(permission) {
+                st.save(self.data_dir())?;
+            }
+            before == Some(Permission::Granted) && permission == Permission::Limited
+        };
+        if narrowed {
+            return self.release_unshared(ln).await;
         }
         let (gone, total) = {
             let mut st = self.backup.lock().await;
@@ -424,6 +447,50 @@ impl AppCore {
             return Ok(());
         }
         self.apply_gallery_deletions(ln, &gone, true).await
+    }
+
+    /// Access just shrank: what this phone can no longer see was unshared. Keep those photos in
+    /// the library; this phone no longer holds them.
+    async fn release_unshared(&self, ln: &LibraryNode<Library>) -> Result<()> {
+        let unshared: Vec<String> = {
+            let st = self.backup.lock().await;
+            st.tracked
+                .iter()
+                .filter(|(_, t)| gone_from_gallery(Path::new(&t.path)))
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        if !unshared.is_empty() {
+            tracing::info!("{} photo(s) no longer shared with Shoebox", unshared.len());
+        }
+        self.apply_gallery_deletions(ln, &unshared, false).await
+    }
+
+    /// An original this phone references cannot be read (the viewer found out). Look at the
+    /// gallery now: a deleted file deletes the photo. If it is still referenced after that (the
+    /// file changed, or it was unshared), stop holding it so it is fetched from another device.
+    pub(crate) async fn original_unreadable(&self, hash: &Blake3Hash) -> Result<()> {
+        let ln = self.ln().await?;
+        if self.photo_source.lock().unwrap().is_some() {
+            let _ = self.gallery_check().await;
+        }
+        if ln.is_in_place(hash).await? {
+            tracing::warn!("the gallery file of {hash} cannot be read: fetching it instead");
+            let ids: Vec<String> = {
+                let st = self.backup.lock().await;
+                st.tracked
+                    .iter()
+                    .filter(|(_, t)| t.hash == hash.to_string())
+                    .map(|(id, _)| id.clone())
+                    .collect()
+            };
+            if ids.is_empty() {
+                ln.release_in_place(&[*hash]).await?;
+            } else {
+                self.apply_gallery_deletions(&ln, &ids, false).await?;
+            }
+        }
+        Ok(())
     }
 
     /// The person's answer about held gallery deletions: delete those photos from the library
@@ -494,7 +561,15 @@ impl AppCore {
             failed: vec![],
         };
         if !files && source.permission().await? != Permission::Granted {
-            if source.request_permission().await? == Permission::Denied {
+            // Deletions so far count as deletions; what vanishes across the prompt was unshared.
+            let _ = self.check_gallery(&*source, &ln).await;
+            let answer = source.request_permission().await?;
+            {
+                let _running = self.backup_running.lock().await;
+                self.release_unshared(&ln).await?;
+                self.backup.lock().await.last_permission = Some(answer);
+            }
+            if answer == Permission::Denied {
                 bail!("Shoebox needs access to your photos to add them from the gallery");
             }
             // What is newly shared shows up in a full look at the roll.

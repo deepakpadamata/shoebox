@@ -24,7 +24,7 @@ pub struct BlobBytes {
     pub etag: String,
 }
 
-pub(crate) async fn serve(
+pub async fn serve(
     core: &Arc<AppCore>,
     id: &str,
     kind: &str,
@@ -71,7 +71,16 @@ pub(crate) async fn serve(
         // Thumbnails and previews are small: get them for the retry.
         core.fetch_in_background(photo, bk);
     }
-    read_blob(core, &blob.hash, &blob.mime, range).await
+    match read_blob(core, &blob.hash, &blob.mime, range).await {
+        Err(e) if bk == BlobKind::Original => {
+            // A gallery file this phone references may be gone: sort that out, and report the
+            // original as not here so the viewer fetches it from another device.
+            tracing::warn!("reading the original of {photo}: {e:#}");
+            core.original_unreadable(&blob.hash).await?;
+            Ok(None)
+        }
+        other => other,
+    }
 }
 
 /// The bytes (or a range) of a blob that is on this device; `None` if it is not.

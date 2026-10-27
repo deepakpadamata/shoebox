@@ -261,10 +261,16 @@ impl<L: LibraryStore> LibraryNode<L> {
             BlobKind::Preview => rec.preview.hash,
             BlobKind::Thumb => rec.thumb.hash,
         };
-        if self.node().blobs().has(&blob).await? {
+        if self.node().blobs().kept(&blob).await? {
             return Ok(FetchSource {
                 device: self.device(),
             });
+        }
+        if self.node().blobs().has(&blob).await? {
+            // Released and waiting for collection: the store would answer from it.
+            anyhow::bail!(
+                "this device is letting go of its copy of that file; the original can be fetched in a few minutes"
+            );
         }
         let source = self.fetch_from_holders(&blob).await?;
         self.publish_holdings(vec![(blob, kind)]).await?;

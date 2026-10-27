@@ -312,8 +312,18 @@ Behaviour that will come back as features or needs a decision.
     (`/storage/emulated/<n>`, `/storage/<card>`) is still there was deleted: the photo is deleted from the library
     (Recently Deleted for 30 days on every device, then purged everywhere, keeper copies included), and this phone's
     holding is retracted at once. Same content still in the gallery under another file keeps the photo. An edit (same
-    asset, new content) adds the new version and deletes the old one. Only with access to every photo: with some shared,
-    a missing file may just be one no longer shared. A card that is not mounted is not a deletion.
+    asset, new content) adds the new version and deletes the old one. A card that is not mounted is not a deletion.
+  - With only some photos shared, Android hides every other file (the S25 showed the app 22 of 3,114 files in the
+    camera folder), so a deleted file and an unshared one look the same. A shared file stops being visible when it is
+    deleted or unshared, and unsharing happens when access changes. So: files that vanish across Shoebox's own "share
+    more" prompt, or when access narrows from all photos to some, were unshared (kept in the library, no longer held
+    here); any other disappearance is a deletion. Not caught: unsharing single photos in the system settings while
+    access stays "some photos" counts as a deletion (Recently Deleted, restorable for 30 days). Without access nothing
+    is checked. (First build checked only with full access, and a deletion on the S25 was missed: found 2026-10-27.)
+  - An original that cannot be read when the viewer asks for it (the file changed or vanished) triggers a gallery
+    check; if the photo is still referenced after that, this phone stops holding it and reports it as not here, so the
+    viewer shows the preview and fetches the original from another device. A released blob counts as not here
+    (`BlobStore::kept`) until collection removes it; fetching it waits for that (up to one GC interval).
   - More than 50 gone at once and more than a quarter of the tracked photos waits for the person (banner: delete them
     too, or keep them in the library; kept ones are no longer held by this phone).
   - Free-up never counts `place/` originals: the file is the gallery's. Free-up on a phone only frees originals it
@@ -325,8 +335,9 @@ Behaviour that will come back as features or needs a decision.
     for folders the person promises not to change remains possible (A-028).
   - Checked on the S25 (Android 16, access to selected photos only, 2026-10-27): the selected files are readable by path,
     all 22 were tracked in place, and the 22 copies an earlier build made were replaced within one GC interval (the
-    app's blob data went from 190 MB to 17 MB). Not checked: GPS kept through the path (none of those photos had a
-    location), a gallery deletion on a real phone, the photo picker with full access.
+    app's blob data went from 190 MB to 17 MB); a gallery deletion with some photos shared reached the library on the
+    next check. Not checked: GPS kept through the path (none of those photos had a location), the photo picker with
+    full access.
   - Not handled: a shared album that references a deleted gallery photo keeps a dangling reference on this phone until
     the photo is purged (the album's other members have their own copies). iOS (PhotoKit) is not built.
 

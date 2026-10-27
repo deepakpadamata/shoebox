@@ -52,6 +52,22 @@
     }
   }
 
+  // The original this device had could not be read (a gallery file deleted or changed under
+  // it): show the preview, and get the original from another device.
+  async function originalFailed() {
+    if (!originalReady) return;
+    const id = photo.id;
+    originalReady = false;
+    try {
+      const d = await api.photoDetail(id);
+      if (photo.id !== id) return;
+      detail = d;
+      if (!d.has_original) await getOriginal();
+    } catch (e) {
+      fail(e);
+    }
+  }
+
   async function toggleFavorite() {
     await api.setFavorite([photo.id], !photo.favorite).catch(fail);
   }
@@ -94,9 +110,9 @@
     <div class="media">
       {#if photo.is_video && originalReady}
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video src={blobUrl(photo.id, 'original')} controls autoplay></video>
+        <video src={blobUrl(photo.id, 'original')} controls autoplay onerror={originalFailed}></video>
       {:else}
-        {#key photo.id}<img {src} alt={`${photo.is_video ? 'Video' : 'Photo'} from ${dateTime(photo.taken_at)}`} style="transform: translateY({pullY}px) scale({zoom}); opacity: {1 - Math.min(0.5, pullY / 400)}" ondblclick={() => (zoom = zoom > 1 ? 1 : 2.5)} />{/key}
+        {#key photo.id}<img {src} alt={`${photo.is_video ? 'Video' : 'Photo'} from ${dateTime(photo.taken_at)}`} style="transform: translateY({pullY}px) scale({zoom}); opacity: {1 - Math.min(0.5, pullY / 400)}" ondblclick={() => (zoom = zoom > 1 ? 1 : 2.5)} onerror={originalFailed} />{/key}
       {/if}
       {#if detail && !originalReady}
         <div class="overlay">

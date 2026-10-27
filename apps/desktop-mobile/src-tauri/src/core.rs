@@ -936,7 +936,7 @@ impl AppCore {
             backed_up,
             has_thumb: self.node.blobs().has(&rec.thumb.hash).await?,
             has_poster: self.poster_path(&rec.id).exists(),
-            has_original: self.node.blobs().has(&rec.original.hash).await?,
+            has_original: self.node.blobs().kept(&rec.original.hash).await?,
             width: rec.exif.width,
             height: rec.exif.height,
         })
@@ -1079,7 +1079,7 @@ impl AppCore {
             redundancy_target: ln.redundancy_target().await? as u32,
             has_thumb: self.node.blobs().has(&rec.thumb.hash).await?,
             has_preview: self.node.blobs().has(&rec.preview.hash).await?,
-            has_original: self.node.blobs().has(&rec.original.hash).await?,
+            has_original: self.node.blobs().kept(&rec.original.hash).await?,
             stored_on,
             albums: in_albums,
         })

@@ -62,8 +62,14 @@ impl<S: tracing::Subscriber> Layer<S> for RingLayer {
 pub fn init_logging() {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "info,loro_internal=warn".into());
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        // Debug builds also show the app's own debug lines (blob requests and the like).
+        if cfg!(debug_assertions) {
+            "info,loro_internal=warn,desktop_mobile=debug".into()
+        } else {
+            "info,loro_internal=warn".into()
+        }
+    });
     let _ = tracing_subscriber::registry()
         .with(filter)
         .with(tracing_subscriber::fmt::layer())

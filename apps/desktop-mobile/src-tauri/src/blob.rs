@@ -11,6 +11,10 @@ use std::sync::Arc;
 /// Without a `Range` header at most this much is returned (as a partial response); videos and
 /// large originals are streamed in pieces by the media element.
 const MAX_UNRANGED: u64 = 32 * 1024 * 1024;
+/// An open-ended range (`bytes=N-`, what a media element asks for) gets at most this much: the
+/// element asks for the rest piece by piece. Answering with the whole file made a large video
+/// (read in full, from the gallery on Android) never start.
+const MAX_OPEN_RANGE: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlobBytes {
@@ -83,6 +87,36 @@ pub async fn serve(
     }
 }
 
+/// A `Range: bytes=first-[last]` header value (one range).
+pub fn parse_range(value: &str) -> Option<(u64, Option<u64>)> {
+    let spec = value.strip_prefix("bytes=")?;
+    let (a, b) = spec.split_once('-')?;
+    Some((
+        a.parse().ok()?,
+        if b.is_empty() {
+            None
+        } else {
+            Some(b.parse().ok()?)
+        },
+    ))
+}
+
+/// What to send for `range` of a blob of `total` bytes: `(start, end exclusive, partial)`.
+fn span(range: Option<(u64, Option<u64>)>, total: u64) -> (u64, u64, bool) {
+    match range {
+        None if total <= MAX_UNRANGED => (0, total, false),
+        None => (0, MAX_UNRANGED, true),
+        Some((first, last)) => {
+            let first = first.min(total);
+            let end = match last {
+                Some(l) => (l + 1).min(total),
+                None => first.saturating_add(MAX_OPEN_RANGE).min(total),
+            };
+            (first, end.max(first), true)
+        }
+    }
+}
+
 /// The bytes (or a range) of a blob that is on this device; `None` if it is not.
 async fn read_blob(
     core: &Arc<AppCore>,
@@ -93,15 +127,7 @@ async fn read_blob(
     let Some(total) = core.blobs().size(hash).await? else {
         return Ok(None);
     };
-    let (start, end, partial) = match range {
-        None if total <= MAX_UNRANGED => (0, total, false),
-        None => (0, MAX_UNRANGED, true),
-        Some((first, last)) => {
-            let first = first.min(total);
-            let end = last.map_or(total, |l| (l + 1).min(total)).max(first);
-            (first, end, true)
-        }
-    };
+    let (start, end, partial) = span(range, total);
     let bytes = if end > start {
         core.blobs().open_range(hash, start..end).await?.to_vec()
     } else {
@@ -114,4 +140,24 @@ async fn read_blob(
         range: partial.then_some((start, end.saturating_sub(1))),
         etag: hash.to_string(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_open_range_of_a_large_blob_is_one_piece() {
+        let total = 140 * 1024 * 1024;
+        assert_eq!(span(Some((0, None)), total), (0, MAX_OPEN_RANGE, true));
+        let (start, end, _) = span(Some((total - 10, None)), total);
+        assert_eq!(
+            (start, end),
+            (total - 10, total),
+            "the last piece ends at the end"
+        );
+        assert_eq!(span(Some((10, Some(19))), total), (10, 20, true));
+        assert_eq!(span(Some((total + 5, None)), total), (total, total, true));
+        assert_eq!(span(None, 1000), (0, 1000, false));
+    }
 }

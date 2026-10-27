@@ -11,6 +11,7 @@ mod core;
 pub mod diagnostics;
 mod export;
 pub mod keystore;
+pub mod media;
 pub mod notify;
 pub mod photos_source;
 mod shared;

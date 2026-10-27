@@ -78,6 +78,21 @@ export function blobUrl(id: string, kind: BlobKind, album?: string): string {
   return `/blob/${id}?kind=${kind}`;
 }
 
+// Android's WebView cannot play a long video from `shoebox://` (it re-applies byte ranges), so
+// the app serves video originals over loopback HTTP there; `null` elsewhere.
+let mediaBase: string | null = null;
+
+export async function loadMediaBase() {
+  if (inTauri) mediaBase = await call<string | null>('media_base').catch(() => null);
+}
+
+/** Where a `<video>` loads a video's original from. */
+export function videoUrl(id: string, album?: string): string {
+  if (!mediaBase) return blobUrl(id, 'original', album);
+  const kind = album ? `album:${album}:original` : 'original';
+  return `${mediaBase}/blob/${id}?kind=${kind}`;
+}
+
 /** Subscribe to app events; returns the unsubscribe function. */
 export function onAppEvent(handler: (e: AppEvent) => void): () => void {
   if (inTauri) {

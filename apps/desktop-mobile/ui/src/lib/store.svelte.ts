@@ -1,6 +1,6 @@
 // App-wide reactive state: what the shell needs everywhere. Screens keep their own data and
 // refetch when `app.version` changes (the app core says something changed).
-import { api, onAppEvent, type AppEvent, type AppState, type LibraryCounts } from './api';
+import { api, loadMediaBase, onAppEvent, type AppEvent, type AppState, type LibraryCounts } from './api';
 
 export const app = $state({
   loading: true,
@@ -131,7 +131,7 @@ function handle(e: AppEvent) {
 
 export async function start() {
   try {
-    await refreshState();
+    await Promise.all([refreshState(), loadMediaBase()]);
   } catch (e) {
     app.error = e instanceof Error ? e.message : String(e);
   } finally {

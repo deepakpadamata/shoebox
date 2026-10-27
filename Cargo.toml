@@ -66,6 +66,15 @@ incremental = false
 [profile.dev.package."*"]
 debug = false
 
+# Reading blobs (bao verification) unoptimised made a debug phone build read a 4 MB piece of a
+# video in over a second, slower than the video plays; the release build takes milliseconds.
+[profile.dev.package.iroh-blobs]
+opt-level = 2
+[profile.dev.package.bao-tree]
+opt-level = 2
+[profile.dev.package.blake3]
+opt-level = 2
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

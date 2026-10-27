@@ -39,19 +39,6 @@ async fn command(app: tauri::AppHandle, cmd: String, args: Option<Value>) -> Res
         .map_err(|e| user_message(&e))
 }
 
-fn parse_range(value: &str) -> Option<(u64, Option<u64>)> {
-    let spec = value.strip_prefix("bytes=")?;
-    let (a, b) = spec.split_once('-')?;
-    Some((
-        a.parse().ok()?,
-        if b.is_empty() {
-            None
-        } else {
-            Some(b.parse().ok()?)
-        },
-    ))
-}
-
 /// `shoebox://localhost/blob/<photo id>?kind=thumb|preview|original`
 async fn serve_blob(
     core: Arc<AppCore>,
@@ -75,8 +62,15 @@ async fn serve_blob(
         .headers()
         .get(header::RANGE)
         .and_then(|v| v.to_str().ok())
-        .and_then(parse_range);
-    match core.blob(id, kind, range).await {
+        .and_then(crate::blob::parse_range);
+    let served = core.blob(id, kind, range).await;
+    tracing::debug!(
+        kind,
+        ?range,
+        outcome = ?served.as_ref().map(|b| b.as_ref().map(|b| (b.range, b.bytes.len()))),
+        "blob request"
+    );
+    match served {
         Ok(Some(b)) => {
             let mut resp = Response::builder()
                 .header(header::CONTENT_TYPE, &b.content_type)
@@ -217,6 +211,12 @@ pub fn run() {
                 ..AppOptions::default()
             };
             let core = tauri::async_runtime::block_on(AppCore::open(&data_dir, opts))?;
+            // Video originals go over loopback HTTP on Android (see `media.rs`).
+            #[cfg(target_os = "android")]
+            match tauri::async_runtime::block_on(crate::media::start(core.clone())) {
+                Ok(base) => core.set_media_base(base),
+                Err(e) => tracing::warn!("no media server, long videos will not play: {e:#}"),
+            }
             // Tray icon (M3-16): the app keeps syncing with its window closed; Quit ends it.
             #[cfg(desktop)]
             setup_tray(app)?;

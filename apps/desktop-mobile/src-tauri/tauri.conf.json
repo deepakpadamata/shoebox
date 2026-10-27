@@ -14,7 +14,7 @@
       { "title": "Shoebox", "width": 1280, "height": 820, "minWidth": 900, "minHeight": 560 }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' shoebox: http://shoebox.localhost blob: data:; media-src 'self' shoebox: http://shoebox.localhost; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost 'self'"
+      "csp": "default-src 'self'; img-src 'self' shoebox: http://shoebox.localhost blob: data:; media-src 'self' shoebox: http://shoebox.localhost http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost 'self'"
     }
   },
   "bundle": {

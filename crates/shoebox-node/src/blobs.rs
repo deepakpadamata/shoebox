@@ -25,7 +25,6 @@ use shoebox_core::ids::Blake3Hash;
 use shoebox_core::model::AlbumId;
 use std::ops::Range;
 use std::path::Path;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 
 /// Why a blob is being kept.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -185,11 +184,14 @@ impl BlobStore {
         if range.start >= end {
             return Ok(Bytes::new());
         }
-        let mut reader = self.store.blobs().reader(iroh_hash(hash));
-        reader.seek(SeekFrom::Start(range.start)).await?;
-        let mut buf = vec![0u8; (end - range.start) as usize];
-        reader.read_exact(&mut buf).await?;
-        Ok(buf.into())
+        // One request for the whole range: the seek-and-read reader is several times slower.
+        self.store
+            .blobs()
+            .export_ranges(iroh_hash(hash), range.start..end)
+            .concatenate()
+            .await
+            .map(Bytes::from)
+            .map_err(|e| anyhow!("reading {hash}: {e}"))
     }
 
     /// Add a protection to a blob that is already stored.

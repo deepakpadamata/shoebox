@@ -2,7 +2,7 @@
   // One shared album (mockups 4a–4e): photos, activity, people; add photos (with the location
   // question), invite, save to my library, settings.
   import { onMount, untrack } from 'svelte';
-  import { api, blobUrl, type FeedEntry, type InviteOut, type PhotoSummary, type SharedAlbumInfo, type SharedItemInfo, type SharedMemberInfo } from '../lib/api';
+  import { api, blobUrl, videoUrl, type FeedEntry, type InviteOut, type PhotoSummary, type SharedAlbumInfo, type SharedItemInfo, type SharedMemberInfo } from '../lib/api';
   import { dateTime, plural } from '../lib/format';
   import { app, fail, toast } from '../lib/store.svelte';
   import { go } from '../lib/route.svelte';
@@ -245,7 +245,7 @@
       {#key current.id + (full ? 'f' : 'p')}
         {#if current.is_video && current.has_original}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video src={blobUrl(current.id, 'original', album)} controls></video>
+          <video src={videoUrl(current.id, album)} controls></video>
         {:else if current.has_original && !current.is_video}
           <img src={blobUrl(current.id, 'original', album)} alt="" />
         {:else if current.is_video}

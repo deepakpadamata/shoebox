@@ -838,3 +838,78 @@ async fn pins_survive_a_restart() {
     );
     core.shutdown().await.unwrap();
 }
+
+/// One raw HTTP request to the media server; returns the status line, the head and the body.
+async fn http_get(base: &str, path: &str, range: Option<&str>) -> (String, String, Vec<u8>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let rest = base.strip_prefix("http://").unwrap();
+    let (addr, token) = rest.split_once('/').unwrap();
+    let path = path.replace("{token}", token);
+    let mut conn = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let range = range.map(|r| format!("Range: {r}\r\n")).unwrap_or_default();
+    conn.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n{range}\r\n").as_bytes())
+        .await
+        .unwrap();
+    let mut all = vec![];
+    conn.read_to_end(&mut all).await.unwrap();
+    let split = all.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8(all[..split].to_vec()).unwrap();
+    let status = head.lines().next().unwrap().to_string();
+    (status, head, all[split + 4..].to_vec())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_media_server_serves_any_range_and_only_with_the_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    let id = core.library_page(None, 1).await.unwrap().items[0]
+        .id
+        .clone();
+    let whole = core.blob(&id, "original", None).await.unwrap().unwrap();
+    let base = desktop_mobile::media::start(core.clone()).await.unwrap();
+    assert!(base.starts_with("http://127.0.0.1:"));
+
+    // A range that does not start at 0 comes back as exactly those bytes (Android's WebView
+    // could not take this from `shoebox://`).
+    let start = whole.total - 100;
+    let (status, head, body) = http_get(
+        &base,
+        &format!("/{{token}}/blob/{id}?kind=original"),
+        Some(&format!("bytes={start}-")),
+    )
+    .await;
+    assert!(status.contains("206"), "{status}");
+    assert!(
+        head.contains(&format!(
+            "Content-Range: bytes {start}-{}/{}",
+            whole.total - 1,
+            whole.total
+        )),
+        "{head}"
+    );
+    assert_eq!(body, whole.bytes[start as usize..]);
+
+    let (status, _, body) =
+        http_get(&base, &format!("/{{token}}/blob/{id}?kind=original"), None).await;
+    assert!(status.contains("200"), "{status}");
+    assert_eq!(body, whole.bytes);
+
+    let (status, head, _) = http_get(
+        &base,
+        &format!("/{{token}}/blob/{id}?kind=original"),
+        Some(&format!("bytes={}-", whole.total + 10)),
+    )
+    .await;
+    assert!(status.contains("416"), "{status}");
+    assert!(head.contains(&format!("Content-Range: bytes */{}", whole.total)));
+
+    let wrong = format!("/{}/blob/{id}?kind=original", "0".repeat(64));
+    let (status, _, body) = http_get(&base, &wrong, None).await;
+    assert!(
+        status.contains("404"),
+        "a wrong token names nothing: {status}"
+    );
+    assert!(!body.starts_with(&whole.bytes[..16]));
+    let (status, _, _) = http_get(&base, &format!("/blob/{id}?kind=original"), None).await;
+    assert!(status.contains("404"), "no token: {status}");
+}

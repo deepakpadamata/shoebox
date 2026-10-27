@@ -2,7 +2,7 @@
   // Full-size viewer (M3-08/09): the preview shows at once, the original replaces it when it is
   // here or once fetched on demand; the info panel says where every copy is stored.
   import { onMount } from 'svelte';
-  import { api, blobUrl, type PhotoDetail, type PhotoSummary } from '../lib/api';
+  import { api, blobUrl, videoUrl, type PhotoDetail, type PhotoSummary } from '../lib/api';
   import { bytes, dateTime, plural } from '../lib/format';
   import { fail, toast } from '../lib/store.svelte';
   import Button from '../components/Button.svelte';
@@ -36,11 +36,14 @@
   let zoom = $state(1);
   let pullY = $state(0);
   let originalReady = $state(false);
+  // The original is here but the media element could not play it (a codec this device lacks).
+  let unplayable = $state(false);
 
   $effect(() => {
     const id = photo.id;
     detail = null;
     originalReady = false;
+    unplayable = false;
     fetching = false;
     zoom = 1;
     pullY = 0;
@@ -78,6 +81,7 @@
       if (photo.id !== id) return;
       detail = d;
       if (!d.has_original) await getOriginal();
+      else unplayable = true;
     } catch (e) {
       fail(e);
     }
@@ -125,13 +129,15 @@
     <div class="media">
       {#if photo.is_video && originalReady}
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video src={blobUrl(photo.id, 'original')} controls autoplay onerror={originalFailed}></video>
+        <video src={videoUrl(photo.id)} controls autoplay onerror={originalFailed}></video>
       {:else}
         {#key photo.id}<img {src} alt={`${photo.is_video ? 'Video' : 'Photo'} from ${dateTime(photo.taken_at)}`} style="transform: translateY({pullY}px) scale({zoom}); opacity: {1 - Math.min(0.5, pullY / 400)}" ondblclick={() => (zoom = zoom > 1 ? 1 : 2.5)} onerror={originalFailed} />{/key}
       {/if}
       {#if detail && !originalReady}
         <div class="overlay">
-          {#if unavailable}
+          {#if unplayable}
+            <b>{photo.is_video ? 'This video cannot be played here' : 'This photo cannot be shown here'}</b><span>The original is on this device, but this device cannot open its format. The preview is what is shown.</span>
+          {:else if unavailable}
             <b>Original unavailable</b><span>The devices that have it are offline. The preview is what is here.</span>
           {:else}
             <Button kind="primary" size="sm" disabled={fetching} onclick={getOriginal}>{fetching ? 'Fetching original…' : `Get original (${bytes(detail.size)})`}</Button>

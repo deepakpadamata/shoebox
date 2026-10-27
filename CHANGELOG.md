@@ -14,6 +14,10 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
   Android and on the desktop, and `shoebox-keeper status` / `alerts` on the keeper.
 - Android: opening the app while a background backup is running no longer closes the app; the background run stops
   and hands over. Debug builds put the background run's log tail in its report (`adb logcat -s ShoeboxBurst`).
+- Long videos play on Android (they never started: the WebView re-applies byte ranges to the app's own URL scheme,
+  so videos now come from a loopback server inside the app, A-098), video pieces are 4 MB instead of the whole file,
+  and reading them is about 20 times faster. A video the device cannot play says so instead of offering "Get
+  original" again.
 - The app and the keeper tell you when a newer version is out (Settings → About → Check for new versions; the keeper's
   `status`). Nothing is installed automatically.
 - A phone keeps one copy of each photo: gallery photos are read where they are, never copied into Shoebox, and a photo

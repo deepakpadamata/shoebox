@@ -409,6 +409,26 @@ Behaviour that will come back as features or needs a decision.
     `shared_albums_follow_the_person_to_all_their_devices` (two devices of Ana, Ben; name, adoption, one person with
     two devices, one "joined", leaving everywhere, sharing an existing album and a later photo following).
 
+- **A-098 · Android plays videos over loopback HTTP (owner's report, 2026-10-27)** · A 140 MB HEVC video taken on the
+  S25 never played on the phone ("Get original" looped: the original was there, the `<video>` silently failed). Three
+  causes, found with the WebView debugger on the phone:
+  - *Android's WebView re-applies byte ranges.* Chromium's stream loader for `shouldInterceptRequest` responses
+    (`components/embedder_support/android/util/input_stream_reader.cc`, `SkipToRequestedRange`) skips the request's
+    first byte position in whatever stream the handler returns, so a correct partial answer from `shoebox://` is cut
+    again and fails; only requests from byte 0 worked, and a long video needs many pieces. Video originals on Android
+    are therefore served by a small HTTP server in the app (`src-tauri/src/media.rs`): bound to 127.0.0.1, every path
+    starting with a random 256-bit token made at each start (other apps on the phone can reach the port but cannot
+    name a blob), `GET`/`HEAD` only, one request per connection, `no-store`. The CSP allows `http://127.0.0.1:*` for
+    `media-src` only; the release network security config allows plain HTTP to 127.0.0.1 only (debug: anywhere, for
+    `tauri android dev`). Photos still use `shoebox://`; desktop is unchanged.
+  - *Open-ended ranges got the whole file.* `bytes=N-` (what a media element sends) now gets at most 4 MB.
+  - *Range reads were slow.* `BlobStore::open_range` read through iroh-blobs' seek-and-read reader: 1.4 s per 4 MB on
+    the phone; one `export_ranges` request takes 70 ms (60 MB/s), well above a phone video's bitrate.
+  - Verified on the S25 (debug build, via the WebView debugger): metadata in 64 ms, 6 s of playback in 6 s, a seek to
+    70 % and 5 s more, no stalls. The release network security config has not run (needs a release build, R1-14).
+  - The viewer now says when an original that is on the device cannot be played instead of offering "Get original"
+    again.
+
 ### Rules for future changes
 
 Not open questions, but they must be honoured by any format or protocol change, and re-checked on every iroh upgrade (shared albums still run on iroh-docs).

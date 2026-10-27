@@ -125,12 +125,23 @@ impl Cluster {
     }
 }
 
-/// Poll `f` every 25 ms until it returns true; errors after `timeout`.
+/// How much longer to wait on slow machines: `SHOEBOX_TEST_TIME_SCALE` (CI sets 3; default 1).
+/// A real stall still fails, only later.
+pub fn time_scale() -> f64 {
+    std::env::var("SHOEBOX_TEST_TIME_SCALE")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|s| *s >= 1.0)
+        .unwrap_or(1.0)
+}
+
+/// Poll `f` every 25 ms until it returns true; errors after `timeout` (times [`time_scale`]).
 pub async fn wait_until<F, Fut>(timeout: Duration, mut f: F) -> Result<()>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = bool>,
 {
+    let timeout = timeout.mul_f64(time_scale());
     let deadline = Instant::now() + timeout;
     loop {
         if f().await {

@@ -8,6 +8,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # GitHub's runners are slow, shared VMs: sync tests wait three times as long before failing.
+  SHOEBOX_TEST_TIME_SCALE: "3"
 
 jobs:
   fmt:

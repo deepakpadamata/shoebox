@@ -4,4 +4,4 @@ mod assertions;
 mod cluster;
 
 pub use assertions::{assert_converged, assert_holders};
-pub use cluster::{wait_until, Cluster};
+pub use cluster::{time_scale, wait_until, Cluster};

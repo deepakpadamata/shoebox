@@ -32,6 +32,10 @@ pub struct ImportOptions {
     pub mode: ImportMode,
     /// Files analysed in parallel (analysis is CPU-bound).
     pub concurrency: usize,
+    /// This call is one part of a larger run: `(files already done, the run's total)`. Progress
+    /// events then count the whole run, so whoever forwards them needs no state of its own (that
+    /// state, read after the call returned, once mislabelled its last event).
+    pub part_of: Option<(usize, usize)>,
 }
 
 impl Default for ImportOptions {
@@ -42,6 +46,7 @@ impl Default for ImportOptions {
         Self {
             mode: ImportMode::Copy,
             concurrency: cpus.clamp(1, 8),
+            part_of: None,
         }
     }
 }
@@ -181,6 +186,10 @@ impl<L: LibraryStore> LibraryNode<L> {
                 self.publish_holdings(std::mem::take(&mut held)).await?;
             }
             if done.is_multiple_of(PROGRESS_EVERY) || done == total {
+                let (done, total) = match opts.part_of {
+                    Some((before, run)) => (before + done, run),
+                    None => (done, total),
+                };
                 self.node().emit(NodeEvent::ImportProgress {
                     done,
                     total,

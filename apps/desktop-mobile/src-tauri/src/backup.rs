@@ -623,10 +623,11 @@ impl AppCore {
                     Err(e) => summary.failed.push(format!("{e:#}")),
                 }
             }
-            *self.import_batches.lock().unwrap() =
-                Some((done + (batch.len() - paths.len()) as u32, total));
-            let result = ln.import_paths(&paths, ImportOptions::default()).await;
-            *self.import_batches.lock().unwrap() = None;
+            let opts = ImportOptions {
+                part_of: Some(((done as usize) + batch.len() - paths.len(), total as usize)),
+                ..ImportOptions::default()
+            };
+            let result = ln.import_paths(&paths, opts).await;
             for p in &paths {
                 let _ = std::fs::remove_file(p);
             }

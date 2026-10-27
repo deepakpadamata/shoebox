@@ -210,9 +210,6 @@ pub struct AppCore {
     /// A newer release the last check found.
     update: Mutex<Option<crate::types::UpdateInfo>>,
     pub(crate) photo_source: Mutex<Option<Arc<dyn crate::photos_source::PhotoSource>>>,
-    /// While a picked import runs in batches: (files done in earlier batches, total), so the
-    /// node's per-batch progress reads as one run.
-    pub(crate) import_batches: Mutex<Option<(u32, u32)>>,
     pub(crate) backup: tokio::sync::Mutex<crate::backup::BackupState>,
     pub(crate) backup_running: tokio::sync::Mutex<()>,
 }
@@ -283,7 +280,6 @@ impl AppCore {
             approved_recoveries: Mutex::new(vec![]),
             update: Mutex::new(None),
             photo_source: Mutex::new(None),
-            import_batches: Mutex::new(None),
             backup: tokio::sync::Mutex::new(backup_state),
             backup_running: tokio::sync::Mutex::new(()),
         });
@@ -474,14 +470,9 @@ impl AppCore {
                         kind: "blob".into(),
                     }),
                     NodeEvent::ImportProgress { done, total, .. } => {
-                        let (base, total) = core
-                            .import_batches
-                            .lock()
-                            .unwrap()
-                            .unwrap_or((0, total as u32));
                         Some(AppEvent::ImportProgress {
-                            done: base + done as u32,
-                            total,
+                            done: done as u32,
+                            total: total as u32,
                         })
                     }
                     NodeEvent::PairingCode {

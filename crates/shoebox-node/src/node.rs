@@ -145,7 +145,8 @@ pub enum NodeEvent {
         device: shoebox_core::ids::EndpointId,
         online: bool,
     },
-    /// Progress of an import run (counts of files processed so far, by outcome).
+    /// Progress of an import run. `done` and `total` count the whole run (see
+    /// `ImportOptions::part_of`); the outcomes count this call's files.
     ImportProgress {
         done: usize,
         total: usize,

@@ -420,11 +420,37 @@ async fn heartbeat_loop<L: LibraryStore>(
     cfg: PresenceConfig,
 ) {
     let mut ticker = tokio::time::interval(cfg.heartbeat);
+    let mut beats = 0u32;
     loop {
         ticker.tick().await;
         let Some(inner) = weak.upgrade() else { break };
         if let Some((_, bytes)) = sealed(&inner, PresenceMsg::Heartbeat) {
             let _ = sender.broadcast(bytes).await;
+        }
+        // A join that failed (the peer was asleep, on another network or restarting) is never
+        // retried by gossip itself (see `Node::gossip_dial`): every third beat, reconnect to the
+        // peers we do not hear from.
+        beats = beats.wrapping_add(1);
+        if beats.is_multiple_of(3) {
+            let quiet: Vec<iroh::EndpointId> = {
+                let devices = inner.devices.lock().unwrap();
+                inner
+                    .peers
+                    .lock()
+                    .unwrap()
+                    .keys()
+                    .filter(|id| !devices.get(*id).is_some_and(|r| r.online))
+                    .filter_map(|id| crate::addr::to_iroh_id(id).ok())
+                    .collect()
+            };
+            for peer in quiet {
+                let (node, sender) = (inner.node.clone(), sender.clone());
+                tokio::spawn(async move {
+                    if node.gossip_dial(peer).await.is_ok() {
+                        let _ = sender.join_peers(vec![peer]).await;
+                    }
+                });
+            }
         }
         // Mark devices we have not heard from as offline.
         let stale: Vec<EndpointId> = inner

@@ -211,3 +211,31 @@ fn photo() -> shoebox_core::model::PhotoRecord {
         deleted_at: Lww::new(None, h),
     }
 }
+
+/// A peer that could not be reached when presence first tried it (a phone on mobile data, a keeper
+/// restarting) is tried again: sync redials on its own, presence has to as well.
+#[tokio::test]
+async fn presence_reaches_a_peer_that_was_unreachable_at_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = MemNetwork::new();
+    let (a, cap) = spawn(&dir, "phone", Role::Companion, &net, None).await;
+    let (b, _) = spawn(&dir, "keeper", Role::Keeper, &net, Some(&cap)).await;
+    let (a_id, b_id) = (a.ln.node().id(), b.ln.node().id());
+    a.ln.node().block_peer(b_id);
+    b.ln.node().block_peer(a_id);
+    connect(&a, &b);
+    a.ln.start_presence(fast_presence()).await.unwrap();
+    b.ln.start_presence(fast_presence()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    // The networks meet; nobody adds anybody again.
+    a.ln.node().unblock_peer(b_id);
+    b.ln.node().unblock_peer(a_id);
+    let b_id = EndpointId(*b_id.as_bytes());
+    assert!(
+        wait_for(Duration::from_secs(15), || async {
+            a.ln.devices().iter().any(|d| d.id == b_id && d.online)
+        })
+        .await,
+        "b shows up online once it can be reached"
+    );
+}

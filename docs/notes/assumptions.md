@@ -367,6 +367,18 @@ Behaviour that will come back as features or needs a decision.
   device removed from the keeper is locked out of what is written next like one removed in the app. `devices add` offers a pairing string (no QR: the person pastes it into the new device's
   app, which already accepts a pasted ticket) and relays the six-digit code over the same socket conversation as `pair`;
   it needs the keeper to be an admin like the app, and says how to become one.
+- **A-096 · devices shown offline while connected (found on real devices, fixed 2026-10-27)** · With the Mac, the
+  keeper on nest and the S25 on mobile data, every device showed the others offline although sync ran over direct
+  paths. Cause, in iroh-gossip 0.101: a peer whose first dial fails stays `Pending` in the gossip actor and every later
+  message to it is queued without a new dial, so one failed join (a phone asleep or on another network, a keeper
+  restarting) silences presence and "new items" nudges with that device until the app restarts. Fix: every third
+  heartbeat, presence opens a gossip connection itself to each listed peer it does not hear from
+  (`Node::gossip_dial`, which hands the connection to `Gossip::handle_connection` and so flushes the queue) and joins it
+  again. Test: `presence_reaches_a_peer_that_was_unreachable_at_first`. After deploying, the S25 on LTE showed online
+  and direct on the keeper within seconds. Shared albums' iroh-docs live sync uses the same gossip; their sync paths
+  already re-ask silent peers (R1-02). Also from the same run: the keeper listed devices by their certificate names
+  ("This computer", the onboarding default when the name field was left empty) while the app showed the names devices
+  report; the keeper now uses the app's rule, and onboarding on a phone says "phone" and defaults to "My phone".
 
 ### Rules for future changes
 
@@ -374,6 +386,8 @@ Not open questions, but they must be honoured by any format or protocol change, 
 
 - **A-008 · M0-04** · Record encoding is `[version byte] ++ postcard(body)` with the version defined per type
   via `Record::VERSION` (all `1`). There is no type-tag byte; the *key/namespace* identifies the record type.
+- **A-096 rule** · On an iroh-gossip upgrade, check whether a failed dial still leaves the peer `Pending`
+  (`net.rs`, `OutEvent::SendMessage`); if fixed upstream, `Node::gossip_dial` can go (the presence test must still pass).
 - **A-036 · M1-05** · iroh-docs 0.101 on iroh 1.4 reports `Failed to close connection` from the *closing* phase of an
   otherwise successful sync; `sync_with` treats exactly that error as success (any other `SyncFinished` error fails).
   Also required: `start_sync(vec![])` on every opened namespace, otherwise incoming syncs abort with `NotFound`.

@@ -652,6 +652,20 @@ impl Node {
         &self.inner.gossip
     }
 
+    /// Open a gossip connection to `peer` ourselves and hand it to gossip. iroh-gossip 0.101 dials
+    /// a peer once: if that dial fails, the peer stays "pending" and later messages to it queue
+    /// forever. A connection handed in this way takes over and sends what was queued.
+    pub async fn gossip_dial(&self, peer: iroh::EndpointId) -> Result<()> {
+        let conn = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.inner.endpoint.connect(peer, GOSSIP_ALPN),
+        )
+        .await
+        .map_err(|_| anyhow!("timed out"))??;
+        self.inner.gossip.handle_connection(conn).await?;
+        Ok(())
+    }
+
     /// Refuse all connections to and from `id` and drop the current ones.
     pub fn block_peer(&self, id: EndpointId) {
         self.inner.tracker.block(id);

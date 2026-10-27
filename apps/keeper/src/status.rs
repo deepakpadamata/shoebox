@@ -17,6 +17,19 @@ fn role_name(r: Role) -> &'static str {
     }
 }
 
+/// The name a device reports about itself is the freshest; the certificate's name (set when it
+/// joined, updated by an admin) is the fallback. The app shows the same.
+fn shown_name(
+    presence: &[shoebox_node::DeviceStatus],
+    d: &shoebox_core::model::DeviceCert,
+) -> String {
+    presence
+        .iter()
+        .find(|p| p.id == d.device)
+        .and_then(|p| p.name.clone())
+        .unwrap_or_else(|| d.name.clone())
+}
+
 pub(crate) async fn devices(shared: &Shared) -> Result<Value> {
     let guard = shared.library.lock().await;
     let ln = guard
@@ -32,7 +45,7 @@ pub(crate) async fn devices(shared: &Shared) -> Result<Value> {
             let online = d.device == me || presence.iter().any(|p| p.id == d.device && p.online);
             json!({
                 "id": hex::encode(d.device.0),
-                "name": d.name,
+                "name": if d.device == me { shared.opts.name.clone() } else { shown_name(&presence, d) },
                 "role": role_name(d.role),
                 "online": online,
                 "revoked": d.revoked,
@@ -73,6 +86,7 @@ pub(crate) async fn report(shared: &Shared) -> Result<Value> {
     let at_risk = ln.at_risk(Page::all()).await?.len();
     let membership = format!("{:?}", ln.membership().await?).to_lowercase();
     let devices = ln.store().device_list().await?;
+    let presence = ln.devices();
     let mut peers = vec![];
     for d in devices
         .devices
@@ -94,7 +108,7 @@ pub(crate) async fn report(shared: &Shared) -> Result<Value> {
             ),
             None => ("none", None),
         };
-        peers.push(json!({ "id": hex::encode(d.device.0), "name": d.name, "path": path, "latency_ms": latency }));
+        peers.push(json!({ "id": hex::encode(d.device.0), "name": shown_name(&presence, d), "path": path, "latency_ms": latency }));
     }
     out["paired"] = json!(true);
     out["alerts"] = json!(crate::alerts::load(&shared.opts.storage));

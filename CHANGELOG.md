@@ -25,3 +25,8 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
 - Phones can add photos by hand (＋ in the Library): from any album, or from files (a file from a cloud drive or a USB
   stick is copied in, since the phone has no other copy).
 - Devices → Storage shows how much of the library each device holds (originals, previews).
+- Fixed: devices could show each other as offline for good while still syncing (after a phone slept or changed
+  networks, or a keeper restarted); presence now reconnects by itself. The keeper lists devices by the names they
+  report, as the app does. Setting up on a phone says "phone", not "computer".
+- Checked on real devices: a Mac, a Samsung S25 on mobile data and a keeper on an x86_64 Linux box reach each other
+  directly across networks.

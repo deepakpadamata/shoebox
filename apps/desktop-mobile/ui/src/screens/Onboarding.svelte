@@ -11,7 +11,10 @@
   let step = $state<Step>('welcome');
   let name = $state('');
   // A phone or tablet is a Companion; a computer is usually the keeper.
-  let role = $state(/Android|iPhone|iPad/i.test(navigator.userAgent) ? 'companion' : 'keeper');
+  const handheld = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  const thisDevice = handheld ? 'this phone' : 'this computer';
+  const defaultName = handheld ? 'My phone' : 'This computer';
+  let role = $state(handheld ? 'companion' : 'keeper');
   let ticket = $state('');
   let link = $state('');
   let phrase = $state('');
@@ -21,7 +24,7 @@
   async function create() {
     busy = true;
     try {
-      created = await api.createLibrary(name.trim() || 'This computer', role);
+      created = await api.createLibrary(name.trim() || defaultName, role);
       step = 'kit';
     } catch (e) {
       fail(e);
@@ -35,7 +38,7 @@
     app.pairingError = '';
     step = 'code';
     try {
-      await api.join(ticket.trim(), name.trim() || 'This computer');
+      await api.join(ticket.trim(), name.trim() || defaultName);
       await refreshState();
     } catch (e) {
       app.pairingError = e instanceof Error ? e.message : String(e);
@@ -57,7 +60,7 @@
   async function recover() {
     busy = true;
     try {
-      await api.recover(link.trim(), phrase, name.trim() || 'This computer');
+      await api.recover(link.trim(), phrase, name.trim() || defaultName);
       await refreshState();
     } catch (e) {
       fail(e);
@@ -83,14 +86,14 @@
       <p class="muted">Your photos, on your own devices. No account, no cloud you do not control.</p>
       <div class="stack">
         <Button kind="primary" block onclick={() => (step = 'create')}>Create a new library</Button>
-        <Button block onclick={() => (step = 'join')}>Add this computer to an existing library</Button>
+        <Button block onclick={() => (step = 'join')}>Add {thisDevice} to an existing library</Button>
         <Button kind="ghost" block onclick={() => (step = 'recover')}>I lost my devices: restore with my recovery phrase</Button>
       </div>
     {:else if step === 'create'}
       <h2>Name this device</h2>
       <p class="muted small">Other devices will show this name.</p>
       <div class="stack">
-        <input class="input" placeholder="MacBook Pro" bind:value={name} />
+        <input class="input" placeholder={handheld ? 'Pixel 9' : 'MacBook Pro'} bind:value={name} />
         <div>
           <div class="label">What does this device do?</div>
           <Segmented bind:value={role} options={[{ value: 'keeper', label: 'Keeper' }, { value: 'companion', label: 'Companion' }, { value: 'viewer', label: 'Viewer' }]} />
@@ -105,7 +108,7 @@
       <h2>Save your recovery kit</h2>
       <RecoveryKit phrase={created.phrase} kitText={created.kit_text} onsaved={() => { created = null; }} />
     {:else if step === 'join'}
-      <h2>Add this computer</h2>
+      <h2>Add {thisDevice}</h2>
       <p class="muted small">On a device that is already in the library, open <b>Devices → Add a device</b> and paste the code it shows.</p>
       <div class="stack">
         <input class="input" placeholder="Name this device" bind:value={name} />

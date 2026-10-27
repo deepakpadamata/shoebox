@@ -171,6 +171,11 @@ impl LibraryState {
         }
     }
 
+    /// Whether a certificate this state knows marks `device` revoked.
+    fn is_revoked(&self, device: &EndpointId) -> bool {
+        self.devices.get(device).is_some_and(|c| c.revoked)
+    }
+
     pub fn new(device: EndpointId) -> Self {
         Self {
             device,
@@ -815,12 +820,17 @@ impl LibraryState {
         }
     }
 
+    /// Who holds `blob`. A revoked device is left out, whenever it recorded the holding: it is
+    /// no backup, no source to fetch from and no reason to free up space. (Only a revocation
+    /// excludes: a device this state has no certificate for, such as the one that created the
+    /// library, still counts.)
     pub fn holders(&self, blob: &Blake3Hash) -> Vec<Holding> {
         let Some(devices) = self.holders_by_blob.get(blob) else {
             return vec![];
         };
         devices
             .iter()
+            .filter(|d| !self.is_revoked(d))
             .filter_map(|device| {
                 let lww = self.holdings.get(&(*device, *blob))?;
                 lww.value.map(|kind| Holding {
@@ -833,15 +843,18 @@ impl LibraryState {
             .collect()
     }
 
-    /// Number of distinct devices holding `original` as an original (a thumb is not a copy).
+    /// Number of distinct devices holding `original` as an original (a thumb is not a copy, nor
+    /// is a revoked device's).
     pub fn copy_count(&self, original: &Blake3Hash) -> usize {
         self.holders_by_blob.get(original).map_or(0, |devices| {
             devices
                 .iter()
                 .filter(|d| {
-                    self.holdings
-                        .get(&(**d, *original))
-                        .is_some_and(|l| l.value == Some(BlobKind::Original))
+                    !self.is_revoked(d)
+                        && self
+                            .holdings
+                            .get(&(**d, *original))
+                            .is_some_and(|l| l.value == Some(BlobKind::Original))
                 })
                 .count()
         })

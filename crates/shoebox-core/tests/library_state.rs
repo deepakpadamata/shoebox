@@ -208,3 +208,61 @@ fn copy_count_counts_devices_holding_originals_only() {
         vec![dev(2)]
     );
 }
+
+/// A revoked device's copies stop counting at once, even ones it recorded before it was revoked
+/// (records it writes afterwards are refused anyway): its copy is no backup, and freeing space
+/// must not rely on it.
+#[test]
+fn a_revoked_devices_copies_are_not_counted() {
+    use shoebox_core::identity::{issue_device_cert, KeyPair};
+    let (root, a, b) = (
+        KeyPair::from_seed([1; 32]),
+        KeyPair::from_seed([2; 32]),
+        KeyPair::from_seed([3; 32]),
+    );
+    let lib = LibraryId([9; 16]);
+    let mut s = LibraryState::with_root(a.endpoint_id(), root.public(), lib);
+    let cert = |k: &KeyPair, ms, revoked| {
+        SignedDeviceChange::Device(issue_device_cert(
+            &root,
+            lib,
+            k.endpoint_id(),
+            Role::Keeper,
+            "keeper",
+            hlc(ms, 0, 1),
+            revoked,
+        ))
+    };
+    // Holdings are single-writer: each device records its own, then the states merge.
+    let mut theirs = LibraryState::with_root(b.endpoint_id(), root.public(), lib);
+    for st in [&mut s, &mut theirs] {
+        st.apply_device_change(&cert(&a, 1, false)).unwrap();
+        st.apply_device_change(&cert(&b, 2, false)).unwrap();
+    }
+    for (st, k, ms) in [(&mut s, &a, 3), (&mut theirs, &b, 4)] {
+        st.put_holdings(
+            k.endpoint_id(),
+            &HoldingsDelta {
+                hlc: hlc(ms, 0, 1),
+                added: vec![(hash(7), BlobKind::Original)],
+                removed: vec![],
+            },
+        )
+        .unwrap();
+    }
+    s.merge_from(&theirs);
+    assert_eq!(s.copy_count(&hash(7)), 2);
+
+    s.apply_device_change(&cert(&b, 5, true)).unwrap();
+    assert_eq!(
+        s.copy_count(&hash(7)),
+        1,
+        "the revoked keeper's copy is not counted"
+    );
+    assert_eq!(
+        s.holders(&hash(7)).len(),
+        1,
+        "nor is it a holder (to fetch from, or to free up space for)"
+    );
+    assert!(s.held_by_keeper(&hash(7)), "the remaining keeper still is");
+}

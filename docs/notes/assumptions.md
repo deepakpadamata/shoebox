@@ -434,6 +434,25 @@ Behaviour that will come back as features or needs a decision.
     in an `<img>` while waiting, and when that image failed (after the `<video>` had replaced it and started) it
     reported the original unreadable and removed the video. Videos now show only the device's poster frame.
 
+- **A-099 · a blob comes from several holders at once (owner's request, 2026-10-27)** · Fetches tried holders one at
+  a time, each from the start of what was missing. iroh-blobs' downloader does not split one blob across providers:
+  its `Split` strategy only splits the children of a hash sequence; for one blob it fails over provider by provider
+  (resuming). So `Node::download_blob_from(holders, hash, size)` does the split itself on iroh-blobs' range API:
+  - A blob of at least 8 MiB (`SPLIT_MIN`) with more than one holder is cut into 2 MiB pieces; up to four holders
+    (`MAX_SOURCES`) each connect and take the next piece (`remote().execute_get` of that chunk range), so a faster
+    holder takes more. A piece a holder fails on, or answers only in part, goes back for another and that holder stops.
+    The split ends as soon as no piece is waiting or in flight, without waiting for a holder still trying to connect.
+    Every piece is verified against the BLAKE3 hash as it arrives, whichever holder sent it.
+  - Whatever is still missing, and every smaller blob, goes through the downloader with the whole holder list: one
+    holder at a time, each continuing where the last stopped.
+  - The library fetcher (and so *Get original*) passes the ranked holders and the size from the record. Shared albums
+    pass their members without a size: members are not known to hold a photo, so they fail over but do not split.
+  - Measured with `cargo run --example fetch_bench` (`crates/shoebox-node/examples`), 128 MiB fetched on the S25
+    (debug build, home Wi-Fi) from the MacBook Air and nest: Mac alone 6.5 s (20.6 MB/s), nest alone 12.1 s
+    (11.1 MB/s), both 4.75–5.5 s (25–28 MB/s; the Mac sent about two thirds). Not yet measured on mobile data
+    through a relay. The first fetch from a holder that had just started failed in 1 s (its address was not
+    published yet); the app's holders are long-running, so this should be rare.
+
 ### Rules for future changes
 
 Not open questions, but they must be honoured by any format or protocol change, and re-checked on every iroh upgrade (shared albums still run on iroh-docs).

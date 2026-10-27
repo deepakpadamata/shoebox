@@ -23,6 +23,7 @@ use iroh_gossip::ALPN as GOSSIP_ALPN;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use shoebox_core::ids::Blake3Hash;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
@@ -32,6 +33,29 @@ pub use iroh::EndpointAddr as PeerAddr;
 
 /// Minimum bytes between `BlobProgress` events for one download.
 const PROGRESS_STEP: u64 = 256 * 1024;
+/// Blobs at least this large are fetched from several holders at once (A-099).
+pub const SPLIT_MIN: u64 = 8 * 1024 * 1024;
+/// One piece of a split fetch, in 1 KiB chunks: 2 MiB, whole 16 KiB chunk groups.
+const PIECE_CHUNKS: u64 = 2048;
+/// Holders a split fetch draws from at once.
+pub const MAX_SOURCES: usize = 4;
+/// How long a split fetch waits to connect to a holder before leaving it out.
+const SOURCE_CONNECT: Duration = Duration::from_secs(10);
+
+/// Where the bytes of a fetch came from.
+#[derive(Clone, Debug, Default)]
+pub struct FetchReport {
+    /// Payload bytes each holder sent, most first. Empty when the blob was already here.
+    pub sources: Vec<(EndpointId, u64)>,
+    pub elapsed: Duration,
+}
+
+impl FetchReport {
+    /// The holder that sent the most.
+    pub fn main(&self) -> Option<EndpointId> {
+        self.sources.first().map(|(peer, _)| *peer)
+    }
+}
 
 /// ALPN of the liveness/latency protocol.
 pub const PING_ALPN: &[u8] = b"shoebox/ping/0";
@@ -790,20 +814,51 @@ impl Node {
         hash: &Blake3Hash,
         why: Protection,
     ) -> Result<()> {
-        self.download_blob(from, hash).await?;
-        self.inner.blobs.protect(hash, why).await?;
+        self.fetch_blob_from(&[from], hash, None, why).await?;
         Ok(())
+    }
+
+    /// [`Self::download_blob_from`], then protect the blob with `why`.
+    pub async fn fetch_blob_from(
+        &self,
+        holders: &[EndpointId],
+        hash: &Blake3Hash,
+        size: Option<u64>,
+        why: Protection,
+    ) -> Result<FetchReport> {
+        let report = self.download_blob_from(holders, hash, size).await?;
+        self.inner.blobs.protect(hash, why).await?;
+        Ok(report)
     }
 
     /// Download `hash` from `from` and verify it, without keeping it under any protection of its
     /// own (for blobs something else already keeps alive, such as iroh-docs entry content).
     pub async fn download_blob(&self, from: EndpointId, hash: &Blake3Hash) -> Result<()> {
+        self.download_blob_from(&[from], hash, None).await?;
+        Ok(())
+    }
+
+    /// Download `hash` from any of `holders` (best first) and verify it, without protecting it.
+    ///
+    /// A blob of known `size` of at least [`SPLIT_MIN`] with more than one holder is fetched in
+    /// pieces from up to [`MAX_SOURCES`] holders at once (A-099): each holder takes the next
+    /// missing piece, so a faster one takes more, and a piece a holder fails on goes back for
+    /// another. Whatever is still missing after that, and every smaller blob, comes from one
+    /// holder at a time, each taking over where the last stopped. Every piece is verified against
+    /// the hash as it arrives, whichever holder sent it.
+    pub async fn download_blob_from(
+        &self,
+        holders: &[EndpointId],
+        hash: &Blake3Hash,
+        size: Option<u64>,
+    ) -> Result<FetchReport> {
+        anyhow::ensure!(!holders.is_empty(), "no holder to fetch {hash} from");
         self.note_activity();
         if self.inner.blobs.has(hash).await? {
-            return Ok(());
+            return Ok(FetchReport::default());
         }
         // An in-flight download has no tag yet; hold a temp tag so GC cannot reap the partial or
-        // freshly completed blob before the permanent protection below exists.
+        // freshly completed blob before the permanent protection exists.
         let _in_flight = self
             .inner
             .blobs
@@ -815,16 +870,177 @@ impl Node {
             })
             .await
             .map_err(|e| anyhow!("protecting in-flight download: {e}"))?;
+        let started = Instant::now();
+        let mut received: HashMap<EndpointId, u64> = HashMap::new();
+        if let Some(size) = size.filter(|s| holders.len() > 1 && *s >= SPLIT_MIN) {
+            for (peer, bytes) in self.download_split(holders, hash, size).await {
+                *received.entry(peer).or_default() += bytes;
+            }
+        }
+        if !self.inner.blobs.has(hash).await? {
+            let (peer, bytes) = self.download_one_at_a_time(holders, hash).await?;
+            *received.entry(peer).or_default() += bytes;
+        }
+        let mut sources: Vec<(EndpointId, u64)> = received.into_iter().collect();
+        sources.sort_by_key(|(_, bytes)| std::cmp::Reverse(*bytes));
+        let report = FetchReport {
+            sources,
+            elapsed: started.elapsed(),
+        };
+        if report.sources.len() > 1 {
+            info!(
+                %hash,
+                sources = ?report.sources.iter().map(|(p, b)| (p.fmt_short().to_string(), *b)).collect::<Vec<_>>(),
+                ms = report.elapsed.as_millis() as u64,
+                "fetched from several holders"
+            );
+        }
+        if let Some(from) = report.main() {
+            let _ = self
+                .inner
+                .events
+                .send(NodeEvent::BlobFetched { hash: *hash, from });
+        }
+        Ok(report)
+    }
+
+    /// The pieces of a split fetch, each holder taking the next one. Returns the payload bytes
+    /// each holder sent; leaves anything not received for the caller.
+    async fn download_split(
+        &self,
+        holders: &[EndpointId],
+        hash: &Blake3Hash,
+        size: u64,
+    ) -> Vec<(EndpointId, u64)> {
+        use iroh_blobs::protocol::{ChunkRanges, ChunkRangesExt, GetRequest};
+        let root = iroh_hash(hash);
+        let chunks = size.div_ceil(1024);
+        // The last piece is open-ended: the holder's proof of the size ends it.
+        let pieces: std::collections::VecDeque<(u64, Option<u64>)> = (0..chunks)
+            .step_by(PIECE_CHUNKS as usize)
+            .map(|a| (a, (a + PIECE_CHUNKS < chunks).then_some(a + PIECE_CHUNKS)))
+            .collect();
+        // Pieces waiting, and how many are being fetched: when both are zero the split is over,
+        // even if a holder is still trying to connect.
+        let queue = Arc::new(Mutex::new((pieces, 0usize)));
+        let finished = Arc::new(tokio::sync::Notify::new());
+        let total = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let got_by: Arc<Mutex<HashMap<EndpointId, u64>>> = Arc::default();
+        let workers = holders.iter().take(MAX_SOURCES).map(|&peer| {
+            let (node, queue, total) = (self.clone(), queue.clone(), total.clone());
+            let (finished, got_by) = (finished.clone(), got_by.clone());
+            async move {
+                let conn = match tokio::time::timeout(
+                    SOURCE_CONNECT,
+                    node.inner.endpoint.connect(peer, BLOBS_ALPN),
+                )
+                .await
+                {
+                    Ok(Ok(conn)) => conn,
+                    _ => return,
+                };
+                let remote = node.inner.blobs.raw().remote().clone();
+                // Hand a piece back (`retry`) or mark it done; the last one ends the split.
+                let settle = |piece: (u64, Option<u64>), retry: bool| {
+                    let mut q = queue.lock().unwrap();
+                    q.1 -= 1;
+                    if retry {
+                        q.0.push_back(piece);
+                    } else if q.0.is_empty() && q.1 == 0 {
+                        finished.notify_one();
+                    }
+                };
+                loop {
+                    let next = {
+                        let mut q = queue.lock().unwrap();
+                        let next = q.0.pop_front();
+                        if next.is_some() {
+                            q.1 += 1;
+                        }
+                        next
+                    };
+                    let Some((a, b)) = next else {
+                        break;
+                    };
+                    let ranges = match b {
+                        Some(b) => ChunkRanges::chunks(a..b),
+                        None => ChunkRanges::chunks(a..),
+                    };
+                    let piece = Arc::new(GetRequest::builder().root(ranges).build(root));
+                    let missing = match remote.local_for_request(piece.clone()).await {
+                        Ok(local) if local.is_complete() => {
+                            settle((a, b), false);
+                            continue;
+                        }
+                        Ok(local) => local.missing(),
+                        Err(_) => {
+                            settle((a, b), true);
+                            break;
+                        }
+                    };
+                    let done = match remote.execute_get(conn.clone(), missing).complete().await {
+                        Ok(stats) => {
+                            *got_by.lock().unwrap().entry(peer).or_default() +=
+                                stats.payload_bytes_read;
+                            let bytes = total.fetch_add(stats.payload_bytes_read, Ordering::Relaxed)
+                                + stats.payload_bytes_read;
+                            node.note_activity();
+                            let _ = node.inner.events.send(NodeEvent::BlobProgress {
+                                hash: *hash,
+                                from: peer,
+                                bytes,
+                            });
+                            // A holder with only part of the blob sends what it has: not done.
+                            matches!(remote.local_for_request(piece).await, Ok(l) if l.is_complete())
+                        }
+                        Err(e) => {
+                            tracing::debug!(peer = %peer.fmt_short(), "piece of {hash} failed: {e:#}");
+                            false
+                        }
+                    };
+                    settle((a, b), !done);
+                    if !done {
+                        // Another holder takes it; this one has stopped being useful.
+                        break;
+                    }
+                }
+                conn.close(0u32.into(), b"done");
+            }
+        });
+        tokio::select! {
+            _ = futures::future::join_all(workers) => {}
+            _ = finished.notified() => {}
+        }
+        let got = got_by.lock().unwrap().clone();
+        got.into_iter().filter(|(_, n)| *n > 0).collect()
+    }
+
+    /// One holder at a time (iroh-blobs' downloader), each continuing from what is already here.
+    /// Returns the holder that finished it and the bytes received in this call.
+    async fn download_one_at_a_time(
+        &self,
+        holders: &[EndpointId],
+        hash: &Blake3Hash,
+    ) -> Result<(EndpointId, u64)> {
+        let remote = self.inner.blobs.raw().remote().clone();
+        let before = remote
+            .local(iroh_hash(hash))
+            .await
+            .map(|l| l.local_bytes())
+            .unwrap_or(0);
         let downloader = self.inner.blobs.raw().downloader(&self.inner.endpoint);
         let mut progress = downloader
-            .download(iroh_hash(hash), Some(from))
+            .download(iroh_hash(hash), holders.to_vec())
             .stream()
             .await
             .map_err(|e| anyhow!("starting download of {hash}: {e}"))?;
+        let mut current = holders[0];
         let mut failure: Option<String> = None;
+        let mut failed: Vec<String> = vec![];
         let mut last_reported = 0u64;
         while let Some(item) = futures::StreamExt::next(&mut progress).await {
             match item {
+                DownloadProgressItem::TryProvider { id, .. } => current = id,
                 DownloadProgressItem::Progress(bytes) => {
                     self.note_activity();
                     // Throttle: a large blob reports thousands of chunks; a UI wants a few updates.
@@ -832,7 +1048,7 @@ impl Node {
                         last_reported = bytes;
                         let _ = self.inner.events.send(NodeEvent::BlobProgress {
                             hash: *hash,
-                            from,
+                            from: current,
                             bytes,
                         });
                     }
@@ -841,28 +1057,31 @@ impl Node {
                 DownloadProgressItem::DownloadError => {
                     failure.get_or_insert_with(|| "download failed".into());
                 }
-                DownloadProgressItem::ProviderFailed { .. } => {
-                    failure.get_or_insert_with(|| {
-                        format!("{} could not provide the blob", from.fmt_short())
-                    });
+                DownloadProgressItem::ProviderFailed { id, .. } => {
+                    failed.push(id.fmt_short().to_string());
                 }
                 _ => {}
             }
         }
-        if let Some(reason) = failure {
-            anyhow::bail!("fetching {hash} from {}: {reason}", from.fmt_short());
-        }
+        let who = if holders.len() == 1 {
+            holders[0].fmt_short().to_string()
+        } else {
+            format!("{} holders", holders.len())
+        };
         if !self.inner.blobs.has(hash).await? {
-            anyhow::bail!(
-                "fetching {hash} from {}: download did not complete",
-                from.fmt_short()
-            );
+            let reason = match (failure, failed.is_empty()) {
+                (Some(reason), _) => reason,
+                (None, false) => format!("{} could not provide the blob", failed.join(", ")),
+                (None, true) => "download did not complete".into(),
+            };
+            anyhow::bail!("fetching {hash} from {who}: {reason}");
         }
-        let _ = self
-            .inner
-            .events
-            .send(NodeEvent::BlobFetched { hash: *hash, from });
-        Ok(())
+        let after = remote
+            .local(iroh_hash(hash))
+            .await
+            .map(|l| l.local_bytes())
+            .unwrap_or(before);
+        Ok((current, after.saturating_sub(before)))
     }
 
     /// Stop all protocols, close the endpoint and release the on-disk stores.

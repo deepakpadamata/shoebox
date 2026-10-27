@@ -1099,19 +1099,16 @@ impl Inner {
             !peers.is_empty(),
             "no other member of this album is known yet"
         );
-        let mut last = anyhow!("no member could be reached");
-        for p in peers {
-            let iroh = to_iroh_id(&p.id).map_err(|e| anyhow!("{e}"))?;
-            match self
-                .node
-                .fetch_blob(iroh, hash, Protection::Album(id))
-                .await
-            {
-                Ok(()) => return Ok(()),
-                Err(err) => last = err,
-            }
-        }
-        Err(last)
+        // Not every member holds every photo: one member at a time, each continuing from what
+        // the last one sent (members are not known to hold it, so no split, A-099).
+        let ids: Vec<_> = peers
+            .iter()
+            .filter_map(|p| to_iroh_id(&p.id).ok())
+            .collect();
+        self.node
+            .fetch_blob_from(&ids, hash, None, Protection::Album(id))
+            .await?;
+        Ok(())
     }
 
     /// Fetch what this device should hold. Returns how many blobs arrived.
@@ -1153,17 +1150,17 @@ impl Inner {
             let peers = self.peers_of(e);
             joins.push(tokio::spawn(async move {
                 let _p = permit;
-                for p in peers {
-                    let Ok(iroh) = to_iroh_id(&p.id) else {
-                        continue;
-                    };
-                    if node
-                        .fetch_blob(iroh, &h, Protection::Album(id))
+                let ids: Vec<_> = peers
+                    .iter()
+                    .filter_map(|p| to_iroh_id(&p.id).ok())
+                    .collect();
+                if !ids.is_empty()
+                    && node
+                        .fetch_blob_from(&ids, &h, None, Protection::Album(id))
                         .await
                         .is_ok()
-                    {
-                        return true;
-                    }
+                {
+                    return true;
                 }
                 this_e
                     .cooling

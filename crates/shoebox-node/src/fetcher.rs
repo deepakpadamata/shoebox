@@ -11,7 +11,7 @@ use crate::config::NodeConfig;
 use crate::library_node::LibraryNode;
 use anyhow::{anyhow, bail, Result};
 use shoebox_core::ids::{Blake3Hash, EndpointId};
-use shoebox_core::model::{BlobKind, PhotoId, PhotoRecord};
+use shoebox_core::model::{BlobKind, BlobRef, PhotoId, PhotoRecord};
 use shoebox_core::policy::{
     fetch_plan, queue_order, rank_holders, Candidate, PathQuality, PlanContext, QueuedFetch,
 };
@@ -258,27 +258,34 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(candidates.into_iter().map(|c| c.device).collect())
     }
 
-    /// Download `blob` from the best holder that can supply it. Does not publish the holding.
-    async fn fetch_from_holders(&self, blob: &Blake3Hash) -> Result<FetchSource> {
-        if self.node().blobs().has(blob).await? {
+    /// Download `blob` from its holders (several at once when it is large, A-099). Does not
+    /// publish the holding.
+    async fn fetch_from_holders(&self, blob: &BlobRef) -> Result<FetchSource> {
+        if self.node().blobs().has(&blob.hash).await? {
             bail!("already present");
         }
-        let holders = self.ranked_holders(blob).await?;
+        let holders = self.ranked_holders(&blob.hash).await?;
         if holders.is_empty() {
-            bail!("no known holder of {blob}");
+            bail!("no known holder of {}", blob.hash);
         }
-        let mut last_error = anyhow!("no holder could be reached");
-        for device in holders {
-            let id = crate::addr::to_iroh_id(&device).map_err(|e| anyhow!("{e}"))?;
-            match self.node().fetch_blob(id, blob, Protection::Library).await {
-                Ok(()) => return Ok(FetchSource { device }),
-                Err(e) => {
-                    debug!("fetch of {blob} from {device} failed: {e:#}");
-                    last_error = e;
-                }
-            }
+        let mut by_iroh = HashMap::new();
+        for device in &holders {
+            let id = crate::addr::to_iroh_id(device).map_err(|e| anyhow!("{e}"))?;
+            by_iroh.insert(id, *device);
         }
-        Err(last_error)
+        let ids: Vec<_> = holders
+            .iter()
+            .filter_map(|d| crate::addr::to_iroh_id(d).ok())
+            .collect();
+        let report = self
+            .node()
+            .fetch_blob_from(&ids, &blob.hash, Some(blob.size), Protection::Library)
+            .await?;
+        let device = report
+            .main()
+            .and_then(|id| by_iroh.get(&id).copied())
+            .unwrap_or(holders[0]);
+        Ok(FetchSource { device })
     }
 
     /// Fetch one blob of `photo` right now (the user opened it), bypassing the queue and a paused
@@ -289,11 +296,12 @@ impl<L: LibraryStore> LibraryNode<L> {
             .photo(photo)
             .await?
             .ok_or_else(|| anyhow!("unknown photo {photo}"))?;
-        let blob = match kind {
-            BlobKind::Original => rec.original.hash,
-            BlobKind::Preview => rec.preview.hash,
-            BlobKind::Thumb => rec.thumb.hash,
+        let blob_ref = match kind {
+            BlobKind::Original => rec.original.clone(),
+            BlobKind::Preview => rec.preview.clone(),
+            BlobKind::Thumb => rec.thumb.clone(),
         };
+        let blob = blob_ref.hash;
         if self.node().blobs().kept(&blob).await? {
             return Ok(FetchSource {
                 device: self.device(),
@@ -310,7 +318,7 @@ impl<L: LibraryStore> LibraryNode<L> {
             waited += 1;
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
-        let source = self.fetch_from_holders(&blob).await?;
+        let source = self.fetch_from_holders(&blob_ref).await?;
         self.publish_holdings(vec![(blob, kind)]).await?;
         if kind == BlobKind::Original && self.is_pinned(photo) {
             self.node().blobs().protect(&blob, Protection::Pin).await?;
@@ -371,7 +379,7 @@ async fn fetch_loop<L: LibraryStore>(
                 let retry = cfg.retry;
                 handles.push(tokio::spawn(async move {
                     let _permit = permit;
-                    match ln2.fetch_from_holders(&hash).await {
+                    match ln2.fetch_from_holders(&item.item.blob).await {
                         Ok(_) => {
                             ln2.inner.fetcher.busy.lock().unwrap().remove(&hash);
                             ln2.inner.fetcher.partials.lock().unwrap().remove(&hash);

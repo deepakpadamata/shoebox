@@ -22,6 +22,9 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
   videos have no still preview yet) as an image, and that image failing removed the video that had started
   playing. The viewer now shows the poster frame or nothing while waiting, and only the element showing the original
   can report it unreadable. Shared-album grids no longer load whole videos as thumbnails.
+- Large originals (8 MB and up) come from all the devices that hold them at once, in pieces, each verified as it
+  arrives; a device that cannot help is skipped (A-099). On home Wi-Fi a phone got 128 MB from a Mac and a Linux keeper
+  together in about 5 s, against 6.5 s from the Mac alone and 12 s from the keeper alone.
 - The app and the keeper tell you when a newer version is out (Settings → About → Check for new versions; the keeper's
   `status`). Nothing is installed automatically.
 - A phone keeps one copy of each photo: gallery photos are read where they are, never copied into Shoebox, and a photo

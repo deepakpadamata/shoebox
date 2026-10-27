@@ -110,6 +110,12 @@ async fn peer_info_reports_path_latency_and_last_seen() {
 /// makes sync work with the internet unplugged. Needs working multicast on this machine.
 #[tokio::test]
 async fn two_nodes_find_each_other_over_mdns_without_a_relay() {
+    // GitHub's macOS runners are VMs without working multicast (the Linux runner and a real Mac
+    // pass): skip there only, and say so.
+    if cfg!(target_os = "macos") && std::env::var_os("GITHUB_ACTIONS").is_some() {
+        eprintln!("skipped: no multicast on GitHub's macOS runners");
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let mut ca = NodeConfig::local_only(dir.path().join("a"), "a");
     let mut cb = NodeConfig::local_only(dir.path().join("b"), "b");

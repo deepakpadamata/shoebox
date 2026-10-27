@@ -748,3 +748,128 @@ async fn the_keeper_manages_devices_from_its_command_line() {
     d.shutdown().await.unwrap();
     phone.shutdown().await.ok();
 }
+
+/// An admin keeper can add a device: it hands out a pairing string, the new device joins with it
+/// (comparing the six-digit code), and the keeper reports who joined. A keeper that is not an
+/// admin says how to become one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_keeper_adds_a_device_with_a_pairing_string() {
+    let dir = tempfile::tempdir().unwrap();
+    let node = Node::open(NodeConfig::local_only(dir.path().join("laptop"), "laptop"))
+        .await
+        .unwrap();
+    let backend = HybridBackend::for_node(node.clone(), SystemClock);
+    let root = KeyPair::generate();
+    let (lib, cap) = backend.create_library(&root.root_public()).await.unwrap();
+    let ln = LibraryNode::new(node.clone(), Arc::new(lib), SystemClock).with_capability(cap);
+    let kit = ln
+        .create_identity(&root, Role::Companion, "laptop")
+        .await
+        .unwrap();
+    let ticket = ln
+        .start_pairing(Role::Keeper, Duration::from_secs(300), accept())
+        .await
+        .unwrap();
+    let d = Daemon::start(opts(dir.path())).await.unwrap();
+    Client::connect(d.control_path())
+        .await
+        .unwrap()
+        .pair(&ticket.to_string(), "pi", |_| true)
+        .await
+        .unwrap();
+
+    // Not an admin yet.
+    let err = Client::connect(d.control_path())
+        .await
+        .unwrap()
+        .add_device("companion", |_, _| {}, |_| true)
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("make-admin"), "{err:#}");
+    // The keeper's own entry reaches it with the first sync.
+    assert!(
+        wait_for(30, || async {
+            Client::connect(d.control_path())
+                .await
+                .unwrap()
+                .call_raw(
+                    serde_json::json!({"cmd":"make_admin","device":"pi","phrase":kit.phrase()}),
+                )
+                .await
+                .is_ok()
+        })
+        .await,
+        "the keeper can be made an admin"
+    );
+    assert!(
+        wait_for(30, || async {
+            let v = Client::connect(d.control_path())
+                .await
+                .unwrap()
+                .call_raw(serde_json::json!({"cmd":"devices"}))
+                .await
+                .unwrap();
+            v["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["name"] == "pi" && d["admin"] == true)
+        })
+        .await
+    );
+
+    // The new device pastes the string the keeper shows.
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let path = d.control_path().to_path_buf();
+    let adder = tokio::spawn(async move {
+        let mut tx = Some(tx);
+        Client::connect(&path)
+            .await
+            .unwrap()
+            .add_device(
+                "viewer",
+                |ticket, secs| {
+                    assert!(secs > 0);
+                    let _ = tx.take().unwrap().send(ticket.to_string());
+                },
+                |code| code.sas.len() == 6,
+            )
+            .await
+    });
+    let ticket: shoebox_node::PairTicket = rx.await.unwrap().parse().unwrap();
+    assert_eq!(ticket.role, Role::Viewer);
+    let tablet = Node::open(NodeConfig::local_only(dir.path().join("tablet"), "tablet"))
+        .await
+        .unwrap();
+    let grant = tablet.pair_join(&ticket, "tablet", accept()).await.unwrap();
+    assert_eq!(grant.role, Role::Viewer);
+    let done = adder.await.unwrap().unwrap();
+    assert_eq!(done["name"], "tablet");
+    assert_eq!(done["device"].as_str().unwrap().len(), 64);
+
+    // It is in the library, and the ticket works once.
+    assert!(
+        wait_for(30, || async {
+            let v = Client::connect(d.control_path())
+                .await
+                .unwrap()
+                .call_raw(serde_json::json!({"cmd":"devices"}))
+                .await
+                .unwrap();
+            v["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["name"] == "tablet" && d["role"] == "viewer")
+        })
+        .await,
+        "the keeper lists the new device"
+    );
+    let again = Node::open(NodeConfig::local_only(dir.path().join("again"), "again"))
+        .await
+        .unwrap();
+    assert!(again.pair_join(&ticket, "again", accept()).await.is_err());
+    d.shutdown().await.unwrap();
+    tablet.shutdown().await.ok();
+    again.shutdown().await.ok();
+}

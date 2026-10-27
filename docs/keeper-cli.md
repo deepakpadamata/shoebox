@@ -14,6 +14,7 @@ be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held w
 | `address` | print this keeper's link (`shoebox-peer1…`), which a recovering device uses to reach it |
 | `status [--json]` | library counts, at-risk, devices and paths |
 | `devices [--json]` | list devices (id, name, role, admin, state) |
+| `devices add [--role companion\|keeper\|viewer] [--yes]` | add a new device: prints a pairing string (works once, five minutes) to paste into the new device's app, then shows the six-digit code to compare; the keeper must be an admin |
 | `devices remove <device> [--phrase]` (alias `revoke`) | remove a device and move the library to a new epoch; the keeper must be an admin and the device not one, or pass `--phrase` (asked for with typing hidden) to remove any device |
 | `devices role <device> keeper\|companion\|viewer [--phrase]` | change a device's role; an admin keeper needs no phrase |
 | `devices make-admin <device>` | make a device an admin (always asks for the recovery phrase) |
@@ -42,7 +43,7 @@ Unpaired keepers return only the top-level fields with `"paired": false`.
 
 ## Control protocol
 
-Request: one JSON object per line, `{"cmd": "status" | "devices" | "revoke" | "role" | "make_admin" | "replace_phrase" | "pair" | "album" | "shutdown", ...}`.
+Request: one JSON object per line, `{"cmd": "status" | "devices" | "revoke" | "role" | "make_admin" | "replace_phrase" | "pair" | "add_device" | "album" | "shutdown", ...}`.
 Reply: `{"type":"ok","data":…}` or `{"type":"error","message":…}`. `pair` is a conversation: the daemon sends
 `{"type":"code","sas":"123456","peer_name":…,"peer_role":…}`, the client answers `{"confirm":true|false}`, then the
-final reply follows.
+final reply follows. `add_device` is the same conversation the other way round: the daemon first sends `{"type":"ticket","ticket":…,"expires_in_secs":300}`, then (when the new device arrives) the `code`, and the final reply names the device.

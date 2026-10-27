@@ -111,6 +111,17 @@ enum DevicesCmd {
         #[arg(long)]
         phrase: bool,
     },
+    /// Add a new device: prints a pairing string to paste into "Add this device to an existing
+    /// library" in the other device's app (it works once, for five minutes), then shows a
+    /// six-digit code to compare. The keeper must be an admin.
+    Add {
+        /// The new device's role: keeper, companion or viewer.
+        #[arg(long, default_value = "companion")]
+        role: String,
+        /// Skip the code comparison prompt (not recommended).
+        #[arg(long)]
+        yes: bool,
+    },
     /// Give a device another role: keeper, companion or viewer. Without --phrase this keeper
     /// must be an admin.
     Role {
@@ -348,6 +359,41 @@ async fn main() -> Result<()> {
                     c.call_raw(json!({"cmd":"revoke","device":device,"phrase":phrase}))
                         .await?;
                     println!("Removed {device}. It can no longer connect to this library.");
+                }
+                DevicesCmd::Add { role, yes } => {
+                    let done = c
+                        .add_device(
+                            &role,
+                            |ticket, secs| {
+                                println!(
+                                    "Paste this into the new device (\"Add this device to an existing library\"). It works once, for {} minutes:\n\n{ticket}\n\nWaiting for the new device…",
+                                    secs / 60
+                                );
+                            },
+                            |code| {
+                                println!(
+                                    "\n{} is asking to join. Check that it shows this code:\n\n    {}\n",
+                                    if code.peer_name.is_empty() { "A device" } else { &code.peer_name },
+                                    code.sas
+                                );
+                                if yes {
+                                    return true;
+                                }
+                                print!("Does it match? [y/N] ");
+                                let _ = std::io::stdout().flush();
+                                let mut line = String::new();
+                                let _ = std::io::stdin().read_line(&mut line);
+                                matches!(line.trim().to_lowercase().as_str(), "y" | "yes")
+                            },
+                        )
+                        .await?;
+                    println!(
+                        "Added {}.",
+                        done["name"]
+                            .as_str()
+                            .filter(|n| !n.is_empty())
+                            .unwrap_or("the new device")
+                    );
                 }
                 DevicesCmd::Role {
                     device,

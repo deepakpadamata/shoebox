@@ -59,6 +59,7 @@ back up the 24-word recovery phrase separately.
 | `status [--json]` | what the keeper holds and who it talks to |
 | `alerts` / `alerts ack` | security alerts: a new admin device, or a replaced recovery phrase; `status` shows them first until you `ack` |
 | `devices` | list devices (by id, name, role) |
+| `devices add [--role companion\|keeper\|viewer]` | add a new device: prints a pairing string to paste into the other device's app (*Add this device to an existing library*), then asks you to compare the six-digit code. The keeper must be an admin (`devices make-admin` first) |
 | `devices remove <device> [--phrase]` | remove a device (a device is its name or the start of its id). The keeper must be an admin, and the device not one; with `--phrase` any device can go |
 | `devices role <device> keeper\|companion\|viewer [--phrase]` | change a device's role |
 | `devices make-admin <device>` | make a device an admin (asks for your recovery phrase; typing is hidden). Run it on the keeper itself to make the keeper an admin: `devices make-admin <this keeper's name>` |

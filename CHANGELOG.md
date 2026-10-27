@@ -21,7 +21,7 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
   by default; off, 30 days, 90 days or 1 year in Settings), your favourites (a toggle, on by default) and everything
   pinned; older originals live on keepers and are fetched when opened. Free-up leaves what the rules keep. Older
   settings that say "phone" still load. Fixed on the way: a restart forgot pinned photos, so free-up could release one.
-- The keeper's command line can do what an admin does: `devices remove`, `role`, `make-admin` and `replace-phrase` (phrase prompts hide the typing); removing a device from the keeper now moves the library to a new epoch, as in the app.
+- The keeper's command line can do what an admin does: `devices add` (prints a pairing string to paste into the new device), `remove`, `role`, `make-admin` and `replace-phrase` (phrase prompts hide the typing); removing a device from the keeper now moves the library to a new epoch, as in the app.
 - Phones can add photos by hand (＋ in the Library): from any album, or from files (a file from a cloud drive or a USB
   stick is copied in, since the phone has no other copy).
 - Devices → Storage shows how much of the library each device holds (originals, previews).

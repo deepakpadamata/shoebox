@@ -69,6 +69,8 @@ async fn handle(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
         let cmd = request["cmd"].as_str().unwrap_or("").to_string();
         let reply = if cmd == "pair" {
             pair(&shared, &request, &mut lines, &mut w).await
+        } else if cmd == "add_device" {
+            add_device(&shared, &request, &mut lines, &mut w).await
         } else {
             dispatch(&shared, &cmd, &request).await
         };
@@ -290,6 +292,82 @@ async fn pair(
     }))
 }
 
+/// How long a pairing ticket from `add_device` works.
+const ADD_DEVICE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Offer to add one new device: reply with a ticket to paste into the other device's app, then
+/// relay the six-digit code for the person to compare, and report how it went. The keeper must be
+/// an admin (the same rule as in the app).
+async fn add_device(
+    shared: &Arc<Shared>,
+    req: &Value,
+    lines: &mut tokio::io::Lines<BufReader<tokio::net::unix::OwnedReadHalf>>,
+    w: &mut tokio::net::unix::OwnedWriteHalf,
+) -> Result<Value> {
+    use shoebox_core::model::Role;
+    let ln = library(shared).await?;
+    let role = match req["role"]
+        .as_str()
+        .unwrap_or("companion")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "keeper" => Role::Keeper,
+        "companion" | "phone" => Role::Companion,
+        "viewer" => Role::Viewer,
+        other => bail!("a role is keeper, companion or viewer, not `{other}`"),
+    };
+    let (code_tx, mut code_rx) = mpsc::unbounded_channel::<(PairingCode, oneshot::Sender<bool>)>();
+    let decide: shoebox_node::DecideFn = Arc::new(move |code| {
+        let (tx, rx) = oneshot::channel();
+        let _ = code_tx.send((code, tx));
+        Box::pin(async move { rx.await.unwrap_or(false) })
+    });
+    // Subscribe first: the outcome event must not be missed.
+    let mut events = shared.node.events();
+    let ticket = ln.start_pairing(role, ADD_DEVICE_TTL, decide).await.map_err(|e| {
+        if format!("{e:#}").contains("admin") {
+            anyhow!("only an admin device can add devices; make this keeper an admin first: shoebox-keeper devices make-admin <this keeper>")
+        } else {
+            e
+        }
+    })?;
+    send(
+        w,
+        json!({"type":"ticket","ticket":ticket.to_string(),
+               "role":format!("{role:?}").to_lowercase(),
+               "expires_in_secs":ADD_DEVICE_TTL.as_secs()}),
+    )
+    .await?;
+    let deadline = tokio::time::sleep(ADD_DEVICE_TTL + std::time::Duration::from_secs(60));
+    tokio::pin!(deadline);
+    let mut peer_name = String::new();
+    loop {
+        tokio::select! {
+            Some((code, answer)) = code_rx.recv() => {
+                peer_name = code.peer_name.clone();
+                send(w, json!({"type":"code","sas":code.sas,"peer_name":code.peer_name,
+                    "peer_role":format!("{:?}", code.peer_role).to_lowercase()})).await?;
+                let confirm = lines.next_line().await?.unwrap_or_default();
+                let ok = serde_json::from_str::<Value>(&confirm)
+                    .ok()
+                    .and_then(|v| v["confirm"].as_bool())
+                    .unwrap_or(false);
+                let _ = answer.send(ok);
+            }
+            ev = events.recv() => match ev {
+                Ok(shoebox_node::NodeEvent::PairingDone { peer }) => {
+                    return Ok(json!({"device": hex::encode(peer.0), "name": peer_name}));
+                }
+                Ok(shoebox_node::NodeEvent::PairingFailed { reason }) => bail!("{reason}"),
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(_) => bail!("the keeper is shutting down"),
+            },
+            _ = &mut deadline => bail!("nobody used the ticket in time"),
+        }
+    }
+}
+
 /// A client for the control socket (used by the CLI subcommands and by tests).
 pub struct Client {
     lines: tokio::io::Lines<BufReader<tokio::net::unix::OwnedReadHalf>>,
@@ -333,6 +411,38 @@ impl Client {
 
     pub async fn status(&mut self) -> Result<Value> {
         self.call_raw(json!({"cmd":"status"})).await
+    }
+
+    /// Offer to add one device as `role`. `show` gets the ticket to paste into the other device;
+    /// `confirm` sees the six-digit code and decides. Returns the new device (`device`, `name`).
+    pub async fn add_device(
+        &mut self,
+        role: &str,
+        mut show: impl FnMut(&str, u64),
+        mut confirm: impl FnMut(&PairingCode) -> bool,
+    ) -> Result<Value> {
+        send(&mut self.w, json!({"cmd":"add_device","role":role})).await?;
+        loop {
+            let reply = self.read_reply().await?;
+            match reply["type"].as_str() {
+                Some("ticket") => show(
+                    reply["ticket"].as_str().unwrap_or_default(),
+                    reply["expires_in_secs"].as_u64().unwrap_or(0),
+                ),
+                Some("code") => {
+                    let code = PairingCode {
+                        sas: reply["sas"].as_str().unwrap_or_default().to_string(),
+                        peer_name: reply["peer_name"].as_str().unwrap_or_default().to_string(),
+                        peer_role: shoebox_core::model::Role::Keeper,
+                    };
+                    let ok = confirm(&code);
+                    send(&mut self.w, json!({"confirm": ok})).await?;
+                }
+                Some("ok") => return Ok(reply["data"].clone()),
+                Some("error") => bail!("{}", reply["message"].as_str().unwrap_or("error")),
+                _ => bail!("unexpected reply: {reply}"),
+            }
+        }
     }
 
     /// Pair this keeper into a library. `confirm` sees the six-digit code and decides.

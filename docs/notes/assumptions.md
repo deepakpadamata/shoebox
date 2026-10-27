@@ -364,8 +364,9 @@ Behaviour that will come back as features or needs a decision.
   socket in the request and is never logged; the terminal prompt hides the typing with `stty -echo` (or reads a line
   when stdin is piped). Devices are named by full id, unique id prefix (≥4 hex digits) or name. Until now `devices
   revoke` only marked the device revoked and did not move the library to a new epoch (the app did): fixed, so a
-  device removed from the keeper is locked out of what is written next like one removed in the app. Not offered on
-  the keeper: adding devices (the "Add a device" code needs a screen), pairing codes for other devices.
+  device removed from the keeper is locked out of what is written next like one removed in the app. `devices add` offers a pairing string (no QR: the person pastes it into the new device's
+  app, which already accepts a pasted ticket) and relays the six-digit code over the same socket conversation as `pair`;
+  it needs the keeper to be an admin like the app, and says how to become one.
 
 ### Rules for future changes
 

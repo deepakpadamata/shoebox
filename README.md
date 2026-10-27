@@ -1,6 +1,4 @@
-# Shoebox — a decentralized photos app on iroh
-
-> **Shoebox** is a placeholder codename. Rename freely.
+# Shoebox — a decentralized photos app, built on top of iroh
 
 Your photos live on *your* devices — phone, laptop, a box under the desk — and sync
 directly between them (and the people you share with) over [iroh](https://iroh.computer)

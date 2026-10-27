@@ -1,6 +1,6 @@
 //! M1-09: LAN discovery, relay configuration and honest connection reporting.
 
-use shoebox_node::{classify_addrs, Node, NodeConfig, PathKind, RelaySetting};
+use shoebox_node::{classify_addrs, classify_addrs_from, Node, NodeConfig, PathKind, RelaySetting};
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -43,6 +43,24 @@ fn addresses_are_classified_as_lan_direct_or_relay() {
         PathKind::Lan
     );
     assert_eq!(classify_addrs(&[]), PathKind::Unknown);
+}
+
+/// A VPN address such as Tailscale's (100.64.0.0/10) is not a private range, so a peer reached on
+/// one is "direct"; but when it is this machine's own address, the peer is on the same machine.
+#[test]
+fn this_machines_own_addresses_count_as_local() {
+    use iroh::TransportAddr as T;
+    let vpn = sock("100.102.90.75:4433");
+    assert_eq!(classify_addrs(&[T::Ip(vpn)]), PathKind::Direct);
+    assert_eq!(
+        classify_addrs_from(&[T::Ip(vpn)], &[vpn.ip()]),
+        PathKind::Lan
+    );
+    assert_eq!(
+        classify_addrs_from(&[T::Ip(sock("100.64.0.9:1"))], &[vpn.ip()]),
+        PathKind::Direct,
+        "another machine on the VPN is still direct"
+    );
 }
 
 #[test]

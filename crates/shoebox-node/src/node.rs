@@ -190,11 +190,19 @@ fn is_local_ip(ip: std::net::IpAddr) -> bool {
 /// Summarise the addresses in use for a peer: a local-network path beats a direct one, which
 /// beats a relay.
 pub fn classify_addrs(addrs: &[iroh::TransportAddr]) -> PathKind {
+    classify_addrs_from(addrs, &[])
+}
+
+/// [`classify_addrs`], also counting `own` (this machine's addresses) as local: a peer on the
+/// same machine can be reached on any of them, e.g. a VPN address outside the private ranges.
+pub fn classify_addrs_from(addrs: &[iroh::TransportAddr], own: &[std::net::IpAddr]) -> PathKind {
     let mut direct = false;
     let mut relay = None;
     for addr in addrs {
         match addr {
-            iroh::TransportAddr::Ip(sock) if is_local_ip(sock.ip()) => return PathKind::Lan,
+            iroh::TransportAddr::Ip(sock) if is_local_ip(sock.ip()) || own.contains(&sock.ip()) => {
+                return PathKind::Lan
+            }
             iroh::TransportAddr::Ip(_) => direct = true,
             iroh::TransportAddr::Relay(url) => relay = Some(url.to_string()),
             _ => {}
@@ -778,9 +786,16 @@ impl Node {
                     .collect()
             })
             .unwrap_or_default();
+        let own: Vec<std::net::IpAddr> = self
+            .inner
+            .endpoint
+            .addr()
+            .ip_addrs()
+            .map(|a| a.ip())
+            .collect();
         Some(PeerInfo {
             id,
-            path: classify_addrs(&active),
+            path: classify_addrs_from(&active, &own),
             latency,
             last_seen,
         })

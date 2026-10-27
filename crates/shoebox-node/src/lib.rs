@@ -41,8 +41,9 @@ pub use keys::load_or_create_secret;
 pub use library_node::LibraryNode;
 pub use maintenance::MaintenanceConfig;
 pub use node::{
-    classify_addrs, FetchReport, Node, NodeEvent, NodeEvents, PathKind, PeerAddr, PeerInfo,
-    ALBUM_ALPN, HAS_ALPN, LORO_ALPN, PAIR_ALPN, PING_ALPN, RECOVER_ALPN, ROTATE_ALPN,
+    classify_addrs, classify_addrs_from, FetchReport, Node, NodeEvent, NodeEvents, PathKind,
+    PeerAddr, PeerInfo, ALBUM_ALPN, HAS_ALPN, LORO_ALPN, PAIR_ALPN, PING_ALPN, RECOVER_ALPN,
+    ROTATE_ALPN,
 };
 pub use pairing::{DecideFn, PairGrant, PairTicket, PairingCode};
 pub use presence::{DeviceStatus, PresenceConfig};

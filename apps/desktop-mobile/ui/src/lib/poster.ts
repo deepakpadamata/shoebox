@@ -2,7 +2,7 @@
 // its own from the video it can play: load the original (byte ranges, so only what the decoder
 // needs), grab a frame, hand it to the app core as a small JPEG. One at a time, so a screenful of
 // videos does not stall the grid.
-import { api, blobUrl } from './api';
+import { api, videoUrl } from './api';
 
 const MAX_SIDE = 480;
 const inFlight = new Map<string, Promise<boolean>>();
@@ -21,7 +21,8 @@ async function grab(id: string): Promise<boolean> {
   video.muted = true;
   video.preload = 'auto';
   video.crossOrigin = 'anonymous';
-  video.src = blobUrl(id, 'original');
+  // The same source the viewer plays from (on Android, `shoebox://` cannot serve a long video).
+  video.src = videoUrl(id);
   try {
     await once(video, 'loadeddata', 10_000);
     const t = Math.min(1, (video.duration || 1) * 0.1);

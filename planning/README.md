@@ -1,6 +1,6 @@
 # Planning · Shoebox MVP
 
-The executable plan: 9 milestones, **98 issues**, in strict execution order for a **solo developer** (decision #20).
+The executable plan: 9 milestones, **99 issues**, in strict execution order for a **solo developer** (decision #20).
 The product and technical context is in `docs/`. Read [`05-prototype-plan.md`](../docs/05-prototype-plan.md) first.
 
 ```
@@ -26,9 +26,9 @@ interruptions, review and unknowns.
 | M4 · Mobile apps | 12 | 33.5 | 8.0 | 36 |
 | M5 · Shared albums | 8 | 20.5 | 4.9 | 41 |
 | M6 · Hardening & beta | 8 | 19 | 4.6 | 46 |
-| R1 · v0.1 testers' preview | 15 | 17.5 | 4.2 | 50 |
-| M7 · MVP release | 4 | 6.5 | 1.6 | 52 |
-| **Total** | **98** | **218.5** | **52** | |
+| R1 · v0.1 testers' preview | 16 | 21.5 | 5.2 | 51 |
+| M7 · MVP release | 4 | 6.5 | 1.6 | 53 |
+| **Total** | **99** | **222.5** | **53** | |
 
 That's roughly **10 months** to MVP for one person, plus the beta's calendar time
 (3–4 weeks, overlapping M7) and app-store review.
@@ -198,6 +198,7 @@ signed builds and the update feed come at the end. This is the first wave of the
 | R1-13 | [Upload to GitHub and the first green CI run](issues/R1-13-upload-to-github-and-the-first-green-ci-run.md) (needs you) | 0.5 | R1-01, R1-02, R1-12 |
 | R1-14 | [Signed release builds](issues/R1-14-signed-release-builds.md) (needs you) | 2 | R1-13 |
 | R1-15 | [Ship the v0.1 testers' preview](issues/R1-15-ship-the-v0-1-testers-preview.md) (needs you) | 1 | R1-03, R1-04, R1-05, R1-06, R1-07, R1-14 |
+| R1-16 | [Android native video player and content:// for local media](issues/R1-16-android-native-video-player-and-content-uris.md) | 4 | R1-09 |
 
 ### M7 · MVP release
 

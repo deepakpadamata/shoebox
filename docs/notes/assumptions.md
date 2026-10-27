@@ -421,6 +421,7 @@ Behaviour that will come back as features or needs a decision.
     name a blob), `GET`/`HEAD` only, one request per connection, `no-store`. The CSP allows `http://127.0.0.1:*` for
     `media-src` only; the release network security config allows plain HTTP to 127.0.0.1 only (debug: anywhere, for
     `tauri android dev`). Photos still use `shoebox://`; desktop is unchanged.
+    A stopgap: R1-16 replaces it with Android's own player and `content://` URIs for media already on the phone.
   - *Open-ended ranges got the whole file.* `bytes=N-` (what a media element sends) now gets at most 4 MB.
   - *Range reads were slow.* `BlobStore::open_range` read through iroh-blobs' seek-and-read reader: 1.4 s per 4 MB on
     the phone; one `export_ranges` request takes 70 ms (60 MB/s), well above a phone video's bitrate.

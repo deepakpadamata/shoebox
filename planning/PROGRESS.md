@@ -143,6 +143,7 @@ Implementation status per issue. Assumptions made along the way are logged in
 | R1-13 Upload to GitHub and the first green CI run | ⬜ | needs the owner: the GitHub repository |
 | R1-14 Signed release builds | ⬜ | needs the owner: Apple, Android and minisign keys |
 | R1-15 Ship the v0.1 testers' preview | ⬜ | needs the owner: testers and a feedback channel |
+| R1-16 Android native video player and content:// for local media | ⬜ | replaces the loopback media server (A-098) |
 
 ### Also done during R1 (not planned as issues)
 

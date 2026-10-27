@@ -323,6 +323,10 @@ Behaviour that will come back as features or needs a decision.
     up to one GC interval, 5 minutes).
   - Desktop imports still copy (a folder on a computer is not a gallery that deletes on its own); a by-reference import
     for folders the person promises not to change remains possible (A-028).
+  - Checked on the S25 (Android 16, access to selected photos only, 2026-10-27): the selected files are readable by path,
+    all 22 were tracked in place, and the 22 copies an earlier build made were replaced within one GC interval (the
+    app's blob data went from 190 MB to 17 MB). Not checked: GPS kept through the path (none of those photos had a
+    location), a gallery deletion on a real phone, the photo picker with full access.
   - Not handled: a shared album that references a deleted gallery photo keeps a dangling reference on this phone until
     the photo is purged (the album's other members have their own copies). iOS (PhotoKit) is not built.
 

@@ -196,8 +196,20 @@ pub fn run() {
                 .write(true)
                 .open(data_dir.join("app.lock"))?;
             if lock.try_lock().is_err() {
-                eprintln!("Shoebox is already running.");
-                std::process::exit(0);
+                // On Android the holder is a background run in this same process: stop it and wait.
+                #[cfg(target_os = "android")]
+                {
+                    use std::sync::atomic::Ordering;
+                    crate::android_bridge::APP_OPENING.store(true, Ordering::SeqCst);
+                    let waited = lock.lock();
+                    crate::android_bridge::APP_OPENING.store(false, Ordering::SeqCst);
+                    waited?;
+                }
+                #[cfg(not(target_os = "android"))]
+                {
+                    eprintln!("Shoebox is already running.");
+                    std::process::exit(0);
+                }
             }
             app.manage(lock);
             let opts = AppOptions {

@@ -21,6 +21,10 @@ impl AppCore {
         let started = Instant::now();
         let deadline = started + budget;
         let ln = self.ln().await?;
+        tracing::info!(
+            after_ms = started.elapsed().as_millis() as u64,
+            "burst: library open"
+        );
         let at_risk_before = ln.at_risk(Page::all()).await?.len() as u32;
 
         // Keepers first: they are the likeliest to take the photos off this device.
@@ -50,8 +54,10 @@ impl AppCore {
                 break;
             }
             let attempt = tokio::time::timeout(PEER_TIMEOUT.min(left), ln.sync_now(p)).await;
-            if matches!(attempt, Ok(Ok(()))) {
-                reached += 1;
+            match attempt {
+                Ok(Ok(())) => reached += 1,
+                Ok(Err(e)) => tracing::warn!(peer = ?p, "burst: sync failed: {e:#}"),
+                Err(_) => tracing::warn!(peer = ?p, "burst: sync timed out"),
             }
         }
 

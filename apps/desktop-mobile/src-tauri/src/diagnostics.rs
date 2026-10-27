@@ -71,6 +71,15 @@ pub fn init_logging() {
         .try_init();
 }
 
+/// The redacted recent log lines (debug builds put them in the background run's report).
+pub fn log_tail(n: usize) -> Vec<String> {
+    let ring = ring().lock().unwrap();
+    ring.iter()
+        .skip(ring.len().saturating_sub(n))
+        .map(|l| redact(l, &[]))
+        .collect()
+}
+
 const FILE_EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "png", "heic", "heif", "avif", "gif", "webp", "tif", "tiff", "dng", "cr2",
     "cr3", "nef", "arw", "raf", "orf", "rw2", "mov", "mp4", "m4v", "avi", "mkv", "3gp", "pdf",

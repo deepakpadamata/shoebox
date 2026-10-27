@@ -19,8 +19,13 @@ use jni::{JNIEnv, JavaVM};
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+
+/// Set while the app is opening and a background run holds the library (both run in one
+/// process): the run stops at once and lets the app have it.
+pub static APP_OPENING: AtomicBool = AtomicBool::new(false);
 
 /// The Kotlin `PhotoBackend` object, callable from any thread.
 struct Backend {
@@ -202,6 +207,7 @@ fn run(
     last_notified_ms: u64,
 ) -> Result<serde_json::Value> {
     let dir = PathBuf::from(&data_dir);
+    crate::diagnostics::init_logging();
     // The app holds `app.lock` while it runs; then its own core does this work.
     let lock = std::fs::OpenOptions::new()
         .create(true)
@@ -237,6 +243,7 @@ fn run(
             core.shutdown().await?;
             return Ok(json!({ "skipped": "no library on this device yet" }));
         }
+        let work = async {
         core.set_photo_source(Arc::new(JniPhotoSource(backend)));
         let backup = if core.backup_status().await?.policy.enabled {
             match core.backup_run(true).await {
@@ -267,8 +274,23 @@ fn run(
             .map(crate::notify::security_notification)
             .map(|n| json!({ "title": n.title, "body": n.body }))
             .collect();
+        anyhow::Ok(json!({ "backup": backup, "burst": burst, "notification": notification, "security": security }))
+        };
+        let app_opening = async {
+            while !APP_OPENING.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        };
+        let outcome = tokio::select! {
+            r = work => r,
+            () = app_opening => Ok(json!({ "skipped": "the app was opened" })),
+        };
         core.shutdown().await?;
-        Ok(json!({ "backup": backup, "burst": burst, "notification": notification, "security": security }))
+        let mut report = outcome?;
+        if cfg!(debug_assertions) {
+            report["log"] = json!(crate::diagnostics::log_tail(40));
+        }
+        Ok(report)
     })
 }
 

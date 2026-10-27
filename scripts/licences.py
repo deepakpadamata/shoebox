@@ -43,9 +43,15 @@ def read(path):
         return f.read().strip()
 
 
+# The features each app ships with: the shell and its plugins are optional in the app crate.
+SHIPPED_FEATURES = {"desktop-mobile": ["desktop-mobile/tauri-app"]}
+
+
 def rust_packages(app):
+    features = SHIPPED_FEATURES.get(app, [])
+    args = ["--features", ",".join(features)] if features else []
     meta = json.loads(subprocess.check_output(
-        ["cargo", "metadata", "--format-version", "1", "--locked"], cwd=ROOT))
+        ["cargo", "metadata", "--format-version", "1", "--locked", *args], cwd=ROOT))
     by_id = {p["id"]: p for p in meta["packages"]}
     members = set(meta["workspace_members"])
     nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}

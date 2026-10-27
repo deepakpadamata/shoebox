@@ -35,6 +35,8 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      # One platform's failure should not hide the other's.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
@@ -42,7 +44,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace
-      - run: cargo test --workspace
+      - name: cargo test --workspace
+        shell: bash
+        # Failing tests become annotations, which show on the run's summary (and in the API)
+        # without opening the log.
+        run: |
+          set -o pipefail
+          cargo test --workspace --no-fail-fast 2>&1 | tee test.log || {
+            grep -E '^---- .* stdout ----$|panicked at|^test .* FAILED$' test.log | head -40 |
+              sed -e 's/%/%25/g' -e 's/^/::error title=cargo test::/'
+            exit 1
+          }
       - run: scripts/test-install-keeper.sh
 
   licenses:

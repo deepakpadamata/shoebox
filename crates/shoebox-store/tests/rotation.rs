@@ -58,7 +58,13 @@ async fn revoking_a_device_moves_the_others_to_a_new_epoch() {
     })
     .await
     .expect("members sync on the new epoch");
-    assert_eq!(photos_of(nodes[1].store().as_ref()).await.len(), 2);
+    // Node 1 moved with only its own records: photo 1 (node 0's) comes back by syncing, which can
+    // land a moment after photo 2's live update.
+    wait_until(Duration::from_secs(20), || async {
+        photos_of(nodes[1].store().as_ref()).await.len() == 2
+    })
+    .await
+    .expect("and the records from before the move come back");
 
     // The revoked device stays on the old epoch and receives nothing, not even through a sync it starts.
     assert_eq!(nodes[3].library_id(), old);

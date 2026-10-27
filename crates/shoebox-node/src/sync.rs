@@ -146,21 +146,23 @@ async fn manager<L: LibraryStore>(
 ) {
     let mut ticker = tokio::time::interval(tick);
     loop {
-        let due: Vec<EndpointId> = tokio::select! {
+        // `nudged`: someone asked for this sync (a rotation, a new peer, presence), as opposed to a
+        // connection coming up.
+        let (due, nudged): (Vec<EndpointId>, bool) = tokio::select! {
             ev = events.recv() => match ev {
-                Ok(NodeEvent::PeerConnected { id }) => vec![crate::addr::from_iroh_id(&id)],
+                Ok(NodeEvent::PeerConnected { id }) => (vec![crate::addr::from_iroh_id(&id)], false),
                 Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             },
-            Some(id) = nudge.recv() => vec![id],
-            _ = ticker.tick() => vec![],
+            Some(id) = nudge.recv() => (vec![id], true),
+            _ = ticker.tick() => (vec![], false),
         };
         let Some(inner) = weak.upgrade() else { break };
         let now = Instant::now();
         let cfg = inner.sync_config.clone();
         let mut run: Vec<EndpointId> = vec![];
         {
-            let peers = inner.peers.lock().unwrap();
+            let mut peers = inner.peers.lock().unwrap();
             if due.is_empty() {
                 // Periodic pass: anything whose scheduled time has come.
                 run.extend(
@@ -173,12 +175,19 @@ async fn manager<L: LibraryStore>(
                 // A connect or an explicit nudge: sync now, but not in a tight loop (connections
                 // flap during every sync).
                 for id in due {
-                    if let Some(p) = peers.get(&id) {
+                    if let Some(p) = peers.get_mut(&id) {
                         let recent = p
                             .last_attempt
                             .is_some_and(|t| now.duration_since(t) < cfg.backoff_min);
                         if !p.syncing && !recent {
                             run.push(id);
+                        } else if nudged {
+                            // Not now, but not dropped either: the sync running (or just run) may
+                            // predate what the nudge is about, e.g. a move to a new epoch, after
+                            // which the next scheduled sync is minutes away. The periodic pass
+                            // takes it as soon as that sync is over. (Connections are not kept:
+                            // every sync brings one up, and that would loop.)
+                            p.dirty = true;
                         }
                     }
                 }

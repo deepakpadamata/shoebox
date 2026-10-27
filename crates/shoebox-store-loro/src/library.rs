@@ -315,6 +315,44 @@ impl LibraryShared {
             .export(ExportMode::updates(vv))
             .map_err(be)
     }
+
+    // The `_in` forms are for replication: each checks, under the lock a rotation also takes, that
+    // the document is still the one for `epoch`. A sync that started before a move must not mix
+    // the two: old-epoch operations imported into the new document would make its version vector
+    // claim operations it never got (a rotation restarts every counter), and the peer would then
+    // never send them.
+
+    pub(crate) fn oplog_vv_in(&self, epoch: LibraryId) -> Result<VersionVector> {
+        let inner = self.inner.lock().unwrap();
+        same_epoch(&inner, epoch)?;
+        Ok(inner.doc.oplog_vv())
+    }
+
+    pub(crate) fn updates_since_in(&self, epoch: LibraryId, vv: &VersionVector) -> Result<Vec<u8>> {
+        let inner = self.inner.lock().unwrap();
+        same_epoch(&inner, epoch)?;
+        inner.doc.export(ExportMode::updates(vv)).map_err(be)
+    }
+
+    pub(crate) fn import_bytes_in(&self, epoch: LibraryId, bytes: &[u8]) -> Result<()> {
+        let changes = {
+            let mut inner = self.inner.lock().unwrap();
+            same_epoch(&inner, epoch)?;
+            inner.import(bytes)?
+        };
+        self.emit(changes);
+        Ok(())
+    }
+}
+
+fn same_epoch(inner: &Inner, epoch: LibraryId) -> Result<()> {
+    if inner.library == epoch {
+        Ok(())
+    } else {
+        Err(StoreError::Backend(
+            "the library moved to a new epoch during the sync".into(),
+        ))
+    }
 }
 
 enum Verdict {
@@ -836,5 +874,51 @@ impl LibraryStore for LoroLibrary {
             .rotate_to(new.library, new.root, Carry::OwnButCerts, vec![])?;
         self.transport.rotated(old, new.library, &self.shared);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A sync that began before a move must not touch the new epoch's document (see
+    /// `import_bytes_in`): its operations would poison the new version vector.
+    #[test]
+    fn replication_refuses_another_epochs_document() {
+        let root = KeyPair::generate();
+        let (identity, old, new) = (LibraryId([7; 16]), LibraryId([1; 16]), LibraryId([2; 16]));
+        let shared = LibraryShared::new(
+            EndpointId([3; 32]),
+            root.public(),
+            identity,
+            old,
+            None,
+            None,
+        )
+        .unwrap();
+        // Operations from another device's replica of the old epoch.
+        let other = LoroDoc::new();
+        other.set_peer_id(42).unwrap();
+        other.get_map(ENTRIES).insert("x", 1).unwrap();
+        other.commit();
+        let old_ops = other.export(ExportMode::all_updates()).unwrap();
+
+        shared.rotate(new, Carry::Own).unwrap();
+        let before = shared.oplog_vv();
+        assert!(shared.import_bytes_in(old, &old_ops).is_err());
+        assert!(shared.oplog_vv_in(old).is_err());
+        assert!(shared.updates_since_in(old, &before).is_err());
+        assert_eq!(
+            shared.oplog_vv(),
+            before,
+            "nothing from the old epoch got in"
+        );
+
+        shared.import_bytes_in(new, &old_ops).unwrap();
+        assert_ne!(
+            shared.oplog_vv_in(new).unwrap(),
+            before,
+            "the right epoch imports"
+        );
     }
 }

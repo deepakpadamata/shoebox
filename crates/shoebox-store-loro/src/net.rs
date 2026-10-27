@@ -91,7 +91,7 @@ async fn round(conn: &Connection, shared: &Arc<LibraryShared>, library: LibraryI
         &mut send,
         &Msg::Hello {
             library,
-            vv: shared.oplog_vv().encode(),
+            vv: shared.oplog_vv_in(library)?.encode(),
         },
     )
     .await?;
@@ -99,13 +99,17 @@ async fn round(conn: &Connection, shared: &Arc<LibraryShared>, library: LibraryI
         bail!("unexpected reply");
     };
     let theirs = decode_vv(&vv)?;
-    shared.import_bytes(&updates)?;
-    write_msg(&mut send, &Msg::Updates(shared.updates_since(&theirs)?)).await?;
+    shared.import_bytes_in(library, &updates)?;
+    write_msg(
+        &mut send,
+        &Msg::Updates(shared.updates_since_in(library, &theirs)?),
+    )
+    .await?;
     send.finish()?;
     let Msg::Done { vv } = read_msg(&mut recv).await? else {
         bail!("unexpected end of exchange");
     };
-    Ok(decode_vv(&vv)? == shared.oplog_vv())
+    Ok(decode_vv(&vv)? == shared.oplog_vv_in(library)?)
 }
 
 impl ConnHandler for IrohNet {
@@ -148,19 +152,19 @@ async fn serve_round(
     write_msg(
         send,
         &Msg::Reply {
-            updates: shared.updates_since(&client_vv)?,
-            vv: shared.oplog_vv().encode(),
+            updates: shared.updates_since_in(library, &client_vv)?,
+            vv: shared.oplog_vv_in(library)?.encode(),
         },
     )
     .await?;
     let Msg::Updates(bytes) = read_msg(recv).await? else {
         bail!("expected updates");
     };
-    shared.import_bytes(&bytes)?;
+    shared.import_bytes_in(library, &bytes)?;
     write_msg(
         send,
         &Msg::Done {
-            vv: shared.oplog_vv().encode(),
+            vv: shared.oplog_vv_in(library)?.encode(),
         },
     )
     .await?;

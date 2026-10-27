@@ -201,6 +201,72 @@ impl DocsBackend {
         .await
     }
 
+    /// Open an album another device of the same person belongs to (its capability came through
+    /// the library): fetch the album's record from one of `peers` if it is not here yet, then
+    /// take part with `role`. Nothing is announced: the person is already in the album.
+    pub async fn adopt_album(
+        &self,
+        capability: &[u8],
+        role: shoebox_core::model::MemberRole,
+        peers: &[PeerAddr],
+    ) -> Result<DocsAlbum> {
+        let capability: DocsCapability = postcard::from_bytes(capability)
+            .map_err(|e| StoreError::Invalid(format!("not an album capability: {e}")))?;
+        let doc = self
+            .node
+            .docs()
+            .import_namespace(capability)
+            .await
+            .map_err(backend_err)?;
+        let mut events = album::drained(doc.subscribe().await.map_err(backend_err)?);
+        let mut rep = self.replica(doc).await?;
+        let has_meta = rep
+            .scan()
+            .await
+            .map_err(backend_err)?
+            .entries
+            .iter()
+            .any(|(k, _)| k == "meta");
+        if !has_meta {
+            let mut reached = false;
+            for peer in peers {
+                let Ok(addr) = to_endpoint_addr(peer) else {
+                    continue;
+                };
+                if replica::sync_until_key(
+                    &rep.doc,
+                    &self.node,
+                    &mut events,
+                    addr,
+                    b"meta",
+                    replica::SYNC_TIMEOUT,
+                )
+                .await
+                .is_ok()
+                {
+                    reached = true;
+                    break;
+                }
+            }
+            if !reached {
+                return Err(StoreError::Unreachable(
+                    peers.first().map(|p| p.id).unwrap_or(self.device),
+                ));
+            }
+        }
+        drop(events);
+        DocsAlbum::join(
+            rep,
+            role,
+            self.device,
+            self.clock.clone(),
+            self.node.clone(),
+            self.device,
+            false,
+        )
+        .await
+    }
+
     async fn join_album_impl(&self, ticket: &InviteTicket) -> Result<DocsAlbum> {
         if let Expiry::At(t) = ticket.expires {
             if self.clock.now_ms() as i64 > t.0 {
@@ -238,6 +304,7 @@ impl DocsBackend {
             self.clock.clone(),
             self.node.clone(),
             ticket.inviter.id,
+            true,
         )
         .await
     }

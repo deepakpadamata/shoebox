@@ -30,3 +30,8 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
   report, as the app does. Setting up on a phone says "phone", not "computer".
 - Checked on real devices: a Mac, a Samsung S25 on mobile data and a keeper on an x86_64 Linux box reach each other
   directly across networks.
+- Shared albums belong to you, not to one device: join or create one on any device and all your devices take part;
+  people see you once, under the name you set in *Settings → You* (the same on all your devices); leaving on one
+  device leaves on all. You can share an album you already have (*Share this album*), and photos you add to it later
+  are shared too.
+- The Info panel's *Stored on* list uses the names devices report, like the Devices screen.

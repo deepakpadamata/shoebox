@@ -36,7 +36,7 @@
       {#each albums as a (a.id)}
         <a class="album" href="#/album/{a.id}">
           <div class="cover">{#if a.cover}<img src={blobUrl(a.cover, 'thumb')} alt="" loading="lazy" />{:else}<span>▤</span>{/if}</div>
-          <b>{a.name}</b>
+          <b>{a.name}{#if a.shared_as}<span class="pill">Shared</span>{/if}</b>
           <span class="muted small">{plural(a.item_count, 'photo')}</span>
         </a>
       {/each}
@@ -50,5 +50,6 @@
   .album { text-decoration: none; display: flex; flex-direction: column; gap: 2px; }
   .cover { aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: var(--surface-2); display: grid; place-items: center; font-size: 34px; color: var(--ink-3); margin-bottom: 6px; }
   .cover img { width: 100%; height: 100%; object-fit: cover; }
+  .pill { margin-left: 6px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); vertical-align: 2px; }
   .input { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 0 12px; color: var(--ink); font: inherit; }
 </style>

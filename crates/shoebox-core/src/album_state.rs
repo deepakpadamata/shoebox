@@ -14,8 +14,18 @@ use std::collections::BTreeMap;
 pub enum AlbumEntry {
     Meta(SharedAlbumMeta),
     Item(SharedItem),
-    Member { hlc: Hlc, member: Member },
+    Member {
+        hlc: Hlc,
+        member: Member,
+    },
     Event(AlbumEvent),
+    /// Which person (library) a member device belongs to, so one person's devices show as one
+    /// member. Added after 0.1's first builds: older readers skip it.
+    Person {
+        hlc: Hlc,
+        device: EndpointId,
+        person: LibraryId,
+    },
 }
 
 /// Which record a write changed.
@@ -24,6 +34,7 @@ pub enum AlbumTouched {
     Item(PhotoId),
     Member(EndpointId),
     Event(Hlc),
+    Person(EndpointId),
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -50,6 +61,8 @@ pub struct AlbumState {
     /// Per member the entry with the greatest `(hlc, name, role)` wins.
     members: BTreeMap<EndpointId, (Hlc, Member)>,
     events: BTreeMap<Hlc, AlbumEvent>,
+    /// Per device the latest person entry wins.
+    persons: BTreeMap<EndpointId, (Hlc, LibraryId)>,
     hlc: HlcClock,
     max_seen: Hlc,
 }
@@ -82,6 +95,7 @@ impl AlbumState {
             items: BTreeMap::new(),
             members: BTreeMap::new(),
             events: BTreeMap::new(),
+            persons: BTreeMap::new(),
             hlc: HlcClock::new(device),
             max_seen: Hlc {
                 physical_ms: 0,
@@ -134,6 +148,53 @@ impl AlbumState {
         }
     }
 
+    fn put_person(
+        &mut self,
+        hlc: Hlc,
+        device: EndpointId,
+        person: LibraryId,
+        fx: &mut AlbumEffect,
+    ) {
+        self.max_seen = self.max_seen.max(hlc);
+        match self.persons.get(&device) {
+            Some(existing) if *existing >= (hlc, person) => {}
+            _ => {
+                fx.touch(AlbumTouched::Person(device));
+                self.persons.insert(device, (hlc, person));
+            }
+        }
+    }
+
+    /// The person (library) `device` said it belongs to, if it did.
+    pub fn person_of(&self, device: &EndpointId) -> Option<LibraryId> {
+        self.persons.get(device).map(|(_, p)| *p)
+    }
+
+    /// Say which person this device belongs to (needs a member role, like the name).
+    pub fn set_my_person(&mut self, person: LibraryId, now_ms: u64) -> Result<AlbumEffect> {
+        self.my_role().ok_or(StoreError::ReadOnly)?;
+        let mut fx = AlbumEffect::default();
+        if self.person_of(&self.me) == Some(person) {
+            return Ok(fx);
+        }
+        let hlc = self.tick(now_ms);
+        let me = self.me;
+        self.put_person(hlc, me, person, &mut fx);
+        Ok(fx)
+    }
+
+    /// People in the album: devices of the same person count once.
+    pub fn people_count(&self) -> usize {
+        let mut seen = std::collections::BTreeSet::new();
+        self.members
+            .keys()
+            .filter(|d| match self.person_of(d) {
+                Some(p) => seen.insert(p),
+                None => true,
+            })
+            .count()
+    }
+
     fn put_event(&mut self, e: &AlbumEvent, fx: &mut AlbumEffect) {
         self.max_seen = self.max_seen.max(e.hlc);
         if self.events.insert(e.hlc, e.clone()).as_ref() != Some(e) {
@@ -155,6 +216,17 @@ impl AlbumState {
 
     /// Register this replica's device as a member with `role`; non-creators log a join event.
     pub fn install_member(&mut self, role: MemberRole, now_ms: u64) -> AlbumEffect {
+        self.install_member_as(role, now_ms, true)
+    }
+
+    /// [`Self::install_member`], optionally without the "joined" event (another device of a person
+    /// who is already in the album).
+    pub fn install_member_as(
+        &mut self,
+        role: MemberRole,
+        now_ms: u64,
+        announce: bool,
+    ) -> AlbumEffect {
         let mut fx = AlbumEffect::default();
         let hlc = self.tick(now_ms);
         let member = Member {
@@ -163,7 +235,7 @@ impl AlbumState {
             role,
         };
         self.put_member(hlc, member, &mut fx);
-        if role != MemberRole::Owner {
+        if role != MemberRole::Owner && announce {
             let h = self.tick(now_ms);
             let ev = AlbumEvent {
                 hlc: h,
@@ -276,6 +348,11 @@ impl AlbumState {
             }
             AlbumEntry::Member { hlc, member } => self.put_member(*hlc, member.clone(), &mut fx),
             AlbumEntry::Event(e) => self.put_event(e, &mut fx),
+            AlbumEntry::Person {
+                hlc,
+                device,
+                person,
+            } => self.put_person(*hlc, *device, *person, &mut fx),
         }
         fx
     }
@@ -288,6 +365,11 @@ impl AlbumState {
                 member: m.clone(),
             }),
             AlbumTouched::Event(h) => self.events.get(h).cloned().map(AlbumEntry::Event),
+            AlbumTouched::Person(d) => self.persons.get(d).map(|(hlc, p)| AlbumEntry::Person {
+                hlc: *hlc,
+                device: *d,
+                person: *p,
+            }),
         }
     }
 
@@ -299,6 +381,11 @@ impl AlbumState {
             member: m.clone(),
         }));
         out.extend(self.events.values().cloned().map(AlbumEntry::Event));
+        out.extend(self.persons.iter().map(|(d, (h, p))| AlbumEntry::Person {
+            hlc: *h,
+            device: *d,
+            person: *p,
+        }));
         out
     }
 

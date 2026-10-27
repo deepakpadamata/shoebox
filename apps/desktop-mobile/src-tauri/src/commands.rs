@@ -96,6 +96,10 @@ pub const COMMANDS: &[&str] = &[
     "shared_seen",
     "shared_fetch",
     "shared_remove_member",
+    "profile",
+    "set_profile_name",
+    "album_share_check",
+    "album_share",
     "diagnostics",
     "device_link",
 ];
@@ -303,6 +307,21 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             )
             .await?),
         "shared_join" => out(core.shared_join(&arg::<String>(&args, "text")?).await?),
+        "profile" => out(core.profile().await?),
+        "set_profile_name" => {
+            core.set_profile_name(&arg::<String>(&args, "name")?)
+                .await?;
+            Ok(json!({}))
+        }
+        "album_share_check" => out(core
+            .album_share_check(&arg::<String>(&args, "album")?)
+            .await?),
+        "album_share" => out(core
+            .album_share(
+                &arg::<String>(&args, "album")?,
+                opt::<String>(&args, "location")?,
+            )
+            .await?),
         "shared_leave" => {
             core.shared_leave(&arg::<String>(&args, "album")?).await?;
             Ok(json!({}))

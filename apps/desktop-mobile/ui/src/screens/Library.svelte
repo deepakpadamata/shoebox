@@ -19,6 +19,31 @@
   interface Props { source: 'all' | 'favorites' | 'album'; album?: string; }
   let { source, album }: Props = $props();
 
+  // An album of your own can be shared: a shared album with its photos, kept linked (A-097).
+  let sharedAs = $state<string | null>(null);
+  let shareAsk = $state(0);
+  let sharing = $state(false);
+  $effect(() => {
+    if (source !== 'album' || !album) return;
+    app.version;
+    untrack(() => { api.albums().then((all) => (sharedAs = all.find((a) => a.id === album)?.shared_as ?? null)).catch(() => {}); });
+  });
+  async function startShare() {
+    try {
+      const check = await api.albumShareCheck(album!);
+      if (check.with_location > 0) shareAsk = check.with_location;
+      else await share('remove');
+    } catch (e) { fail(e); }
+  }
+  async function share(location: string) {
+    sharing = true;
+    try {
+      const s = await api.albumShare(album!, location);
+      shareAsk = 0;
+      go(`shared/${s.id}`);
+    } catch (e) { fail(e); } finally { sharing = false; }
+  }
+
   const GAP = 2;
   const HEAD = 44;
   let items = $state<PhotoSummary[]>([]);
@@ -190,6 +215,17 @@
       <ProgressBar total={wantThumbs.length} segments={[{ value: wantThumbs.length - missingThumbs, tone: 'info' }]} label="Previews downloaded" />
     </div>
   {/if}
+  {#if source === 'album' && album && !selecting}
+    <div class="sharebar">
+      {#if sharedAs}
+        <span class="grow small">Shared with others. Photos you add here are shared too.</span>
+        <Button size="sm" onclick={() => go(`shared/${sharedAs}`)}>Open shared album</Button>
+      {:else}
+        <span class="grow small muted">Only on your devices.</span>
+        <Button size="sm" disabled={sharing} onclick={startShare}>{sharing ? 'Sharing…' : 'Share this album'}</Button>
+      {/if}
+    </div>
+  {/if}
   {#if selecting}
     <div class="selbar">
       <b>{selected.length} selected</b>
@@ -254,6 +290,14 @@
   <Viewer {items} index={viewing} onclose={() => (viewing = null)} onmove={jump} />
 {/if}
 
+<Sheet open={shareAsk > 0} title="Share the location?" onclose={() => (shareAsk = 0)} width={420}>
+  <div class="stack">
+    <p>{plural(shareAsk, 'photo')} in this album {shareAsk === 1 ? 'was' : 'were'} taken at a known place. People you share it with would see where. Your choice also applies to photos you add to the album later.</p>
+    <Button kind="primary" block disabled={sharing} onclick={() => share('remove')}>Remove the location</Button>
+    <Button block disabled={sharing} onclick={() => share('keep')}>Keep the location</Button>
+  </div>
+</Sheet>
+
 <Sheet open={albumSheet} title="Add to album" onclose={() => (albumSheet = false)} width={380}>
   <div class="stack">
     {#each albums as a}
@@ -268,6 +312,7 @@
 
 <style>
   .wrap { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+  .sharebar { display: flex; gap: 8px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line); }
   .selbar { display: flex; gap: 8px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--accent-soft); flex-wrap: wrap; }
   .scroller { flex: 1; overflow-y: auto; position: relative; min-height: 0; touch-action: pan-y; }
   .canvas { position: relative; }

@@ -230,3 +230,25 @@ async fn a_stored_copy_of_a_gallery_file_becomes_a_reference() {
     assert!(nodes[0].copy_count(&id).await.unwrap() >= 1);
     c.shutdown().await;
 }
+
+/// A gallery video is referenced and served like a photo: the keeper gets its bytes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_gallery_video_reaches_the_keeper() {
+    let (_c, nodes) = phone_and_keeper().await;
+    let dir = tempfile::tempdir().unwrap();
+    let samples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/samples");
+    let file = dir.path().join("VID_0001.mp4");
+    std::fs::copy(samples.join("clip.mp4"), &file).unwrap();
+    let report = nodes[0]
+        .import_paths(std::slice::from_ref(&file), in_place())
+        .await
+        .unwrap();
+    assert_eq!(report.imported.len(), 1, "{report:?}");
+    let id = report.imported[0];
+    assert!(nodes[0].is_in_place(&id).await.unwrap());
+    keeper_holds(&nodes, &report.imported).await;
+    assert_eq!(
+        nodes[1].node().blobs().get(&id).await.unwrap(),
+        std::fs::read(&file).unwrap()
+    );
+}

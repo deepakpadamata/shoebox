@@ -379,6 +379,35 @@ Behaviour that will come back as features or needs a decision.
   already re-ask silent peers (R1-02). Also from the same run: the keeper listed devices by their certificate names
   ("This computer", the onboarding default when the name field was left empty) while the app showed the names devices
   report; the keeper now uses the app's rule, and onboarding on a phone says "phone" and defaults to "My phone".
+- **A-097 · shared albums belong to the person, not the device (owner's request, 2026-10-27)** · Three asks after
+  trying shared albums on real devices: share an album you already have, show one name for a person, and give all of
+  a person's devices access when one joins. Design:
+  - *The library holds the person's shared albums.* Library setting `shared.albums` is a JSON list of `AlbumRef`
+    (capability, inviter, role, `cap_ms`, `joined_ms`, `left_ms`, `from_album`, `location`). Every device (the app
+    and the keeper) follows it (`shoebox_store::library_link::follow`, on library changes and every 20 s): albums it
+    is in are added; albums in the list it is not in are *adopted*: the namespace is imported with the capability,
+    the album's record fetched from the person's other devices (then the inviter), and the device takes part with
+    the same role, with no "joined" line in the feed. Album capabilities were already in each device's
+    `shared-albums.json`; now every device of the library can read them too (same trust domain: the person).
+  - *Leaving* writes `left_ms` and every device leaves. *A move* (the owner removed someone) gives a new capability;
+    `cap_ms` decides which is newer, so a device that was not told directly (a viewer device without an entry)
+    follows through the library. A list write is last-writer-wins: two devices joining different albums at the same
+    moment can drop one entry, which the device that is in it re-adds on its next round.
+  - *One person, several devices.* A new album record `people/<device>` says which person (the library's lasting
+    identity id) a member device belongs to. Members are listed per person with a device count, the 50-member limit
+    counts people, and removing a member removes all their devices. Older builds skip the record (they show each
+    device as before).
+  - *The person's name* is the library setting `profile.name`, set in Settings → You; until set, a device's own name
+    is used, as before. Changing it renames the person in every album.
+  - *Sharing an album you have* (Albums → the album → Share this album) creates a shared album with its name and
+    photos, asks once about location (remove or keep, for later photos too; with none to ask about, later photos have
+    their location removed) and links the two (`from_album`): photos added to the album later are shared by whichever
+    of the person's devices is in the shared album (at once on the device that added them, otherwise within 30 s).
+    Removing a photo from the album does not remove it from the shared album (shared albums cannot remove items yet).
+  - Limits: a *viewer* person's other devices have no member entry, so other people's devices do not serve them
+    blobs; they get the album's photos from the person's own devices. Tested in
+    `shared_albums_follow_the_person_to_all_their_devices` (two devices of Ana, Ben; name, adoption, one person with
+    two devices, one "joined", leaving everywhere, sharing an existing album and a later photo following).
 
 ### Rules for future changes
 

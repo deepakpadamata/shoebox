@@ -20,6 +20,7 @@
 //! items/<photoId hex>                  → AlbumEntry::Item
 //! members/<memberKey hex>              → AlbumEntry::Member
 //! events/<hlc: ms:016x counter:08x device hex> → AlbumEntry::Event
+//! people/<deviceId hex>                → AlbumEntry::Person
 //! ```
 //!
 //! Values are `[version byte = 1] ++ postcard(entry)`. The key is derived from the record, and a
@@ -93,6 +94,7 @@ pub fn album_touched_key(t: &AlbumTouched) -> String {
         AlbumTouched::Item(id) => format!("items/{}", hex32(&id.0)),
         AlbumTouched::Member(k) => format!("members/{}", hex32(&k.0)),
         AlbumTouched::Event(h) => format!("events/{}", hlc_key(h)),
+        AlbumTouched::Person(d) => format!("people/{}", hex32(&d.0)),
     }
 }
 
@@ -102,6 +104,7 @@ pub fn album_key(e: &AlbumEntry) -> String {
         AlbumEntry::Item(i) => format!("items/{}", hex32(&i.id.0)),
         AlbumEntry::Member { member, .. } => format!("members/{}", hex32(&member.key.0)),
         AlbumEntry::Event(ev) => format!("events/{}", hlc_key(&ev.hlc)),
+        AlbumEntry::Person { device, .. } => format!("people/{}", hex32(&device.0)),
     }
 }
 

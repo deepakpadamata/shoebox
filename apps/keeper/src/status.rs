@@ -166,7 +166,16 @@ pub(crate) async fn album(shared: &Shared, req: &Value) -> Result<Value> {
         let text = req["text"]
             .as_str()
             .ok_or_else(|| anyhow!("missing `text`"))?;
-        let id = albums.join(text, &shared.opts.name).await?;
+        // Members see the person's name when one is set (the same on all their devices).
+        let my_name = match shared.library.lock().await.as_ref() {
+            Some(ln) => shoebox_store::library_link::person_name(ln.store().as_ref())
+                .await
+                .ok()
+                .flatten(),
+            None => None,
+        }
+        .unwrap_or_else(|| shared.opts.name.clone());
+        let id = albums.join(text, &my_name).await?;
         let name = albums
             .list()
             .await?

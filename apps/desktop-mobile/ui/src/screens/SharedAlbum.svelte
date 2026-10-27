@@ -225,7 +225,7 @@
     {:else}
       <div class="list">
         {#each members as m (m.key)}
-          <div class="row"><span>👤</span><span>{m.name}{m.me ? ' (you)' : ''}</span><span class="grow"></span><Pill tone={m.role === 'owner' ? 'info' : 'mute'}>{m.role}</Pill>{#if isOwner && !m.me}<Button size="sm" kind="ghost" onclick={() => (removing = m)}>Remove</Button>{/if}</div>
+          <div class="row"><span>👤</span><span>{m.name}{m.me ? ' (you)' : ''}{#if m.devices > 1}<span class="muted small"> · {m.devices} devices</span>{/if}</span><span class="grow"></span><Pill tone={m.role === 'owner' ? 'info' : 'mute'}>{m.role}</Pill>{#if isOwner && !m.me}<Button size="sm" kind="ghost" onclick={() => (removing = m)}>Remove</Button>{/if}</div>
         {/each}
         <p class="muted small">People who leave or are removed keep the photos they already downloaded.</p>
       </div>

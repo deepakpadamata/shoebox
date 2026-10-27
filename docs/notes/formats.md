@@ -53,6 +53,16 @@ Each signature or keyed hash starts with its domain, so one can never be replaye
 |---|---|
 | library records (photos, albums, certificates, holdings, settings) | `[version byte] ++ postcard(body)`, version 1 (`codec.rs`, `entry_codec.rs`) |
 | Loro capability payload | version byte 1 (`CAPABILITY_VERSION`); `[2, identity id]` after an epoch change |
+| shared-album records (meta, items, members, events, people) | `[version byte] ++ postcard(body)`, version 1. `people/<device>` (`AlbumEntry::Person`, which person a device belongs to) was appended to the enum on 2026-10-27, before the 0.1.0 release: builds from before that skip it |
+
+Library settings with a meaning (LWW per key, opaque bytes):
+
+| Key | Value |
+|---|---|
+| `redundancy.target` | one byte: copies to keep |
+| `recovery_kit_saved` | one byte |
+| `profile.name` | UTF-8: the person's name as people they share with see it (A-097) |
+| `shared.albums` | JSON list of `AlbumRef` (`shoebox_store::shared`): the shared albums the person is in, with capability, inviter, role, `cap_ms`, `joined_ms`, `left_ms`, `from_album`, `location` (A-097) |
 
 ## Text people copy
 
@@ -76,7 +86,7 @@ App data dir:
 | `app.json` | device name, role, library ticket, relay, unacknowledged security alerts |
 | `app.lock` | one app per data dir |
 | `backup.json` | camera-roll backup state (phones): policy, change token, waiting assets, `tracked` (asset id → photo, path, modified time), `moving`, `held_deletions`; an older file with only `imported` is read and replaced |
-| `shared-albums.json` | shared-album registry (`0600`: holds album capabilities) |
+| `shared-albums.json` | shared-album registry (`0600`: holds album capabilities); per album also `own` (the person's other devices in it) and `cap_ms` (when the capability was set), both optional |
 | `secrets/` | file keystore (dev, tests); real builds use the OS keystore |
 | `posters/` | device-local video poster frames |
 | `backups/` | copies taken before a migration |

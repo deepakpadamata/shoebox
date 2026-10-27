@@ -54,6 +54,13 @@ keeps no copy of them, only the gallery does. Free-up also leaves alone what the
 
 *Shared* lists the albums you share with other people (who may be on their own libraries).
 
+* **Your name.** People you share with see the name in *Settings → You*, the same on all your devices (until you set
+  one, they see the device's name).
+* **All your devices take part.** Join or create a shared album on one device and your other devices join it by
+  themselves; the other people see you once, not once per device. Leaving on one device leaves on all of them.
+* **Share an album you already have:** open it under *Albums* and choose *Share this album*. Its photos are shared,
+  and photos you add to the album later are shared too. (Removing a photo from your album does not remove it from
+  the shared one.)
 * **Create** a shared album, then **Invite**: choose whether the person can add photos or only look. You get
   a QR code and a text code; the person opens *Shared → Join with an invitation* and scans or pastes it. Both
   of you need to be online while they join. An invitation works once and for seven days.

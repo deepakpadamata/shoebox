@@ -138,6 +138,14 @@ impl<L: LibraryStore> LibraryNode<L> {
             .library
     }
 
+    /// The library's lasting identity (it survives rotations): what shared albums call the
+    /// person this library belongs to.
+    pub fn person_id(&self) -> shoebox_core::store::LibraryId {
+        self.capability()
+            .expect("library node has a capability")
+            .identity_id()
+    }
+
     pub fn node(&self) -> &Node {
         &self.inner.node
     }

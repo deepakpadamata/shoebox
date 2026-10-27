@@ -12,6 +12,7 @@ use shoebox_core::model::{
 use shoebox_core::store::{AlbumEventKind, Cursor, LibraryStore, Page};
 use shoebox_media::strip_location;
 use shoebox_node::Protection;
+use shoebox_store::library_link;
 use shoebox_store::{item_blob, SharedAlbums, SharedSummary};
 use std::sync::Arc;
 
@@ -23,6 +24,14 @@ fn role_name(r: Option<MemberRole>) -> &'static str {
         Some(MemberRole::Owner) => "owner",
         Some(MemberRole::Contributor) => "contributor",
         Some(MemberRole::Viewer) | None => "viewer",
+    }
+}
+
+fn role_of(s: &str) -> MemberRole {
+    match s {
+        "owner" => MemberRole::Owner,
+        "contributor" => MemberRole::Contributor,
+        _ => MemberRole::Viewer,
     }
 }
 
@@ -77,12 +86,49 @@ impl AppCore {
             .ok_or_else(|| anyhow!("set up or join a library first"))
     }
 
-    fn my_name(&self) -> String {
+    /// The name other people see in shared albums: the person's name when set (shared by all
+    /// their devices), this device's name until then.
+    async fn my_name(&self) -> String {
+        if let Ok(ln) = self.ln().await {
+            if let Ok(Some(n)) = library_link::person_name(ln.store().as_ref()).await {
+                return n;
+            }
+        }
         let n = self.device_name();
         if n.trim().is_empty() {
             "This device".into()
         } else {
             n
+        }
+    }
+
+    /// The name shown to people you share with, and whether it was set (or is the device name).
+    pub async fn profile(&self) -> Result<Profile> {
+        let ln = self.ln().await?;
+        let set = library_link::person_name(ln.store().as_ref()).await?;
+        Ok(Profile {
+            is_set: set.is_some(),
+            name: self.my_name().await,
+        })
+    }
+
+    /// Set the name shown to people you share with, on every device of the library.
+    pub async fn set_profile_name(&self, name: &str) -> Result<()> {
+        let ln = self.ln().await?;
+        library_link::set_person_name(ln.store().as_ref(), name).await?;
+        if let Ok(sa) = self.sa().await {
+            sa.rename_me(name.trim()).await;
+        }
+        Ok(())
+    }
+
+    /// Bring the library's list of shared albums up to date now (after creating or joining).
+    async fn publish_shared(&self) {
+        if let (Ok(sa), Ok(ln)) = (self.sa().await, self.ln().await) {
+            let name = self.my_name().await;
+            if let Err(e) = library_link::reconcile(&sa, &ln, &name).await {
+                tracing::debug!("publishing shared albums to the library: {e:#}");
+            }
         }
     }
 
@@ -110,7 +156,8 @@ impl AppCore {
 
     pub async fn shared_create(&self, name: &str) -> Result<SharedAlbumInfo> {
         let sa = self.sa().await?;
-        let id = sa.create(name, &self.my_name()).await?;
+        let id = sa.create(name, &self.my_name().await).await?;
+        self.publish_shared().await;
         self.shared_info(&id).await
     }
 
@@ -136,12 +183,15 @@ impl AppCore {
 
     pub async fn shared_join(&self, text: &str) -> Result<SharedAlbumInfo> {
         let sa = self.sa().await?;
-        let id = sa.join(text, &self.my_name()).await?;
+        let id = sa.join(text, &self.my_name().await).await?;
+        self.publish_shared().await;
         self.shared_info(&id).await
     }
 
+    /// Leave an album on every device of the library.
     pub async fn shared_leave(&self, album: &str) -> Result<()> {
-        self.sa().await?.leave(&album_id(album)?).await
+        let (sa, ln) = (self.sa().await?, self.ln().await?);
+        library_link::leave_everywhere(&sa, &ln, &album_id(album)?).await
     }
 
     fn member_names(
@@ -220,15 +270,35 @@ impl AppCore {
         let sa = self.sa().await?;
         let members = sa.members(&album_id(album)?).await?;
         let names = Self::member_names(&members);
-        Ok(members
-            .into_iter()
-            .map(|m| SharedMemberInfo {
-                key: hex::encode(m.member.key.0),
-                name: names[&m.member.key].clone(),
-                role: role_name(Some(m.member.role)).into(),
-                me: m.me,
-            })
-            .collect())
+        let my_person = members.iter().find(|m| m.me).and_then(|m| m.person);
+        // One row per person: their devices together (the strongest role among them).
+        let mut out: Vec<(Option<shoebox_core::store::LibraryId>, SharedMemberInfo)> = vec![];
+        for m in &members {
+            let me = m.me || (m.person.is_some() && m.person == my_person);
+            if let Some(row) = out
+                .iter_mut()
+                .find(|(p, _)| p.is_some() && *p == m.person)
+                .map(|(_, r)| r)
+            {
+                row.devices += 1;
+                row.me |= me;
+                if m.member.role < role_of(&row.role) {
+                    row.role = role_name(Some(m.member.role)).into();
+                }
+                continue;
+            }
+            out.push((
+                m.person,
+                SharedMemberInfo {
+                    key: hex::encode(m.member.key.0),
+                    name: names[&m.member.key].clone(),
+                    role: role_name(Some(m.member.role)).into(),
+                    me,
+                    devices: 1,
+                },
+            ));
+        }
+        Ok(out.into_iter().map(|(_, r)| r).collect())
     }
 
     pub async fn shared_feed(&self, album: &str) -> Result<Vec<FeedEntry>> {
@@ -539,5 +609,139 @@ impl AppCore {
             });
         }
         Ok((hash, mime, small))
+    }
+
+    // ---------- sharing a personal album ----------
+
+    async fn personal_album(&self, album: &str) -> Result<(AlbumId, String, Vec<String>)> {
+        let ln = self.ln().await?;
+        let id = album_id(album)?;
+        let name = ln
+            .store()
+            .albums()
+            .await?
+            .into_iter()
+            .find(|a| a.id == id)
+            .map(|a| a.name)
+            .ok_or_else(|| anyhow!("no such album"))?;
+        let mut ids = vec![];
+        for p in ln.store().album_items(&id, Page::all()).await? {
+            if let Some(rec) = ln.store().photo(&p).await? {
+                if !rec.is_deleted() {
+                    ids.push(p.to_string());
+                }
+            }
+        }
+        Ok((id, name, ids))
+    }
+
+    /// Before sharing an album: how many of its photos carry a location.
+    pub async fn album_share_check(&self, album: &str) -> Result<AddCheck> {
+        let (_, _, ids) = self.personal_album(album).await?;
+        let ln = self.ln().await?;
+        let mut with_location = 0;
+        for i in &ids {
+            if let Some(rec) = ln.store().photo(&photo_id(i)?).await? {
+                if rec.exif.gps.is_some() {
+                    with_location += 1;
+                }
+            }
+        }
+        Ok(AddCheck {
+            total: ids.len() as u32,
+            with_location,
+            policy: "ask".into(),
+        })
+    }
+
+    /// Share one of your albums: a shared album with its name and photos, kept linked so photos
+    /// added to the album later are shared too (from whichever of your devices can). `location`
+    /// is `keep` or `remove`, asked once and used for every later photo.
+    pub async fn album_share(
+        &self,
+        album: &str,
+        location: Option<String>,
+    ) -> Result<SharedAlbumInfo> {
+        let (pid, name, ids) = self.personal_album(album).await?;
+        let (sa, ln) = (self.sa().await?, self.ln().await?);
+        ensure!(
+            library_link::shared_from(ln.store().as_ref(), &pid)
+                .await?
+                .is_none(),
+            "this album is already shared"
+        );
+        if let Some(l) = &location {
+            ensure!(
+                matches!(l.as_str(), "keep" | "remove"),
+                "choose whether to keep or remove the location"
+            );
+        }
+        let id = sa.create(&name, &self.my_name().await).await?;
+        let hex_id = hex::encode(id.0);
+        if let Some(l) = &location {
+            sa.set_location_policy(&id, l)?;
+        }
+        if !ids.is_empty() {
+            self.shared_add(&hex_id, &ids, location.clone(), true)
+                .await?;
+        }
+        library_link::link(&sa, &ln, &id, &pid, location).await?;
+        self.publish_shared().await;
+        self.shared_info(&id).await
+    }
+
+    /// Share what was added to shared personal albums since (on any device of the library).
+    /// Photos already in the shared album, including copies without location, are skipped.
+    pub async fn sync_linked_albums(&self) -> Result<u32> {
+        let (sa, ln) = (self.sa().await?, self.ln().await?);
+        let mut added = 0;
+        for (personal, shared, location) in library_link::shared_links(ln.store().as_ref()).await? {
+            let Ok(album) = sa.album(&shared) else {
+                continue;
+            };
+            if !album.can_add().await {
+                continue;
+            }
+            use shoebox_core::store::AlbumStore;
+            let items = album.items(Page::all()).await?;
+            let mut missing = vec![];
+            for p in ln.store().album_items(&personal, Page::all()).await? {
+                let Some(rec) = ln.store().photo(&p).await? else {
+                    continue;
+                };
+                if rec.is_deleted()
+                    || items
+                        .iter()
+                        .any(|i| i.id == rec.id || i.preview.hash == rec.preview.hash)
+                {
+                    continue;
+                }
+                // Without a location choice, only photos without a location can go.
+                if location.is_none() && rec.exif.gps.is_some() {
+                    continue;
+                }
+                missing.push(p.to_string());
+            }
+            if !missing.is_empty() {
+                let r = self
+                    .shared_add(&hex::encode(shared.0), &missing, location.clone(), false)
+                    .await?;
+                added += r.added;
+            }
+        }
+        Ok(added)
+    }
+
+    /// Personal album id → the shared album it is shared as.
+    pub(crate) async fn shared_links(&self) -> Vec<(String, String)> {
+        let Ok(ln) = self.ln().await else {
+            return vec![];
+        };
+        library_link::shared_links(ln.store().as_ref())
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(p, s, _)| (hex::encode(p.0), hex::encode(s.0)))
+            .collect()
     }
 }

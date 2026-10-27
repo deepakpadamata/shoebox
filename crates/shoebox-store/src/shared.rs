@@ -61,6 +61,37 @@ struct Reg {
     /// where it went, and whether they may write.
     #[serde(default)]
     pending_moves: Vec<(EndpointId, bool)>,
+    /// The person's other devices in this album (it came to this device through the library):
+    /// peers to sync and fetch from even when they have no entry of their own (viewers).
+    #[serde(default)]
+    own: Vec<EndpointId>,
+    /// When `capability` was last set (ms): the newest one wins between the person's devices.
+    #[serde(default)]
+    cap_ms: u64,
+}
+
+/// A shared album as the person's library remembers it, so every device of the person takes
+/// part (A-097). Written by the device that created or joined it, read by the others.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct AlbumRef {
+    pub album: AlbumId,
+    /// Serialised iroh-docs capability (changes when the album moves to a new space).
+    pub capability: Vec<u8>,
+    pub inviter: Option<PeerAddr>,
+    pub role: MemberRole,
+    /// When `capability` was set (ms): after a move the newer capability wins.
+    #[serde(default)]
+    pub cap_ms: u64,
+    /// When the person created or joined it (ms); a later `left_ms` means they left.
+    pub joined_ms: u64,
+    #[serde(default)]
+    pub left_ms: Option<u64>,
+    /// The personal album it was shared from: photos added there are added here too.
+    #[serde(default)]
+    pub from_album: Option<AlbumId>,
+    /// The location choice made when sharing (`keep` or `remove`), used by every device.
+    #[serde(default)]
+    pub location: Option<String>,
 }
 
 /// "The album moved": sent by the owner to each remaining member over [`ALBUM_ALPN`].
@@ -117,6 +148,8 @@ struct Inner {
     notices: broadcast::Sender<AlbumNotice>,
     invites: Mutex<Vec<Invite>>,
     guests: Mutex<HashMap<iroh::EndpointId, Instant>>,
+    /// Which person (library) this device belongs to, told to every album.
+    person: Mutex<Option<shoebox_core::store::LibraryId>>,
 }
 
 /// The shared albums of one device.
@@ -144,6 +177,8 @@ pub struct SharedSummary {
 pub struct MemberInfo {
     pub member: Member,
     pub me: bool,
+    /// The person (library) this device said it belongs to.
+    pub person: Option<shoebox_core::store::LibraryId>,
 }
 
 pub fn encode_invite(t: &InviteTicket) -> String {
@@ -226,6 +261,7 @@ impl SharedAlbums {
                 notices,
                 invites: Mutex::new(vec![]),
                 guests: Mutex::new(HashMap::new()),
+                person: Mutex::new(None),
             }),
         };
         let file = read_registry(&this.inner.path)?;
@@ -302,7 +338,7 @@ impl SharedAlbums {
             created_by: self.inner.backend.device(),
         };
         let album = self.inner.backend.create_album(meta).await?;
-        let _ = album.set_display_name(my_name).await;
+        let _ = album.set_profile(my_name, self.person()).await;
         let reg = Reg {
             album: AlbumId(id),
             capability: album.capability().await?,
@@ -313,6 +349,8 @@ impl SharedAlbums {
             viewers: vec![],
             joined: vec![],
             pending_moves: vec![],
+            own: vec![],
+            cap_ms: self.inner.clock.now_ms(),
         };
         self.install(Arc::new(album), reg);
         self.save()?;
@@ -390,7 +428,7 @@ impl SharedAlbums {
                 other => anyhow!("{other}"),
             })?;
         tracing::debug!("join: album opened");
-        let _ = album.set_display_name(my_name).await;
+        let _ = album.set_profile(my_name, self.person()).await;
         tracing::debug!("join: name published");
         let id = album.meta().await?.id;
         let reg = Reg {
@@ -403,6 +441,8 @@ impl SharedAlbums {
             viewers: vec![],
             joined: vec![],
             pending_moves: vec![],
+            own: vec![],
+            cap_ms: self.inner.clock.now_ms(),
         };
         self.install(Arc::new(album), reg);
         self.save()?;
@@ -419,31 +459,50 @@ impl SharedAlbums {
             e.album.my_role().await == Some(MemberRole::Owner),
             "only the owner can remove people"
         );
+        let members = self.members(id).await?;
+        let person_of = |k: &EndpointId| {
+            members
+                .iter()
+                .find(|m| m.member.key == *k)
+                .and_then(|m| m.person)
+        };
         ensure!(
-            *member != me,
+            *member != me && (person_of(member).is_none() || person_of(member) != self.person()),
             "you cannot remove yourself: leave the album instead"
         );
-        let members = self.members(id).await?;
         let only_joined = e.reg.lock().unwrap().joined.contains(member);
         ensure!(
             members.iter().any(|m| m.member.key == *member) || only_joined,
             "that person is not in this album"
         );
-        let moved = Arc::new(self.inner.backend.move_album(&e.album, &[*member]).await?);
+        // A person goes with all their devices.
+        let mut gone = vec![*member];
+        if let Some(p) = person_of(member) {
+            gone.extend(
+                members
+                    .iter()
+                    .filter(|m| m.person == Some(p) && m.member.key != *member)
+                    .map(|m| m.member.key),
+            );
+        }
+        let moved = Arc::new(self.inner.backend.move_album(&e.album, &gone).await?);
         let mut reg = e.reg.lock().unwrap().clone();
         reg.capability = moved.capability().await?;
-        reg.viewers.retain(|v| v != member);
-        reg.joined.retain(|v| v != member);
+        reg.cap_ms = self.inner.clock.now_ms();
+        reg.viewers.retain(|v| !gone.contains(v));
+        reg.joined.retain(|v| !gone.contains(v));
         reg.pending_moves = members
             .iter()
-            .filter(|m| m.member.key != me && m.member.key != *member)
+            .filter(|m| m.member.key != me && !gone.contains(&m.member.key))
             .map(|m| (m.member.key, m.member.role != MemberRole::Viewer))
             .collect();
         self.install(moved, reg);
         self.save()?;
-        if let Ok(gone) = to_iroh_id(member) {
-            // Their invitation window (if still open) must not outlive their membership.
-            self.inner.guests.lock().unwrap().remove(&gone);
+        for g in &gone {
+            if let Ok(gone) = to_iroh_id(g) {
+                // Their invitation window (if still open) must not outlive their membership.
+                self.inner.guests.lock().unwrap().remove(&gone);
+            }
         }
         self.inner.refresh_gate();
         self.inner.wake.notify_one();
@@ -510,7 +569,7 @@ impl SharedAlbums {
                 name: meta.name,
                 role: e.album.my_role().await,
                 item_count: e.album.item_count().await,
-                member_count: e.album.members().await?.len(),
+                member_count: e.album.people_count().await,
                 keep_originals: reg.keep_originals,
                 location: reg.location,
                 unread,
@@ -526,12 +585,13 @@ impl SharedAlbums {
         let e = self.entry(id)?;
         let mut out: Vec<MemberInfo> = e
             .album
-            .members()
-            .await?
+            .members_with_person()
+            .await
             .into_iter()
-            .map(|m| MemberInfo {
+            .map(|(m, person)| MemberInfo {
                 me: m.key == me,
                 member: m,
+                person,
             })
             .collect();
         let viewers = e.reg.lock().unwrap().viewers.clone();
@@ -539,6 +599,7 @@ impl SharedAlbums {
             if !out.iter().any(|m| m.member.key == v) {
                 out.push(MemberInfo {
                     me: false,
+                    person: None,
                     member: Member {
                         key: v,
                         display_name: format!("Viewer {}", hex::encode(&v.0[..4])),
@@ -627,6 +688,104 @@ impl SharedAlbums {
     }
 
     /// This device got a new name: tell the members of every album (viewers cannot).
+    fn person(&self) -> Option<shoebox_core::store::LibraryId> {
+        *self.inner.person.lock().unwrap()
+    }
+
+    /// Which person (library) this device belongs to; told to every album from now on.
+    pub fn set_person(&self, person: shoebox_core::store::LibraryId) {
+        *self.inner.person.lock().unwrap() = Some(person);
+    }
+
+    /// The albums this device is part of, for the person's library (see [`AlbumRef`]).
+    pub async fn refs(&self) -> Vec<AlbumRef> {
+        let entries: Vec<Arc<Entry>> = self
+            .inner
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect();
+        let mut out = vec![];
+        for e in entries {
+            let reg = e.reg.lock().unwrap().clone();
+            out.push(AlbumRef {
+                album: reg.album,
+                capability: reg.capability,
+                inviter: reg.inviter,
+                role: e.album.my_role().await.unwrap_or(MemberRole::Viewer),
+                cap_ms: reg.cap_ms,
+                joined_ms: 0,
+                left_ms: None,
+                from_album: None,
+                location: Some(reg.location.clone()).filter(|l| l != "ask"),
+            });
+        }
+        out
+    }
+
+    /// Whether this device is part of `id`.
+    pub fn contains(&self, id: &AlbumId) -> bool {
+        self.inner.entries.lock().unwrap().contains_key(id)
+    }
+
+    /// Take part in an album another device of this person belongs to: its record is fetched
+    /// from `peers` (those devices, then the inviter), and the members are told this device is
+    /// the same person. Nothing new appears in the album's activity.
+    pub async fn adopt(&self, r: &AlbumRef, peers: Vec<PeerAddr>, my_name: &str) -> Result<()> {
+        if let Ok(e) = self.entry(&r.album) {
+            let (cap, cap_ms) = {
+                let reg = e.reg.lock().unwrap();
+                (reg.capability.clone(), reg.cap_ms)
+            };
+            if cap == r.capability || cap_ms >= r.cap_ms {
+                return Ok(());
+            }
+            // The album moved to a new space and this device was not told (it has no entry of
+            // its own): follow the person's newer capability. What was downloaded stays.
+            self.inner.entries.lock().unwrap().remove(&r.album);
+        }
+        let mut try_peers = peers.clone();
+        try_peers.extend(r.inviter.clone());
+        for p in &try_peers {
+            if let Ok(addr) = shoebox_node::to_endpoint_addr(p) {
+                self.inner.node.add_peer_addr(addr);
+            }
+        }
+        let album = self
+            .inner
+            .backend
+            .adopt_album(&r.capability, r.role, &try_peers)
+            .await
+            .map_err(|e| match e {
+                StoreError::Unreachable(_) => {
+                    anyhow!("none of your devices in that album could be reached yet")
+                }
+                other => anyhow!("{other}"),
+            })?;
+        let _ = album.set_profile(my_name, self.person()).await;
+        let reg = Reg {
+            album: r.album,
+            capability: album.capability().await?,
+            inviter: r.inviter.clone(),
+            keep_originals: false,
+            location: r.location.clone().unwrap_or_else(|| "ask".into()),
+            seen_ms: self.inner.clock.now_ms(),
+            viewers: vec![],
+            joined: vec![],
+            pending_moves: vec![],
+            own: peers.iter().map(|p| p.id).collect(),
+            cap_ms: r.cap_ms.max(1),
+        };
+        self.install(Arc::new(album), reg);
+        self.save()?;
+        self.inner.refresh_gate();
+        self.inner.wake.notify_one();
+        Ok(())
+    }
+
+    /// Change the name this device shows in every album (the person's name).
     pub async fn rename_me(&self, name: &str) {
         let entries: Vec<Arc<Entry>> = self
             .inner
@@ -636,8 +795,9 @@ impl SharedAlbums {
             .values()
             .cloned()
             .collect();
+        let person = self.person();
         for e in entries {
-            let _ = e.album.set_display_name(name).await;
+            let _ = e.album.set_profile(name, person).await;
         }
     }
 
@@ -672,7 +832,9 @@ impl Inner {
     /// presented an invitation (to sync with before their entry reaches us).
     fn member_ids(e: &Entry) -> Vec<EndpointId> {
         let mut ids = Self::confirmed_member_ids(e);
-        ids.extend(e.reg.lock().unwrap().joined.iter().copied());
+        let reg = e.reg.lock().unwrap();
+        ids.extend(reg.joined.iter().copied());
+        ids.extend(reg.own.iter().copied());
         ids
     }
 
@@ -807,6 +969,7 @@ impl Inner {
         let album = Arc::new(self.backend.open_album(&moved.capability).await?);
         let mut reg = entry.reg.lock().unwrap().clone();
         reg.capability = moved.capability;
+        reg.cap_ms = self.clock.now_ms();
         reg.inviter = Some(moved.owner);
         reg.pending_moves = vec![];
         reg.viewers = vec![];

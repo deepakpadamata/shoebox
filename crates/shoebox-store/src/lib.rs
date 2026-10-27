@@ -2,10 +2,12 @@
 //! document ([`shoebox_store_loro`]) and shared albums stay on iroh-docs ([`shoebox_store_docs`]),
 //! whose namespace capabilities give albums their read/write roles.
 
+pub mod library_link;
 mod shared;
 
 pub use shared::{
-    decode_invite, encode_invite, item_blob, AlbumNotice, MemberInfo, SharedAlbums, SharedSummary,
+    decode_invite, encode_invite, item_blob, AlbumNotice, AlbumRef, MemberInfo, SharedAlbums,
+    SharedSummary,
 };
 
 use async_trait::async_trait;

@@ -16,6 +16,10 @@
 
   let s = $state<Settings | null>(null);
   let name = $state('');
+  // The name people you share with see: one for all your devices.
+  let profileName = $state('');
+  let profileSet = $state(false);
+  onMount(() => { api.profile().then((p) => { profileName = p.name; profileSet = p.is_set; }).catch(() => {}); });
   let relay = $state('default');
   let customRelay = $state('');
   let folder = $state('');
@@ -113,6 +117,16 @@
 <div class="page">
   {#if s}
     <BackupCard />
+
+    <div class="section">You</div>
+    <div class="card pad stack">
+      <span class="small muted">Your name</span>
+      <div class="row-flex">
+        <input class="input grow" bind:value={profileName} placeholder="Your name" />
+        <Button size="sm" disabled={!profileName.trim()} onclick={() => save(async () => { await api.setProfileName(profileName); profileSet = true; }, 'Saved on all your devices')}>Save</Button>
+      </div>
+      <div class="small muted">{profileSet ? 'People you share albums with see this name. It is the same on all your devices.' : 'People you share albums with see this device\'s name until you set one here, for all your devices.'}</div>
+    </div>
 
     <div class="section">This device</div>
     <div class="card pad stack">

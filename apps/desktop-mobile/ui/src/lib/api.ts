@@ -31,11 +31,12 @@ import type { PhotoSummary } from '../bindings/PhotoSummary';
 import type { AboutInfo } from '../bindings/AboutInfo';
 import type { UpdateInfo } from '../bindings/UpdateInfo';
 import type { Settings } from '../bindings/Settings';
+import type { Profile } from '../bindings/Profile';
 
 export type {
   AboutInfo, AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
   AlbumInfo, AppEvent, BackupPolicy, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, Health, ImportSummary,
-  LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Settings,
+  LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, Settings,
 };
 
 export type BlobKind = 'thumb' | 'preview' | 'original' | 'poster';
@@ -170,6 +171,10 @@ export const api = {
   sharedSeen: (album: string) => call<{}>('shared_seen', { album }),
   sharedFetch: (album: string, id: string, kind: BlobKind) => call<{}>('shared_fetch', { album, id, kind }),
   sharedRemoveMember: (album: string, member: string) => call<{}>('shared_remove_member', { album, member }),
+  profile: () => call<Profile>('profile'),
+  setProfileName: (name: string) => call<{}>('set_profile_name', { name }),
+  albumShareCheck: (album: string) => call<AddCheck>('album_share_check', { album }),
+  albumShare: (album: string, location: string | null) => call<SharedAlbumInfo>('album_share', { album, location }),
   syncBurst: (seconds = 10) => call<import('../bindings/BurstReport').BurstReport>('sync_burst', { seconds }),
   deviceLink: () => call<string>('device_link'),
   diagnostics: () => call<DiagnosticsBundle>('diagnostics'),

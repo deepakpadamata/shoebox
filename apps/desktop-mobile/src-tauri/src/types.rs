@@ -188,6 +188,8 @@ ts_type! {
         pub name: String,
         pub cover: Option<String>,
         pub item_count: u32,
+        /// The shared album this album is shared as, if it is shared.
+        pub shared_as: Option<String>,
     }
 }
 
@@ -428,6 +430,8 @@ ts_type! {
         pub name: String,
         pub role: String,
         pub me: bool,
+        /// How many of this person's devices are in the album.
+        pub devices: u32,
     }
 }
 
@@ -466,5 +470,14 @@ ts_type! {
         pub location_removed: u32,
         /// Photos left out, with the reason.
         pub skipped: Vec<String>,
+    }
+}
+
+ts_type! {
+    /// The name people you share with see (the same on all your devices).
+    pub struct Profile {
+        pub name: String,
+        /// False while it is still this device's name (no name was set).
+        pub is_set: bool,
     }
 }

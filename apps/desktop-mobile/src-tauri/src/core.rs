@@ -196,6 +196,9 @@ pub struct AppCore {
     node: Node,
     library: tokio::sync::RwLock<Option<LibraryNode<Library>>>,
     pub(crate) shared: tokio::sync::RwLock<Option<shoebox_store::SharedAlbums>>,
+    /// Following the library's list of shared albums, and sharing what is added to shared
+    /// personal albums (A-097): stopped when the library closes.
+    followers: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     file: Mutex<AppFile>,
     events: broadcast::Sender<AppEvent>,
     pending_pairing: PendingAnswer,
@@ -269,6 +272,7 @@ impl AppCore {
             node,
             library: tokio::sync::RwLock::new(None),
             shared: tokio::sync::RwLock::new(None),
+            followers: Mutex::new(vec![]),
             file: Mutex::new(file),
             events,
             pending_pairing: Mutex::new(PairingSlot::Idle),
@@ -319,6 +323,9 @@ impl AppCore {
 
     /// Stop everything and release the data directory.
     pub async fn shutdown(&self) -> Result<()> {
+        for h in self.followers.lock().unwrap().drain(..) {
+            h.abort();
+        }
         *self.shared.write().await = None;
         *self.library.write().await = None;
         self.node.shutdown().await
@@ -614,6 +621,26 @@ impl AppCore {
             shoebox_store::SharedAlbums::open(self.node.clone(), &self.dir, self.opts.background)
                 .await?;
         self.forward_shared_changes(&shared);
+        if self.opts.background {
+            let weak = Arc::downgrade(self);
+            let follow =
+                shoebox_store::library_link::follow(shared.clone(), ln.clone(), move || {
+                    weak.upgrade().map(|c| c.device_name()).unwrap_or_default()
+                });
+            let weak = Arc::downgrade(self);
+            let linked = tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    let Some(core) = weak.upgrade() else { break };
+                    if let Err(e) = core.sync_linked_albums().await {
+                        tracing::debug!("sharing new photos of shared albums: {e:#}");
+                    }
+                }
+            });
+            self.followers.lock().unwrap().extend([follow, linked]);
+        } else {
+            shared.set_person(ln.person_id());
+        }
         *self.shared.write().await = Some(shared);
         *self.library.write().await = Some(ln);
         Ok(())
@@ -1026,9 +1053,11 @@ impl AppCore {
                         let cert = list.devices.iter().find(|d| d.device == h.device);
                         stored_on.push(StoredOn {
                             device_id: hex::encode(h.device.0),
-                            name: cert
-                                .map(|c| c.name.clone())
-                                .unwrap_or_else(|| "unknown device".into()),
+                            name: self.shown_name(
+                                &h.device,
+                                cert.map(|c| c.name.as_str()),
+                                &presence,
+                            ),
                             role: cert
                                 .map(|c| role_name(c.role).to_string())
                                 .unwrap_or_default(),
@@ -1167,16 +1196,21 @@ impl AppCore {
 
     pub async fn albums(&self) -> Result<Vec<AlbumInfo>> {
         let ln = self.ln().await?;
+        let links = self.shared_links().await;
         Ok(ln
             .store()
             .albums()
             .await?
             .into_iter()
-            .map(|a| AlbumInfo {
-                id: hex::encode(a.id.0),
-                name: a.name,
-                cover: a.cover.map(|c| c.to_string()),
-                item_count: a.item_count as u32,
+            .map(|a| {
+                let id = hex::encode(a.id.0);
+                AlbumInfo {
+                    shared_as: links.iter().find(|(p, _)| *p == id).map(|(_, s)| s.clone()),
+                    id,
+                    name: a.name,
+                    cover: a.cover.map(|c| c.to_string()),
+                    item_count: a.item_count as u32,
+                }
             })
             .collect())
     }
@@ -1206,6 +1240,7 @@ impl AppCore {
             name: name.to_string(),
             cover: None,
             item_count: 0,
+            shared_as: None,
         })
     }
 
@@ -1213,6 +1248,11 @@ impl AppCore {
         let ln = self.ln().await?;
         let ids: Vec<_> = ids.iter().map(|i| parse_hash(i)).collect::<Result<_>>()?;
         ln.store().album_add(&parse_album(album)?, &ids).await?;
+        // A shared album: share what was added (or later, from another device, if this one is
+        // not in the shared album).
+        if let Err(e) = self.sync_linked_albums().await {
+            tracing::debug!("sharing new photos of shared albums: {e:#}");
+        }
         Ok(())
     }
 
@@ -1301,6 +1341,25 @@ impl AppCore {
             .collect())
     }
 
+    /// How a device is named everywhere in the app. The name a device reports about itself is the
+    /// freshest; the certificate's name (set when it joined, updated by an admin) is the fallback.
+    fn shown_name(
+        &self,
+        device: &EndpointId,
+        cert_name: Option<&str>,
+        presence: &[shoebox_node::DeviceStatus],
+    ) -> String {
+        if device.0 == *self.node.id().as_bytes() {
+            return self.device_name();
+        }
+        presence
+            .iter()
+            .find(|p| p.id == *device)
+            .and_then(|p| p.name.clone())
+            .or_else(|| cert_name.map(str::to_string))
+            .unwrap_or_else(|| "unknown device".into())
+    }
+
     pub async fn devices(&self) -> Result<Vec<DeviceInfo>> {
         let ln = self.ln().await?;
         let list = ln.store().device_list().await?;
@@ -1329,17 +1388,7 @@ impl AppCore {
             };
             out.push(DeviceInfo {
                 id: hex::encode(d.device.0),
-                // The name a device reports about itself is the freshest; the certificate's name
-                // (set when it joined, updated by an admin) is the fallback.
-                name: if d.device == me {
-                    self.device_name()
-                } else {
-                    presence
-                        .iter()
-                        .find(|p| p.id == d.device)
-                        .and_then(|p| p.name.clone())
-                        .unwrap_or_else(|| d.name.clone())
-                },
+                name: self.shown_name(&d.device, Some(&d.name), &presence),
                 role: role_name(d.role).into(),
                 online: d.device == me || presence.iter().any(|p| p.id == d.device && p.online),
                 is_this_device: d.device == me,

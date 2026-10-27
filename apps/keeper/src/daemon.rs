@@ -117,9 +117,14 @@ impl Shared {
         ln.start_fetcher(FetcherConfig::default());
         ln.start_maintenance(MaintenanceConfig::default());
         ln.start_presence(PresenceConfig::default()).await?;
-        *self.library.lock().await = Some(ln);
         let albums =
             shoebox_store::SharedAlbums::open(self.node.clone(), &self.opts.storage, true).await?;
+        // The keeper takes part in the shared albums its person's other devices are in (A-097).
+        let keeper_name = self.opts.name.clone();
+        shoebox_store::library_link::follow(albums.clone(), ln.clone(), move || {
+            keeper_name.clone()
+        });
+        *self.library.lock().await = Some(ln);
         *self.albums.lock().await = Some(albums);
         // A rotation replaces the capability: remember the new one so a restart rejoins it.
         let mut events = self.node.events();

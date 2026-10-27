@@ -241,3 +241,172 @@ async fn keeping_the_location_shares_the_photo_as_it_is() {
     assert_eq!(a.shared_albums().await.unwrap()[0].location, "ask");
     a.shutdown().await.unwrap();
 }
+
+/// Pair `b` into `a`'s library (both confirm the six digits).
+async fn pair(a: &Arc<AppCore>, b: &Arc<AppCore>, name: &str, role: &str) {
+    use desktop_mobile::types::AppEvent;
+    let start = a.pair_start(role).await.unwrap();
+    let confirm = |mut ev: tokio::sync::broadcast::Receiver<AppEvent>, core: Arc<AppCore>| {
+        tokio::spawn(async move {
+            while let Ok(e) = ev.recv().await {
+                if let AppEvent::PairingCode { .. } = e {
+                    core.confirm_pairing(true).unwrap();
+                    return;
+                }
+            }
+        })
+    };
+    let (ha, hb) = (
+        confirm(a.events(), a.clone()),
+        confirm(b.events(), b.clone()),
+    );
+    b.join(&start.ticket, name).await.unwrap();
+    let _ = (ha.await, hb.await);
+}
+
+/// A-097: a person's name and shared albums follow them to all their devices; another person
+/// sees them once; an album of their own can be shared and stays linked.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shared_albums_follow_the_person_to_all_their_devices() {
+    let (d1, d2, db) = (
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    let laptop = open(d1.path()).await;
+    laptop
+        .create_library("Ana's laptop", "keeper")
+        .await
+        .unwrap();
+    let phone = open(d2.path()).await;
+    pair(&laptop, &phone, "Ana's phone", "companion").await;
+    let ben = open(db.path()).await;
+    ben.create_library("Ben's laptop", "keeper").await.unwrap();
+
+    // One name for Ana, set on the laptop, seen on the phone.
+    assert!(!laptop.profile().await.unwrap().is_set);
+    laptop.set_profile_name("Ana").await.unwrap();
+    assert!(
+        wait(30, || async {
+            phone
+                .profile()
+                .await
+                .map(|p| p.name == "Ana")
+                .unwrap_or(false)
+        })
+        .await,
+        "the phone uses the name set on the laptop"
+    );
+
+    // Ben invites Ana; she joins on the laptop and the phone takes part by itself.
+    let album = ben.shared_create("Picnic").await.unwrap();
+    let invite = ben
+        .shared_invite(&album.id, "contributor", 7)
+        .await
+        .unwrap();
+    laptop.shared_join(&invite.text).await.unwrap();
+    let id = album.id.clone();
+    assert!(
+        wait(90, || async {
+            phone
+                .shared_albums()
+                .await
+                .map(|l| l.iter().any(|a| a.id == id && a.role == "contributor"))
+                .unwrap_or(false)
+        })
+        .await,
+        "the phone is in the album too"
+    );
+    // The phone can add, and Ben sees one Ana with two devices, joined once.
+    phone
+        .import_paths(&[sample("screenshot.png")])
+        .await
+        .unwrap();
+    let shot = phone.library_page(None, 10).await.unwrap().items[0]
+        .id
+        .clone();
+    phone
+        .shared_add(&album.id, &[shot], None, false)
+        .await
+        .unwrap();
+    assert!(
+        wait(60, || async {
+            ben.shared_members(&id)
+                .await
+                .map(|m| m.iter().any(|r| r.name == "Ana" && r.devices == 2))
+                .unwrap_or(false)
+        })
+        .await,
+        "Ben sees Ana once, with two devices: {:?}",
+        ben.shared_members(&id).await
+    );
+    let members = ben.shared_members(&id).await.unwrap();
+    assert_eq!(members.len(), 2, "Ben and Ana: {members:?}");
+    let feed = ben.shared_feed(&id).await.unwrap();
+    let joins = feed.iter().filter(|f| f.kind == "joined").count();
+    assert_eq!(joins, 1, "{feed:?}");
+
+    // Leaving on the phone leaves on the laptop too.
+    phone.shared_leave(&id).await.unwrap();
+    assert!(
+        wait(60, || async {
+            laptop
+                .shared_albums()
+                .await
+                .map(|l| !l.iter().any(|a| a.id == id))
+                .unwrap_or(false)
+        })
+        .await,
+        "the laptop left as well"
+    );
+
+    // Sharing an album Ana already has: its photos go, and what she adds later follows.
+    laptop
+        .import_paths(&[sample("IMG_0001.jpg"), sample("photo-gps.jpg")])
+        .await
+        .unwrap();
+    let ids: Vec<String> = laptop
+        .library_page(None, 10)
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    let trip = laptop.create_album("Trip").await.unwrap();
+    laptop.album_add(&trip.id, &ids[..1]).await.unwrap();
+    let check = laptop.album_share_check(&trip.id).await.unwrap();
+    assert_eq!(check.total, 1);
+    let shared = laptop
+        .album_share(&trip.id, Some("remove".into()))
+        .await
+        .unwrap();
+    assert_eq!((shared.name.as_str(), shared.item_count), ("Trip", 1));
+    assert!(laptop
+        .albums()
+        .await
+        .unwrap()
+        .iter()
+        .any(|a| a.id == trip.id && a.shared_as.as_deref() == Some(shared.id.as_str())));
+    let invite = laptop.shared_invite(&shared.id, "viewer", 7).await.unwrap();
+    ben.shared_join(&invite.text).await.unwrap();
+    laptop.album_add(&trip.id, &ids[1..]).await.unwrap();
+    let (sid, want) = (shared.id.clone(), ids.len() as u32);
+    assert!(
+        wait(60, || async {
+            ben.shared_items(&sid, None, 10)
+                .await
+                .map(|p| p.total == want)
+                .unwrap_or(false)
+        })
+        .await,
+        "the photos added to Trip later reach Ben: {:?}",
+        ben.shared_items(&sid, None, 10).await.map(|p| p.total)
+    );
+    let page = ben.shared_items(&sid, None, 10).await.unwrap();
+    assert!(
+        page.items.iter().all(|i| i.added_by == "Ana"),
+        "{:?}",
+        page.items
+    );
+}

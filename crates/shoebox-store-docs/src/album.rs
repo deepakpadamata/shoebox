@@ -150,6 +150,7 @@ impl DocsAlbum {
         clock: Arc<dyn Clock>,
         node: shoebox_node::Node,
         inviter: EndpointId,
+        announce: bool,
     ) -> Result<Self> {
         let events = drained(replica.doc.subscribe().await.map_err(backend_err)?);
         tracing::debug!("join: first scan");
@@ -183,7 +184,7 @@ impl DocsAlbum {
         if role != MemberRole::Viewer {
             // A viewer holds a read-only capability and cannot publish its membership.
             let mut core = album.inner.core.lock().await;
-            let effect = core.state.install_member(role, clock.now_ms());
+            let effect = core.state.install_member_as(role, clock.now_ms(), announce);
             for t in &effect.touched {
                 if let Some(entry) = core.state.entry(t) {
                     let bytes = encode_album_entry(&entry);
@@ -274,6 +275,54 @@ impl DocsAlbum {
             self.inner.emit();
         }
         Ok(())
+    }
+
+    /// Tell the other members who this device is: the person's name and which person (library)
+    /// it belongs to, so one person's devices show as one member (a viewer cannot).
+    pub async fn set_profile(
+        &self,
+        name: &str,
+        person: Option<shoebox_core::store::LibraryId>,
+    ) -> Result<()> {
+        self.set_display_name(name).await?;
+        let Some(person) = person else { return Ok(()) };
+        let now = self.inner.clock.now_ms();
+        let mut core = self.inner.core.lock().await;
+        let effect = core.state.set_my_person(person, now)?;
+        for t in &effect.touched {
+            if let Some(entry) = core.state.entry(t) {
+                let bytes = encode_album_entry(&entry);
+                core.replica
+                    .put(&album_key(&entry), bytes)
+                    .await
+                    .map_err(backend_err)?;
+            }
+        }
+        drop(core);
+        if effect.changed() {
+            self.inner.emit();
+        }
+        Ok(())
+    }
+
+    /// Members with the person each said it belongs to.
+    pub async fn members_with_person(
+        &self,
+    ) -> Vec<(Member, Option<shoebox_core::store::LibraryId>)> {
+        let core = self.inner.core.lock().await;
+        core.state
+            .members()
+            .into_iter()
+            .map(|m| {
+                let p = core.state.person_of(&m.key);
+                (m, p)
+            })
+            .collect()
+    }
+
+    /// People in the album (one person's devices count once).
+    pub async fn people_count(&self) -> usize {
+        self.inner.core.lock().await.state.people_count()
     }
 
     /// The iroh-docs capability (serialised) that lets this device reopen the album later.
@@ -452,7 +501,7 @@ impl AlbumStore for DocsAlbum {
         if core.state.my_role() != Some(MemberRole::Owner) {
             return Err(StoreError::ReadOnly);
         }
-        if core.state.members().len() >= MAX_ALBUM_MEMBERS {
+        if core.state.people_count() >= MAX_ALBUM_MEMBERS {
             return Err(StoreError::Invalid(format!(
                 "a shared album has at most {MAX_ALBUM_MEMBERS} members"
             )));

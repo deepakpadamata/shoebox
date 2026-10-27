@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 
 const PEER_TIMEOUT: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(500);
+/// Pause before trying a device again after it refused.
+const RETRY: Duration = Duration::from_millis(500);
 /// Give up early when nothing improved for this long (the other devices are not pulling).
 const STALL: Duration = Duration::from_secs(20);
 
@@ -53,11 +55,30 @@ impl AppCore {
             if left.is_zero() {
                 break;
             }
-            let attempt = tokio::time::timeout(PEER_TIMEOUT.min(left), ln.sync_now(p)).await;
-            match attempt {
-                Ok(Ok(())) => reached += 1,
-                Ok(Err(e)) => tracing::warn!(peer = ?p, "burst: sync failed: {e:#}"),
-                Err(_) => tracing::warn!(peer = ?p, "burst: sync timed out"),
+            // A quick refusal is often momentary (a device paired a moment ago, a sync the
+            // background scheduler started that just failed): keep trying within the time this
+            // device gets, instead of giving up on the first answer.
+            let give_up = Instant::now() + PEER_TIMEOUT.min(left);
+            loop {
+                let left = give_up.saturating_duration_since(Instant::now());
+                match tokio::time::timeout(left, ln.sync_now(p)).await {
+                    Ok(Ok(())) => {
+                        reached += 1;
+                        break;
+                    }
+                    Ok(Err(e)) if Instant::now() + RETRY < give_up => {
+                        tracing::debug!(peer = ?p, "burst: sync failed, trying again: {e:#}");
+                        tokio::time::sleep(RETRY).await;
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!(peer = ?p, "burst: sync failed: {e:#}");
+                        break;
+                    }
+                    Err(_) => {
+                        tracing::warn!(peer = ?p, "burst: sync timed out");
+                        break;
+                    }
+                }
             }
         }
 

@@ -7,10 +7,11 @@
 //! missing ranges.
 
 use crate::blobs::Protection;
+use crate::config::NodeConfig;
 use crate::library_node::LibraryNode;
 use anyhow::{anyhow, bail, Result};
 use shoebox_core::ids::{Blake3Hash, EndpointId};
-use shoebox_core::model::{BlobKind, PhotoId};
+use shoebox_core::model::{BlobKind, PhotoId, PhotoRecord};
 use shoebox_core::policy::{
     fetch_plan, queue_order, rank_holders, Candidate, PathQuality, PlanContext, QueuedFetch,
 };
@@ -136,6 +137,35 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(())
     }
 
+    /// Taken within the keep-recent window of `config`.
+    pub(crate) fn is_recent(&self, rec: &PhotoRecord, config: &NodeConfig) -> bool {
+        const DAY_MS: i64 = 86_400_000;
+        config.keep_recent_days > 0
+            && rec.taken_at.0 >= self.now_ms() as i64 - i64::from(config.keep_recent_days) * DAY_MS
+    }
+
+    /// Why a Companion keeps this original on its own account, if it does: the policy that free-up
+    /// leaves alone (pins are checked by the caller).
+    pub(crate) fn kept_by_policy(&self, rec: &PhotoRecord, config: &NodeConfig) -> bool {
+        self.is_recent(rec, config) || (config.keep_favorites && rec.favorite.value)
+    }
+
+    /// This device's keep rules: the recent window in days (0 = off) and whether favourites are
+    /// kept. A Companion's fetcher wakes to apply them.
+    pub fn keep_rules(&self) -> (u32, bool) {
+        let c = self.node().config();
+        (c.keep_recent_days, c.keep_favorites)
+    }
+
+    pub fn set_keep_rules(&self, recent_days: u32, favorites: bool) -> Result<()> {
+        self.node().update_config(|c| {
+            c.keep_recent_days = recent_days;
+            c.keep_favorites = favorites;
+        })?;
+        self.inner.fetcher.wake.notify_one();
+        Ok(())
+    }
+
     pub fn is_pinned(&self, photo: &PhotoId) -> bool {
         self.node()
             .config()
@@ -147,8 +177,9 @@ impl<L: LibraryStore> LibraryNode<L> {
 
     /// Everything this device should hold according to its role but does not, in fetch order.
     pub async fn missing_blobs(&self) -> Result<Vec<QueuedFetch>> {
-        let role = self.node().config().role;
-        let pinned: HashSet<String> = self.node().config().pinned_originals.into_iter().collect();
+        let config = self.node().config();
+        let role = config.role;
+        let pinned: HashSet<String> = config.pinned_originals.iter().cloned().collect();
         let target = self.redundancy_target().await? as usize;
         let photos = self
             .store()
@@ -168,6 +199,8 @@ impl<L: LibraryStore> LibraryNode<L> {
             let ctx = PlanContext {
                 pinned: pinned.contains(&rec.id.to_string()),
                 own_capture_below_target: own_below,
+                recent: self.is_recent(&rec, &config),
+                kept_favorite: config.keep_favorites && rec.favorite.value,
             };
             for item in fetch_plan(role, &rec, &ctx) {
                 if !self.node().blobs().has(&item.blob.hash).await? {

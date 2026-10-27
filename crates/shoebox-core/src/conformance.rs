@@ -713,7 +713,7 @@ async fn device_list_is_signed_and_order_independent<H: Harness>(h: &H) {
         Err(StoreError::BadSignature)
     );
     let mut tampered = device_cert(lib, 3, 5);
-    tampered.role = Role::Phone;
+    tampered.role = Role::Companion;
     assert_eq!(
         apply(&a, SignedDeviceChange::Device(tampered)).await,
         Err(StoreError::BadSignature)
@@ -777,7 +777,7 @@ async fn device_list_is_signed_and_order_independent<H: Harness>(h: &H) {
         &admin_key,
         lib,
         dev(3),
-        Role::Phone,
+        Role::Companion,
         "phone",
         hlc(30, 1),
         false,

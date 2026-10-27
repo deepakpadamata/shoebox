@@ -39,6 +39,17 @@ pub struct NodeConfig {
     /// Originals (photo ids, hex) the user pinned on this device; never replicated.
     #[serde(default)]
     pub pinned_originals: Vec<String>,
+    /// A Companion keeps the original of every photo taken in the last this many days, from any
+    /// device. 0 turns the window off. Device-local: each device chooses for itself.
+    #[serde(default = "default_keep_recent_days")]
+    pub keep_recent_days: u32,
+    /// A Companion also keeps the originals of photos you favourite.
+    #[serde(default = "default_true")]
+    pub keep_favorites: bool,
+}
+
+fn default_keep_recent_days() -> u32 {
+    90
 }
 
 fn default_true() -> bool {
@@ -67,6 +78,8 @@ impl NodeConfig {
             gc_quiet_ms: default_gc_quiet_ms(),
             watched_folders: vec![],
             pinned_originals: vec![],
+            keep_recent_days: default_keep_recent_days(),
+            keep_favorites: true,
         }
     }
 
@@ -131,5 +144,27 @@ mod tests {
         cfg.ensure_dirs().unwrap();
         cfg.save().unwrap();
         assert_eq!(NodeConfig::load(dir.path()).unwrap(), cfg);
+    }
+
+    /// Before 0.1.0 the middle role was called Phone: a config file written then still loads, and
+    /// keeps the old behaviour's new defaults (a 90-day window, favourites).
+    #[test]
+    fn a_config_from_the_phone_days_still_loads_as_a_companion() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = NodeConfig::local_only(dir.path(), "Pixel");
+        cfg.role = Role::Companion;
+        cfg.ensure_dirs().unwrap();
+        cfg.save().unwrap();
+        let text = std::fs::read_to_string(cfg.config_path()).unwrap();
+        assert!(text.contains("Companion"), "{text}");
+        let old: String = text
+            .lines()
+            .filter(|l| !l.starts_with("keep_"))
+            .map(|l| l.replace("Companion", "Phone") + "\n")
+            .collect();
+        std::fs::write(cfg.config_path(), old).unwrap();
+        let loaded = NodeConfig::load(dir.path()).unwrap();
+        assert_eq!(loaded.role, Role::Companion);
+        assert_eq!((loaded.keep_recent_days, loaded.keep_favorites), (90, true));
     }
 }

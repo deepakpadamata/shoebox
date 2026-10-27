@@ -120,8 +120,11 @@ async fn a_stolen_admin_is_removed_with_the_recovery_phrase() {
     // 0: the real admin, 1: the stolen admin phone, 2: a member that is away, 3: a device the
     // stolen phone certified (its current cert is signed by 1).
     let c = Cluster::new(4).await.unwrap();
-    let (rig, nodes) =
-        library_nodes_roles(&c, &[Role::Keeper, Role::Phone, Role::Phone, Role::Keeper]).await;
+    let (rig, nodes) = library_nodes_roles(
+        &c,
+        &[Role::Keeper, Role::Companion, Role::Companion, Role::Keeper],
+    )
+    .await;
     let (real, thief, away, added) = (
         core_id(&c, 0),
         core_id(&c, 1),
@@ -251,7 +254,8 @@ fn rig_phrase(rig: &Rig) -> String {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_root_key_can_be_replaced_and_the_old_phrase_stops_working() {
     let c = Cluster::new(3).await.unwrap();
-    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Phone, Role::Phone]).await;
+    let (rig, nodes) =
+        library_nodes_roles(&c, &[Role::Keeper, Role::Companion, Role::Companion]).await;
     for n in &nodes {
         n.enforce_membership().await.unwrap();
     }
@@ -350,7 +354,8 @@ async fn the_root_key_can_be_replaced_and_the_old_phrase_stops_working() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_first_valid_handover_wins() {
     let c = Cluster::new(3).await.unwrap();
-    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Phone, Role::Phone]).await;
+    let (rig, nodes) =
+        library_nodes_roles(&c, &[Role::Keeper, Role::Companion, Role::Companion]).await;
     for n in &nodes {
         n.enforce_membership().await.unwrap();
     }

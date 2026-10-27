@@ -146,6 +146,7 @@ export const api = {
   health: () => call<Health>('health'),
   freeUpSpace: (dry_run: boolean) => call<FreeUpReport>('free_up_space', { dry_run }),
   settings: () => call<Settings>('settings'),
+  setKeepRules: (recent_days: number, favorites: boolean) => call<{}>('set_keep_rules', { recent_days, favorites }),
   setRedundancyTarget: (copies: number) => call<{}>('set_redundancy_target', { copies }),
   setRelay: (relay: string) => call<{}>('set_relay', { relay }),
   renameDevice: (name: string) => call<{}>('rename_device', { name }),

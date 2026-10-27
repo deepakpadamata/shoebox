@@ -341,6 +341,23 @@ Behaviour that will come back as features or needs a decision.
   - Not handled: a shared album that references a deleted gallery photo keeps a dangling reference on this phone until
     the photo is purged (the album's other members have their own copies). iOS (PhotoKit) is not built.
 
+- **A-093 · the Companion role and its keep rules (2026-10-27)** · "Phone" became **Companion** (`Role::Companion`; the serde
+  alias `Phone`, the app's `parse_role` and the dev tool still accept the old name, so config files and app.json from
+  development builds load; certs are postcard, which stores the variant index, so devices on either name still agree).
+  A Companion fetches thumbnails and previews of everything and the original of a photo when it is pinned, recent
+  (taken within `keep_recent_days`, default 90, 0 = off), a favourite while `keep_favorites` is on (default), or its own
+  capture below the copy target (`PlanContext::keeps_original`). The rules are device-local in `config.toml`
+  (`keep_recent_days`, `keep_favorites`), not replicated: each device chooses for itself. Free-up never frees a pin, a
+  recent photo or a kept favourite. Nothing is removed automatically when a photo leaves the window or a toggle goes
+  off: the originals stay until *Free up space* (an automatic offload is a possible follow-up). "Recent" is the photo's
+  taken date, so a photo shot long ago and imported today is not recent; a favourited photo is fetched on every device that keeps
+  favourites, which on a small phone can add up (the toggle is there for that). A phone's gallery photos stay in
+  place whatever the rules say (A-092). Onboarding on a phone or tablet defaults to Companion.
+- **A-094 · pins were forgotten on restart (found and fixed 2026-10-27)** · `Node::open` rebuilt `config.toml` from the caller's
+  defaults and kept only watched folders, so `pinned_originals` (the list the fetcher and free-up read) reset to empty
+  every start while the `pin/` blob tags stayed: after a restart a pinned original was no longer planned and free-up
+  could release it. It now keeps pins and the keep rules too (`pins_survive_a_restart`).
+
 ### Rules for future changes
 
 Not open questions, but they must be honoured by any format or protocol change, and re-checked on every iroh upgrade (shared albums still run on iroh-docs).

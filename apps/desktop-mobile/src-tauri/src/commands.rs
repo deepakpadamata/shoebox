@@ -70,6 +70,7 @@ pub const COMMANDS: &[&str] = &[
     "free_up_space",
     "settings",
     "set_redundancy_target",
+    "set_keep_rules",
     "set_relay",
     "rename_device",
     "watch_folder",
@@ -250,6 +251,11 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
         "health" => out(core.health().await?),
         "free_up_space" => out(core.free_up_space(arg(&args, "dry_run")?).await?),
         "settings" => out(core.settings().await?),
+        "set_keep_rules" => {
+            core.set_keep_rules(arg(&args, "recent_days")?, arg(&args, "favorites")?)
+                .await?;
+            Ok(json!({}))
+        }
         "set_redundancy_target" => {
             core.set_redundancy_target(arg(&args, "copies")?).await?;
             Ok(json!({}))

@@ -124,6 +124,16 @@
       <div class="small muted">Role: <b>{s.role}</b></div>
     </div>
 
+    {#if s.role === 'companion'}
+      <div class="section">What this device keeps</div>
+      <div class="card pad stack">
+        <p class="small muted" style="margin:0">Keeps the full-size photos from this recent period, from any of your devices. Older ones stay on your keepers; open one and it is fetched. Pinned photos are always kept.</p>
+        <Segmented value={String(s.keep_recent_days)} options={[{ value: '0', label: 'Off' }, { value: '30', label: '30 days' }, { value: '90', label: '90 days' }, { value: '365', label: '1 year' }]}
+          onchange={(v) => save(() => api.setKeepRules(Number(v), s!.keep_favorites), 'Saved')} />
+        <label class="row-flex"><Toggle checked={s.keep_favorites} label="Keep favourites" onchange={(v) => save(() => api.setKeepRules(s!.keep_recent_days, v), 'Saved')} /> Also keep my favourites</label>
+      </div>
+    {/if}
+
     <div class="section">Copies to keep</div>
     <div class="card pad stack">
       <p class="small muted" style="margin:0">Photos with fewer copies than this are marked at risk and copied to other devices as soon as one is reachable. A photo held by a keeper counts as backed up whatever this number is.</p>

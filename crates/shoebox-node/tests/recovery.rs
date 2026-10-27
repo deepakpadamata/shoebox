@@ -127,7 +127,7 @@ async fn admins_can_revoke_devices_and_others_cannot() {
         &root,
         cap.library,
         other.endpoint_id(),
-        Role::Phone,
+        Role::Companion,
         "phone",
         shoebox_core::Hlc {
             physical_ms: 1_699_999_999_000,

@@ -438,12 +438,18 @@ impl Node {
 
     async fn open_inner(mut config: NodeConfig, secret: Option<[u8; 32]>) -> Result<Node> {
         config.ensure_dirs().context("creating data dir layout")?;
-        // Watched folders are state the app builds up at runtime, not something callers pass in:
-        // keep what an earlier run saved unless the caller supplied its own list.
-        if config.watched_folders.is_empty() {
-            if let Ok(saved) = NodeConfig::load(&config.data_dir) {
+        // Watched folders, pins and the keep rules are state the person builds up at runtime, not
+        // something callers pass in: keep what an earlier run saved. (Pins were once lost here, so
+        // a restart forgot them: free-up could then release a pinned original.)
+        if let Ok(saved) = NodeConfig::load(&config.data_dir) {
+            if config.watched_folders.is_empty() {
                 config.watched_folders = saved.watched_folders;
             }
+            if config.pinned_originals.is_empty() {
+                config.pinned_originals = saved.pinned_originals;
+            }
+            config.keep_recent_days = saved.keep_recent_days;
+            config.keep_favorites = saved.keep_favorites;
         }
         config.save().context("writing config.toml")?;
         let secret = match secret {

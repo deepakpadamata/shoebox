@@ -202,6 +202,7 @@ impl<L: LibraryStore> LibraryNode<L> {
             bail!("a keeper never frees space: it is the backstop");
         }
         let me = self.device();
+        let config = self.node().config();
         let target = self.redundancy_target().await? as usize;
         let photos = self
             .store()
@@ -227,6 +228,9 @@ impl<L: LibraryStore> LibraryNode<L> {
             };
             if self.is_pinned(&rec.id) {
                 continue;
+            }
+            if self.kept_by_policy(rec, &config) {
+                continue; // recent, or a favourite this device keeps
             }
             let protections = self.node().blobs().protections(&hash).await?;
             if protections

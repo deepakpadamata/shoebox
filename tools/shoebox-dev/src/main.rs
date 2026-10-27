@@ -116,9 +116,9 @@ fn state_path(dir: &Path) -> PathBuf {
 fn parse_role(s: &str) -> Result<Role> {
     match s.to_ascii_lowercase().as_str() {
         "keeper" => Ok(Role::Keeper),
-        "phone" => Ok(Role::Phone),
+        "companion" | "phone" => Ok(Role::Companion),
         "viewer" => Ok(Role::Viewer),
-        other => bail!("unknown role `{other}` (use keeper, phone or viewer)"),
+        other => bail!("unknown role `{other}` (use keeper, companion or viewer)"),
     }
 }
 
@@ -415,7 +415,7 @@ async fn cmd_run(cli: &Cli) -> Result<()> {
     println!("role: {:?}", s.state.role);
     use std::io::Write;
     // Admin devices offer one single-use pairing ticket per role and a fresh one after each use.
-    for role in [Role::Keeper, Role::Viewer, Role::Phone] {
+    for role in [Role::Keeper, Role::Viewer, Role::Companion] {
         match offer(&s.ln, role).await {
             Ok(ticket) => println!("{}", ticket_line(role, &ticket)),
             Err(e) => {
@@ -447,7 +447,7 @@ async fn cmd_run(cli: &Cli) -> Result<()> {
                 }
                 if let NodeEvent::PairingDone { .. } = ev {
                     // Every ticket is single use: hand out fresh ones.
-                    for role in [Role::Keeper, Role::Viewer, Role::Phone] {
+                    for role in [Role::Keeper, Role::Viewer, Role::Companion] {
                         if let Ok(ticket) = offer(&s.ln, role).await {
                             println!("{}", ticket_line(role, &ticket));
                         }
@@ -469,7 +469,7 @@ fn ticket_line(role: Role, ticket: &PairTicket) -> String {
     match role {
         Role::Keeper => format!("ticket: {ticket}"),
         Role::Viewer => format!("ticket-viewer: {ticket}"),
-        Role::Phone => format!("ticket-phone: {ticket}"),
+        Role::Companion => format!("ticket-companion: {ticket}"),
     }
 }
 

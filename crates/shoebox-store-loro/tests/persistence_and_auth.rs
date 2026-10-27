@@ -305,7 +305,7 @@ async fn records_wait_for_their_authors_certificate_and_then_apply() {
         &r.root,
         r.lib,
         key(5).endpoint_id(),
-        Role::Phone,
+        Role::Companion,
         "late",
         Hlc {
             physical_ms: 9,

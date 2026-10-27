@@ -31,7 +31,7 @@ async fn settle_to(nodes: &[LibraryNode<Library>], id: &Blake3Hash, want: usize,
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn copy_counts_follow_adds_removals_and_an_offline_node() {
     // Phones: a keeper holding a photo would count as backed up on its own.
-    let c = Cluster::with_roles(&[shoebox_core::model::Role::Phone; 3])
+    let c = Cluster::with_roles(&[shoebox_core::model::Role::Companion; 3])
         .await
         .unwrap();
     let nodes = library_nodes_auto(&c).await;
@@ -136,7 +136,7 @@ async fn copy_counts_follow_adds_removals_and_an_offline_node() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn storage_by_device_adds_up_what_each_device_holds() {
     use shoebox_core::model::Role;
-    let c = Cluster::with_roles(&[Role::Phone, Role::Keeper])
+    let c = Cluster::with_roles(&[Role::Companion, Role::Keeper])
         .await
         .unwrap();
     let nodes = library_nodes_auto(&c).await;

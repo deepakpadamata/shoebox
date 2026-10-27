@@ -14,7 +14,7 @@ device, you remove it from another one.
 | Role | Keeps | Good for |
 |---|---|---|
 | Keeper | every original, always | a computer or small always-on box (Raspberry Pi, NAS, a cheap server) |
-| Everyday (phone) | previews and thumbnails of everything, originals of what you pin or took on that device | phones and laptops |
+| Companion | previews and thumbnails of everything, plus the full-size photos you pin, favourite (optional) or that were taken in the last 90 days (adjustable); older ones are fetched from a keeper when you open them | phones, tablets and laptops |
 | Viewer | previews only, never originals | a family tablet |
 
 A role is not forever: *Devices → Role* next to a device changes it, for example when an old laptop becomes the
@@ -28,9 +28,11 @@ it holds counts as backed up. A photo only on a phone is one lost phone away fro
 how many photos are in that state and when they will be safe.
 
 **Photos are only ever deleted by you.** *Delete* moves a photo to Recently Deleted for 30 days on every
-device. Freeing space on a phone removes only originals that a keeper, or at least two other devices, confirmed holding
+device. Freeing space on a Companion removes only originals that a keeper, or at least two other devices, confirmed holding
 in the last week: the same rule as "backed up". Photos from the phone's own gallery are not freed this way: Shoebox
-keeps no copy of them, only the gallery does.
+keeps no copy of them, only the gallery does. Free-up also leaves alone what the Companion keeps by its own rules: recent photos, favourites (if kept) and pins.
+
+**What a Companion keeps** is yours to set in *Settings → What this device keeps*: the recent window (off, 30 days, 90 days, 1 year), and whether favourites are kept. Pins are always kept. Changing the window changes what is fetched; nothing is removed until you choose *Free up space*.
 
 ## First run
 

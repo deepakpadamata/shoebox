@@ -781,3 +781,60 @@ async fn a_newer_release_on_the_feed_shows_until_dismissed() {
     assert!(!core.settings().await.unwrap().update_checks);
     core.shutdown().await.unwrap();
 }
+
+/// The Companion's keep rules are saved per device and shown in Settings; a role stored as
+/// "phone" by an earlier build reads as "companion".
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn keep_rules_are_saved_and_an_old_phone_role_reads_as_companion() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = AppCore::open(dir.path().join("app"), AppOptions::local_only())
+        .await
+        .unwrap();
+    core.create_library("Pixel", "phone").await.unwrap();
+    let s = core.settings().await.unwrap();
+    assert_eq!(s.role, "companion");
+    assert_eq!((s.keep_recent_days, s.keep_favorites), (90, true));
+    core.set_keep_rules(30, false).await.unwrap();
+    let s = core.settings().await.unwrap();
+    assert_eq!((s.keep_recent_days, s.keep_favorites), (30, false));
+    assert!(core.set_keep_rules(99_999, true).await.is_err());
+    let again = {
+        core.shutdown().await.unwrap();
+        AppCore::open(dir.path().join("app"), AppOptions::local_only())
+            .await
+            .unwrap()
+    };
+    let s = again.settings().await.unwrap();
+    assert_eq!(
+        (s.keep_recent_days, s.keep_favorites),
+        (30, false),
+        "survives a restart"
+    );
+    again.shutdown().await.unwrap();
+}
+
+/// Pins are always kept, so a restart must not forget them (free-up and the fetcher read the list).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pins_survive_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = dir.path().join("app");
+    let core = AppCore::open(&app, AppOptions::local_only()).await.unwrap();
+    core.create_library("Pixel", "companion").await.unwrap();
+    let samples = format!(
+        "{}/../../../fixtures/samples/photo-gps.jpg",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    core.import_paths(&[samples]).await.unwrap();
+    let id = core.library_page(None, 10).await.unwrap().items[0]
+        .id
+        .clone();
+    core.pin_original(&id, true).await.unwrap();
+    assert!(core.photo_detail(&id).await.unwrap().pinned);
+    core.shutdown().await.unwrap();
+    let core = AppCore::open(&app, AppOptions::local_only()).await.unwrap();
+    assert!(
+        core.photo_detail(&id).await.unwrap().pinned,
+        "still pinned after a restart"
+    );
+    core.shutdown().await.unwrap();
+}

@@ -79,7 +79,7 @@ async fn a_fresh_device_recovers_the_library_with_the_phrase_alone() {
     // And it can pair further devices: it is an admin.
     assert!(b
         .start_pairing(
-            Role::Phone,
+            Role::Companion,
             Duration::from_secs(60),
             Arc::new(|_| Box::pin(async { true }))
         )
@@ -173,13 +173,19 @@ async fn a_recovery_waits_for_approval_on_the_member() {
     // Declined: nothing is written.
     let err = c
         .node(1)
-        .recover(&link, &phrase, Role::Phone, "laptop", c.clock().now_ms())
+        .recover(
+            &link,
+            &phrase,
+            Role::Companion,
+            "laptop",
+            c.clock().now_ms(),
+        )
         .await
         .unwrap_err();
     assert!(format!("{err:#}").contains("not approved"), "{err:#}");
     assert_eq!(a.store().device_list().await.unwrap(), before);
     let req = asked.lock().unwrap()[0].clone();
-    assert_eq!((req.name.as_str(), req.role), ("laptop", Role::Phone));
+    assert_eq!((req.name.as_str(), req.role), ("laptop", Role::Companion));
     assert_eq!(req.device, core_id(&c, 1));
 
     // Approved: it joins, and the member reports both the recovery and the new admin.
@@ -187,7 +193,13 @@ async fn a_recovery_waits_for_approval_on_the_member() {
     let mut events = a.node().events();
     a.enforce_membership().await.unwrap();
     c.node(1)
-        .recover(&link, &phrase, Role::Phone, "laptop", c.clock().now_ms())
+        .recover(
+            &link,
+            &phrase,
+            Role::Companion,
+            "laptop",
+            c.clock().now_ms(),
+        )
         .await
         .unwrap();
     let (mut joined, mut admin) = (false, false);
@@ -221,7 +233,7 @@ async fn other_members_alert_on_a_new_admin_but_not_on_old_ones() {
             }
         }
     });
-    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Phone]).await;
+    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Companion]).await;
     for n in &nodes {
         n.enforce_membership().await.unwrap();
     }

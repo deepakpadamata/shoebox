@@ -41,7 +41,7 @@ async fn inviter(dir: &Path, files: &[&str]) -> (Node, LibraryNode<Library>) {
     let root = KeyPair::generate();
     let (lib, cap) = backend.create_library(&root.root_public()).await.unwrap();
     let ln = LibraryNode::new(node.clone(), Arc::new(lib), SystemClock).with_capability(cap);
-    ln.create_identity(&root, Role::Phone, "laptop")
+    ln.create_identity(&root, Role::Companion, "laptop")
         .await
         .unwrap();
     let samples: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/samples");
@@ -233,7 +233,7 @@ async fn a_keeper_follows_a_rotation_and_rejoins_the_new_library_after_a_restart
         .await
         .unwrap();
     let t = ln
-        .start_pairing(Role::Phone, Duration::from_secs(300), accept())
+        .start_pairing(Role::Companion, Duration::from_secs(300), accept())
         .await
         .unwrap();
     phone.pair_join(&t, "phone", accept()).await.unwrap();
@@ -293,7 +293,7 @@ async fn an_unpaired_keeper_recovers_with_the_phrase_through_a_surviving_device(
     let (lib, cap) = backend.create_library(&root.root_public()).await.unwrap();
     let ln = LibraryNode::new(node.clone(), Arc::new(lib), SystemClock).with_capability(cap);
     let kit = ln
-        .create_identity(&root, Role::Phone, "laptop")
+        .create_identity(&root, Role::Companion, "laptop")
         .await
         .unwrap();
     let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/samples");
@@ -460,7 +460,7 @@ async fn security_alerts_wait_in_status_until_acknowledged() {
     let (lib, cap) = backend.create_library(&root.root_public()).await.unwrap();
     let ln = LibraryNode::new(node.clone(), Arc::new(lib), SystemClock).with_capability(cap);
     let kit = ln
-        .create_identity(&root, Role::Phone, "laptop")
+        .create_identity(&root, Role::Companion, "laptop")
         .await
         .unwrap();
     ln.enforce_membership().await.unwrap();

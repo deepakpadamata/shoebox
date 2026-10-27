@@ -17,6 +17,10 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
 - A phone keeps one copy of each photo: gallery photos are read where they are, never copied into Shoebox, and a photo
   deleted in the gallery is deleted from the library too (Recently Deleted on every device). Copies made by earlier
   builds are replaced by references on first start. Many photos disappearing at once ask first.
+- The middle role is now **Companion** (it was "Phone"): it keeps the full-size photos taken in a recent window (90 days
+  by default; off, 30 days, 90 days or 1 year in Settings), your favourites (a toggle, on by default) and everything
+  pinned; older originals live on keepers and are fetched when opened. Free-up leaves what the rules keep. Older
+  settings that say "phone" still load. Fixed on the way: a restart forgot pinned photos, so free-up could release one.
 - Phones can add photos by hand (＋ in the Library): from any album, or from files (a file from a cloud drive or a USB
   stick is copied in, since the phone has no other copy).
 - Devices → Storage shows how much of the library each device holds (originals, previews).

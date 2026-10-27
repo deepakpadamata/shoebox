@@ -339,10 +339,12 @@ async fn a_partly_downloaded_blob_resumes_without_refetching_what_it_has() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn phones_fetch_originals_only_for_pinned_photos() {
-    let c = Cluster::with_roles(&[Role::Keeper, Role::Phone])
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Companion])
         .await
         .unwrap();
     let nodes = library_nodes_auto(&c).await;
+    // This test is about pins and copies, not the recent window.
+    nodes[1].set_keep_rules(0, false).unwrap();
     let samples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/samples");
     let ids = nodes[0]
         .import_paths(

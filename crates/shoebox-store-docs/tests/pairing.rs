@@ -46,7 +46,7 @@ async fn pairing_adds_a_certified_device_and_hands_over_the_library() {
     let (da, mut seen_a) = decider(true);
     let (db, mut seen_b) = decider(true);
     let ticket = a
-        .start_pairing(Role::Phone, Duration::from_secs(300), da)
+        .start_pairing(Role::Companion, Duration::from_secs(300), da)
         .await
         .unwrap();
     // The ticket survives its text form (what a QR code carries).
@@ -58,7 +58,7 @@ async fn pairing_adds_a_certified_device_and_hands_over_the_library() {
         .pair_join(&ticket, "Asha's phone", db)
         .await
         .unwrap();
-    assert_eq!(grant.role, Role::Phone);
+    assert_eq!(grant.role, Role::Companion);
     assert_eq!(grant.cap.library, a.library_id());
 
     // Both people saw the same six digits and the right peer details.
@@ -68,14 +68,14 @@ async fn pairing_adds_a_certified_device_and_hands_over_the_library() {
     assert_eq!(sas_a, sas_b);
     assert_eq!(sas_a.len(), 6);
     assert!(sas_a.chars().all(|ch| ch.is_ascii_digit()));
-    assert_eq!(rest_a, "Asha's phone|Phone");
+    assert_eq!(rest_a, "Asha's phone|Companion");
 
     // The inviter recorded the certificate; the joiner can open the library and sync it.
     let list = a.store().device_list().await.unwrap();
     assert!(list
         .devices
         .iter()
-        .any(|d| d.name == "Asha's phone" && d.role == Role::Phone && !d.revoked));
+        .any(|d| d.name == "Asha's phone" && d.role == Role::Companion && !d.revoked));
     let backend = DocsBackend::for_node(c.node(1).clone(), c.clock().clone());
     let lib = backend.open_library(&grant.cap).await.unwrap();
     let b =
@@ -110,7 +110,7 @@ async fn a_declined_code_aborts_without_any_state_change() {
         let (da, _) = decider(inviter_ok);
         let (db, _) = decider(joiner_ok);
         let ticket = a
-            .start_pairing(Role::Phone, Duration::from_secs(300), da)
+            .start_pairing(Role::Companion, Duration::from_secs(300), da)
             .await
             .unwrap();
         let err = c.node(1).pair_join(&ticket, "x", db).await.unwrap_err();
@@ -133,7 +133,7 @@ async fn tickets_are_single_use_and_expire() {
     let (da, _) = decider(true);
     let (db, _) = decider(true);
     let ticket = a
-        .start_pairing(Role::Phone, Duration::from_secs(300), da.clone())
+        .start_pairing(Role::Companion, Duration::from_secs(300), da.clone())
         .await
         .unwrap();
     c.node(1)
@@ -151,7 +151,7 @@ async fn tickets_are_single_use_and_expire() {
     );
 
     let ticket = a
-        .start_pairing(Role::Phone, Duration::from_secs(300), da)
+        .start_pairing(Role::Companion, Duration::from_secs(300), da)
         .await
         .unwrap();
     c.clock().advance(301_000);
@@ -169,7 +169,7 @@ async fn failed_attempts_are_rate_limited() {
     let (da, _) = decider(true);
     let (db, _) = decider(true);
     let ticket = a
-        .start_pairing(Role::Phone, Duration::from_secs(300), da)
+        .start_pairing(Role::Companion, Duration::from_secs(300), da)
         .await
         .unwrap();
     // Someone who can reach the device but does not know a valid secret gets nowhere...
@@ -199,7 +199,7 @@ async fn failed_attempts_are_rate_limited() {
     // A minute later pairing works again.
     c.clock().advance(61_000);
     let ticket = a
-        .start_pairing(Role::Phone, Duration::from_secs(300), decider(true).0)
+        .start_pairing(Role::Companion, Duration::from_secs(300), decider(true).0)
         .await
         .unwrap();
     c.node(1).pair_join(&ticket, "x", db).await.unwrap();
@@ -219,7 +219,7 @@ async fn only_admins_can_start_pairing() {
             .with_capability(cap);
     let (d, _) = decider(true);
     assert!(ln
-        .start_pairing(Role::Phone, Duration::from_secs(60), d)
+        .start_pairing(Role::Companion, Duration::from_secs(60), d)
         .await
         .is_err());
     c.shutdown().await;

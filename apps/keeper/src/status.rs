@@ -12,7 +12,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 fn role_name(r: Role) -> &'static str {
     match r {
         Role::Keeper => "keeper",
-        Role::Phone => "phone",
+        Role::Companion => "companion",
         Role::Viewer => "viewer",
     }
 }

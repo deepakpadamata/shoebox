@@ -10,7 +10,8 @@
   type Step = 'welcome' | 'create' | 'kit' | 'join' | 'code' | 'recover';
   let step = $state<Step>('welcome');
   let name = $state('');
-  let role = $state('keeper');
+  // A phone or tablet is a Companion; a computer is usually the keeper.
+  let role = $state(/Android|iPhone|iPad/i.test(navigator.userAgent) ? 'companion' : 'keeper');
   let ticket = $state('');
   let link = $state('');
   let phrase = $state('');
@@ -92,9 +93,9 @@
         <input class="input" placeholder="MacBook Pro" bind:value={name} />
         <div>
           <div class="label">What does this device do?</div>
-          <Segmented bind:value={role} options={[{ value: 'keeper', label: 'Keeper' }, { value: 'phone', label: 'Everyday' }, { value: 'viewer', label: 'Viewer' }]} />
+          <Segmented bind:value={role} options={[{ value: 'keeper', label: 'Keeper' }, { value: 'companion', label: 'Companion' }, { value: 'viewer', label: 'Viewer' }]} />
           <p class="small muted" style="margin-top:6px">
-            {role === 'keeper' ? 'Keeps a full copy of every original. Best for a computer or a home server that is usually on.' : role === 'phone' ? 'Keeps previews and what you pin; fetches originals when you open them.' : 'Browses only; never stores originals.'}
+            {role === 'keeper' ? 'Keeps a full copy of every original. Best for a computer or a home server that is usually on.' : role === 'companion' ? 'Keeps recent and favourite photos in full and previews of the rest; older originals live on your keepers and are fetched when you open them.' : 'Browses only; never stores originals.'}
           </p>
         </div>
         <Button kind="primary" block disabled={busy} onclick={create}>{busy ? 'Creating…' : 'Create library'}</Button>

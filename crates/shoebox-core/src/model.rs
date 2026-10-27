@@ -17,8 +17,13 @@ pub struct AlbumId(pub [u8; 16]);
 /// A device's storage role (F4.3).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub enum Role {
+    /// Keeps every original: the backstop.
     Keeper,
-    Phone,
+    /// Keeps what is recent, what you favourite and what you pin; the rest lives on keepers.
+    /// (Called `Phone` until 0.1.0: older config files still say so.)
+    #[serde(alias = "Phone")]
+    Companion,
+    /// Previews only.
     Viewer,
 }
 

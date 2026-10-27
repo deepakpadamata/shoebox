@@ -246,7 +246,7 @@ mod tests {
                 &root,
                 identity,
                 KeyPair::generate().endpoint_id(),
-                Role::Phone,
+                Role::Companion,
                 "p",
                 hlc(5),
                 true,

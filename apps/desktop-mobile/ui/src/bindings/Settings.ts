@@ -8,4 +8,12 @@ relay: string, watched_folders: Array<string>, role: string,
 /**
  * Look for a newer release now and then.
  */
-update_checks: boolean, };
+update_checks: boolean, 
+/**
+ * A Companion keeps the originals of photos taken in the last this many days (0: off).
+ */
+keep_recent_days: number, 
+/**
+ * A Companion also keeps the originals of favourites.
+ */
+keep_favorites: boolean, };

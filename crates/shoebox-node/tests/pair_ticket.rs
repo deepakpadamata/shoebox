@@ -14,7 +14,7 @@ fn ticket() -> PairTicket {
         },
         secret: [9; 32],
         expires: Timestamp(1_700_000_300_000),
-        role: Role::Phone,
+        role: Role::Companion,
     }
 }
 

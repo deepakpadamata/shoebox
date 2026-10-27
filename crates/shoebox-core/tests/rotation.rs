@@ -32,7 +32,7 @@ fn notice(root: &KeyPair, admin: &KeyPair, signer_is_admin: bool) -> RotationNot
         signer,
         IDENTITY,
         key(3).endpoint_id(),
-        Role::Phone,
+        Role::Companion,
         "lost",
         hlc(20, 0, 2),
         true,

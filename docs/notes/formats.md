@@ -86,7 +86,7 @@ Node data dir (the keeper storage dir is one, plus `keeper.json`, `keeper.lock`,
 
 | Path | What |
 |---|---|
-| `config.toml` | node settings, watched folders, pinned originals |
+| `config.toml` | node settings, watched folders, pinned originals, keep rules (`keep_recent_days`, `keep_favorites`); a role of `Phone` from earlier builds reads as `Companion` |
 | `keys/` | endpoint key file (when no OS keystore) |
 | `blobs/` | iroh-blobs store; tags `lib/<hash>`, `pin/<hash>`, `album/<album>/<hash>`, `place/<hash>` (an original referenced in place, a phone's gallery file) |
 | `store/docs/` | iroh-docs store (shared albums) |

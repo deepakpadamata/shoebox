@@ -101,7 +101,7 @@ struct AppFile {
 fn parse_role(s: &str) -> Result<Role> {
     Ok(match s.to_ascii_lowercase().as_str() {
         "keeper" => Role::Keeper,
-        "phone" => Role::Phone,
+        "companion" | "phone" => Role::Companion,
         "viewer" => Role::Viewer,
         other => bail!("unknown role `{other}`"),
     })
@@ -110,7 +110,7 @@ fn parse_role(s: &str) -> Result<Role> {
 fn role_name(r: Role) -> &'static str {
     match r {
         Role::Keeper => "keeper",
-        Role::Phone => "phone",
+        Role::Companion => "companion",
         Role::Viewer => "viewer",
     }
 }
@@ -859,7 +859,12 @@ impl AppCore {
             let f = self.file.lock().unwrap();
             (
                 f.device_name.clone(),
-                f.role.clone().unwrap_or_else(|| "keeper".into()),
+                // Files from before 0.1.0 say "phone".
+                f.role
+                    .as_deref()
+                    .map(|r| parse_role(r).map(role_name).unwrap_or("keeper"))
+                    .unwrap_or("keeper")
+                    .to_string(),
                 f.alerts.clone(),
             )
         };
@@ -1595,7 +1600,19 @@ impl AppCore {
                 .collect(),
             role,
             update_checks: self.update_checks_enabled(),
+            keep_recent_days: cfg.keep_recent_days,
+            keep_favorites: cfg.keep_favorites,
         })
+    }
+
+    /// What a Companion keeps on this device: the originals of photos taken in the last
+    /// `recent_days` (0: none) and of favourites. Pins are always kept.
+    pub async fn set_keep_rules(&self, recent_days: u32, favorites: bool) -> Result<()> {
+        ensure!(
+            recent_days <= 3650,
+            "the recent window is at most ten years"
+        );
+        self.ln().await?.set_keep_rules(recent_days, favorites)
     }
 
     pub async fn set_redundancy_target(&self, copies: u32) -> Result<()> {

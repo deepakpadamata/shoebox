@@ -157,10 +157,11 @@ async fn a_device_that_receives_its_own_revocation_reports_removed_and_stops_syn
 /// frees and announces.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn roles_can_change_and_devices_follow_their_certificate() {
-    let c = Cluster::with_roles(&[Role::Keeper, Role::Phone, Role::Phone])
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Companion, Role::Companion])
         .await
         .unwrap();
-    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Phone, Role::Phone]).await;
+    let (rig, nodes) =
+        library_nodes_roles(&c, &[Role::Keeper, Role::Companion, Role::Companion]).await;
     for n in &nodes {
         n.enforce_membership().await.unwrap();
     }
@@ -194,10 +195,10 @@ async fn roles_can_change_and_devices_follow_their_certificate() {
     let phrase =
         shoebox_core::recovery::RecoveryKit::new(rig.cap.library, 0, rig.root.clone()).phrase();
     nodes[1]
-        .set_device_role_with_phrase(&phrase, &phone, Role::Phone)
+        .set_device_role_with_phrase(&phrase, &phone, Role::Companion)
         .await
         .unwrap();
-    assert_eq!(c.node(1).config().role, Role::Phone, "follows at once");
+    assert_eq!(c.node(1).config().role, Role::Companion, "follows at once");
     assert!(nodes[1]
         .set_device_role_with_phrase("not the phrase", &phone, Role::Keeper)
         .await
@@ -205,17 +206,17 @@ async fn roles_can_change_and_devices_follow_their_certificate() {
 
     // An admin can change its own role; it stays an admin.
     nodes[0]
-        .set_device_role(&core_id(&c, 0), Role::Phone)
+        .set_device_role(&core_id(&c, 0), Role::Companion)
         .await
         .unwrap();
-    assert_eq!(c.node(0).config().role, Role::Phone);
+    assert_eq!(c.node(0).config().role, Role::Companion);
     let list = nodes[0].store().device_list().await.unwrap();
     assert!(list.admins.iter().any(|a| a.admin == core_id(&c, 0)));
     // The others learn every change.
     wait_until(Duration::from_secs(30), || async {
         let l = nodes[2].store().device_list().await.unwrap();
         let role = |id| l.devices.iter().find(|d| d.device == id).map(|d| d.role);
-        role(core_id(&c, 0)) == Some(Role::Phone) && role(phone) == Some(Role::Phone)
+        role(core_id(&c, 0)) == Some(Role::Companion) && role(phone) == Some(Role::Companion)
     })
     .await
     .expect("the change replicates");
@@ -229,7 +230,7 @@ async fn roles_can_change_and_devices_follow_their_certificate() {
 async fn changes_reach_devices_known_only_from_the_device_list() {
     use shoebox_node::{LibraryNode, SyncConfig};
     let c = Cluster::new(2).await.unwrap();
-    let (rig, libs) = rig(&c, &[Role::Keeper, Role::Phone]).await;
+    let (rig, libs) = rig(&c, &[Role::Keeper, Role::Companion]).await;
     // Periodic sync effectively off: only a push or a nudge moves anything.
     let push_only = SyncConfig {
         tick: Duration::from_millis(100),
@@ -280,10 +281,11 @@ async fn changes_reach_devices_known_only_from_the_device_list() {
 /// changes nothing; the other devices alert on the new admin.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_phrase_makes_another_device_an_admin() {
-    let c = Cluster::with_roles(&[Role::Keeper, Role::Phone, Role::Phone])
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Companion, Role::Companion])
         .await
         .unwrap();
-    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Phone, Role::Phone]).await;
+    let (rig, nodes) =
+        library_nodes_roles(&c, &[Role::Keeper, Role::Companion, Role::Companion]).await;
     for n in &nodes {
         n.enforce_membership().await.unwrap();
     }
@@ -325,7 +327,7 @@ async fn the_phrase_makes_another_device_an_admin() {
         .expect("an admin changes roles without the phrase");
     assert!(nodes[1]
         .start_pairing(
-            Role::Phone,
+            Role::Companion,
             Duration::from_secs(60),
             std::sync::Arc::new(|_| Box::pin(async { true }))
         )

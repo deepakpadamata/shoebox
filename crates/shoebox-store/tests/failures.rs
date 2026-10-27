@@ -57,7 +57,7 @@ async fn all_copy_counts(nodes: &[&LibraryNode<Library>], ids: &[Blake3Hash]) ->
 /// A keeper that joins after the library has history gets all of it, and the counts agree.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_keeper_that_joins_late_catches_up_and_counts_are_truthful() {
-    let c = Cluster::with_roles(&[Role::Phone, Role::Phone, Role::Keeper])
+    let c = Cluster::with_roles(&[Role::Companion, Role::Companion, Role::Keeper])
         .await
         .unwrap();
     let nodes = library_nodes_auto(&c).await;
@@ -216,7 +216,7 @@ async fn revoking_a_device_mid_transfer_keeps_every_original_and_stops_counting_
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_keeper_with_a_full_disk_reports_only_what_it_holds_and_recovers() {
     use std::os::unix::fs::PermissionsExt;
-    let c = Cluster::with_roles(&[Role::Phone, Role::Keeper])
+    let c = Cluster::with_roles(&[Role::Companion, Role::Keeper])
         .await
         .unwrap();
     let nodes = library_nodes_auto(&c).await;
@@ -360,7 +360,7 @@ async fn a_clock_a_day_off_changes_who_wins_but_never_loses_anything() {
 /// One keeper holding an original is enough to call a photo backed up, however high the target.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_photo_on_one_keeper_is_backed_up_even_below_the_copy_target() {
-    let c = Cluster::with_roles(&[Role::Phone, Role::Keeper, Role::Phone])
+    let c = Cluster::with_roles(&[Role::Companion, Role::Keeper, Role::Companion])
         .await
         .unwrap();
     let nodes = library_nodes_auto(&c).await;
@@ -404,7 +404,7 @@ async fn a_photo_on_one_keeper_is_backed_up_even_below_the_copy_target() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn renaming_a_device_reaches_the_others() {
     use shoebox_node::PresenceConfig;
-    let c = Cluster::with_roles(&[Role::Keeper, Role::Phone])
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Companion])
         .await
         .unwrap();
     let nodes = library_nodes_auto(&c).await;
@@ -439,10 +439,10 @@ async fn renaming_a_device_reaches_the_others() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn presence_from_outside_the_device_list_is_ignored() {
     use shoebox_node::PresenceConfig;
-    let c = Cluster::with_roles(&[Role::Keeper, Role::Phone])
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Companion])
         .await
         .unwrap();
-    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Phone]).await;
+    let (rig, nodes) = library_nodes_roles(&c, &[Role::Keeper, Role::Companion]).await;
 
     // The outsider has the library's capability (so it derives the same topic) but no
     // certificate. Its own library has no device list, so it accepts every signer: seeing the

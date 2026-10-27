@@ -28,7 +28,7 @@
   );
   const most = $derived(Math.max(1, ...storageRows.map((r) => used(r.s))));
   let addOpen = $state(false);
-  let role = $state('phone');
+  let role = $state('companion');
   let pair = $state<PairStart | null>(null);
   let revoking = $state<DeviceInfo | null>(null);
   let phrase = $state('');
@@ -49,9 +49,9 @@
       busy = false;
     }
   }
-  let newRole = $state('phone');
+  let newRole = $state('companion');
   const roleHelp: Record<string, string> = {
-    phone: 'Keeps previews of everything, and the originals of its own photos until they are backed up elsewhere.',
+    companion: 'Keeps previews of everything and the full-size photos you pin, favourite or took recently; the rest lives on your keepers. For phones, tablets and laptops.',
     keeper: 'Keeps every original: the backstop. Best for an always-on computer or a small box at home.',
     viewer: 'Sees previews only and cannot add or change photos. Good for a shared tablet or a TV.',
   };
@@ -226,7 +226,7 @@
   {:else}
     <div class="stack">
       <p class="muted small">What will the new device do?</p>
-      <Segmented bind:value={role} options={[{ value: 'phone', label: 'Phone' }, { value: 'keeper', label: 'Keeper' }, { value: 'viewer', label: 'Viewer' }]} />
+      <Segmented bind:value={role} options={[{ value: 'companion', label: 'Companion' }, { value: 'keeper', label: 'Keeper' }, { value: 'viewer', label: 'Viewer' }]} />
       <Button kind="primary" block disabled={busy} onclick={startPairing}>Show pairing code</Button>
     </div>
   {/if}
@@ -248,7 +248,7 @@
   {#if changing}
     <div class="stack">
       <p class="small">What should {changing.is_this_device ? 'this device' : changing.name} do?</p>
-      <Segmented bind:value={newRole} options={[{ value: 'phone', label: 'Phone' }, { value: 'keeper', label: 'Keeper' }, { value: 'viewer', label: 'Viewer' }]} />
+      <Segmented bind:value={newRole} options={[{ value: 'companion', label: 'Companion' }, { value: 'keeper', label: 'Keeper' }, { value: 'viewer', label: 'Viewer' }]} />
       <p class="small muted">{roleHelp[newRole]}</p>
       {#if !me?.admin}
         <p class="small">This device is not an admin, so changing a role from here needs your recovery phrase.</p>

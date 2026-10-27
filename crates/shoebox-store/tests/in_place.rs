@@ -66,7 +66,7 @@ fn store_bytes(dir: &Path) -> u64 {
 }
 
 async fn phone_and_keeper() -> (Cluster, Vec<LibraryNode<Library>>) {
-    let c = Cluster::with_roles(&[Role::Phone, Role::Keeper])
+    let c = Cluster::with_roles(&[Role::Companion, Role::Keeper])
         .await
         .unwrap();
     let nodes = library_nodes_auto(&c).await;

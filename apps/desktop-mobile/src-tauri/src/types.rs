@@ -335,6 +335,10 @@ ts_type! {
         pub role: String,
         /// Look for a newer release now and then.
         pub update_checks: bool,
+        /// A Companion keeps the originals of photos taken in the last this many days (0: off).
+        pub keep_recent_days: u32,
+        /// A Companion also keeps the originals of favourites.
+        pub keep_favorites: bool,
     }
 }
 

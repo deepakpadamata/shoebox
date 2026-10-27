@@ -1,8 +1,10 @@
 //! Fetch policy (M1-12): which blobs a device should have, as a pure function of its role.
 //!
 //! - **Keeper**: thumbnails, previews and every original.
-//! - **Phone**: thumbnails and previews of everything; the original only if the user pinned it or
-//!   it is this phone's own capture that does not yet have enough copies.
+//! - **Companion**: thumbnails and previews of everything; the original when the user pinned it,
+//!   when it is recent (within the device's window), when it is a favourite (if the device keeps
+//!   favourites), or when it is this device's own capture that does not yet have enough copies.
+//!   Everything else lives on keepers.
 //! - **Viewer**: thumbnails and previews only.
 //! - **Shared albums**: previews only, plus originals when the album's "keep originals" is on.
 //!
@@ -19,6 +21,17 @@ pub struct PlanContext {
     pub pinned: bool,
     /// This device imported the photo and fewer than the target number of copies exist.
     pub own_capture_below_target: bool,
+    /// The photo was taken within this device's keep-recent window.
+    pub recent: bool,
+    /// The photo is a favourite and this device keeps favourites.
+    pub kept_favorite: bool,
+}
+
+impl PlanContext {
+    /// A Companion holds this original on its own account (not just because it is pinned).
+    pub fn keeps_original(&self) -> bool {
+        self.pinned || self.own_capture_below_target || self.recent || self.kept_favorite
+    }
 }
 
 /// One blob to fetch.
@@ -48,7 +61,7 @@ fn is_placeholder(rec_original: &BlobRef, rendition: &BlobRef) -> bool {
 pub fn fetch_plan(role: Role, rec: &PhotoRecord, ctx: &PlanContext) -> Vec<FetchItem> {
     let want_original = match role {
         Role::Keeper => true,
-        Role::Phone => ctx.pinned || ctx.own_capture_below_target,
+        Role::Companion => ctx.keeps_original(),
         Role::Viewer => false,
     };
     let mut plan = vec![];
@@ -200,6 +213,8 @@ mod tests {
                 let ctx = PlanContext {
                     pinned,
                     own_capture_below_target: own,
+                    recent: true,
+                    kept_favorite: true,
                 };
                 let plan = fetch_plan(Role::Viewer, &photo(1, 0), &ctx);
                 assert_eq!(kinds(&plan), vec![BlobKind::Thumb, BlobKind::Preview]);
@@ -208,24 +223,32 @@ mod tests {
     }
 
     #[test]
-    fn phone_wants_an_original_only_when_pinned_or_it_is_an_under_replicated_own_capture() {
+    fn a_companion_wants_an_original_when_pinned_recent_favourite_or_an_under_replicated_own_capture(
+    ) {
         let p = photo(1, 0);
-        let plan = |pinned, own| {
-            fetch_plan(
-                Role::Phone,
-                &p,
-                &PlanContext {
-                    pinned,
-                    own_capture_below_target: own,
-                },
-            )
-        };
-        assert_eq!(
-            kinds(&plan(false, false)),
-            vec![BlobKind::Thumb, BlobKind::Preview]
-        );
-        assert!(kinds(&plan(true, false)).contains(&BlobKind::Original));
-        assert!(kinds(&plan(false, true)).contains(&BlobKind::Original));
+        let plan = |ctx: PlanContext| fetch_plan(Role::Companion, &p, &ctx);
+        let none = PlanContext::default();
+        assert_eq!(kinds(&plan(none)), vec![BlobKind::Thumb, BlobKind::Preview]);
+        for ctx in [
+            PlanContext {
+                pinned: true,
+                ..none
+            },
+            PlanContext {
+                own_capture_below_target: true,
+                ..none
+            },
+            PlanContext {
+                recent: true,
+                ..none
+            },
+            PlanContext {
+                kept_favorite: true,
+                ..none
+            },
+        ] {
+            assert!(kinds(&plan(ctx)).contains(&BlobKind::Original), "{ctx:?}");
+        }
     }
 
     #[test]
@@ -254,7 +277,7 @@ mod tests {
             added_at: Timestamp(0),
             taken_at: Timestamp(0),
         };
-        for role in [Role::Phone, Role::Viewer] {
+        for role in [Role::Companion, Role::Viewer] {
             assert_eq!(
                 kinds(&shared_item_plan(role, &item, true)),
                 vec![BlobKind::Thumb, BlobKind::Preview]

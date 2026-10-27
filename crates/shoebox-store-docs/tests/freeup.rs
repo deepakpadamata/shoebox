@@ -23,10 +23,12 @@ fn fast() -> FetcherConfig {
 
 /// A phone that imported all sample photos; every other node is a keeper that fetches originals.
 async fn rig(keepers: usize) -> (Cluster, Vec<LibraryNode<DocsLibrary>>, Vec<Blake3Hash>, u64) {
-    let mut roles = vec![Role::Phone];
+    let mut roles = vec![Role::Companion];
     roles.extend(std::iter::repeat_n(Role::Keeper, keepers));
     let c = Cluster::with_roles(&roles).await.unwrap();
     let nodes = library_nodes(&c).await;
+    // This test is about pins and copies, not the recent window.
+    nodes[0].set_keep_rules(0, false).unwrap();
     let samples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/samples");
     let files = ["photo-gps.jpg", "IMG_0001.jpg", "screenshot.png"].map(|f| samples.join(f));
     let ids = nodes[0]

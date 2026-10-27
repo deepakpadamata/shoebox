@@ -428,6 +428,10 @@ Behaviour that will come back as features or needs a decision.
     70 % and 5 s more, no stalls. The release network security config has not run (needs a release build, R1-14).
   - The viewer now says when an original that is on the device cannot be played instead of offering "Get original"
     again.
+  - *What the owner actually saw* was a fourth cause, in the viewer, on the Mac and the phone alike: a video's
+    `preview` and `thumb` are the original (videos have no still renditions yet, M3-10), the viewer showed the preview
+    in an `<img>` while waiting, and when that image failed (after the `<video>` had replaced it and started) it
+    reported the original unreadable and removed the video. Videos now show only the device's poster frame.
 
 ### Rules for future changes
 

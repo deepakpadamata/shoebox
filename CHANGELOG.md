@@ -18,6 +18,10 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
   so videos now come from a loopback server inside the app, A-098), video pieces are 4 MB instead of the whole file,
   and reading them is about 20 times faster. A video the device cannot play says so instead of offering "Get
   original" again.
+- Videos play in the viewer on every device: while waiting it loaded the video's "preview" (the video itself, as
+  videos have no still preview yet) as an image, and that image failing removed the video that had started
+  playing. The viewer now shows the poster frame or nothing while waiting, and only the element showing the original
+  can report it unreadable. Shared-album grids no longer load whole videos as thumbnails.
 - The app and the keeper tell you when a newer version is out (Settings → About → Check for new versions; the keeper's
   `status`). Nothing is installed automatically.
 - A phone keeps one copy of each photo: gallery photos are read where they are, never copied into Shoebox, and a photo

@@ -206,7 +206,7 @@
         <div class="grid">
           {#each items as it, i (it.id)}
             <button class="tile" class:sel={selected.includes(it.id)} onclick={() => open(i)} oncontextmenu={(e) => { e.preventDefault(); toggle(it.id); }} aria-label="Photo from {it.added_by}">
-              {#if it.has_thumb}<img src={blobUrl(it.id, 'thumb', album)} alt="" loading="lazy" decoding="async" />{:else}<span class="ph"></span>{/if}
+              {#if it.has_thumb && !it.is_video}<img src={blobUrl(it.id, 'thumb', album)} alt="" loading="lazy" decoding="async" />{:else}<span class="ph"></span>{/if}
               {#if it.is_video}<span class="vid">▶</span>{/if}
               {#if selecting}<span class="check">{selected.includes(it.id) ? '✓' : ''}</span>{/if}
             </button>

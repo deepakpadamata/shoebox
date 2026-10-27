@@ -55,7 +55,16 @@
     }).catch(fail);
   });
 
-  const src = $derived(originalReady && !photo.is_video ? blobUrl(photo.id, 'original') : blobUrl(photo.id, detail?.has_preview === false ? 'thumb' : 'preview'));
+  // A video's preview and thumbnail are the video itself (no poster frames in the record yet):
+  // an image of one only fails, slowly. Show this device's poster frame, or nothing.
+  const poster = $derived(photo.is_video && photo.has_poster ? blobUrl(photo.id, 'poster') : null);
+  const src = $derived(photo.is_video ? poster : originalReady ? blobUrl(photo.id, 'original') : blobUrl(photo.id, detail?.has_preview === false ? 'thumb' : 'preview'));
+
+  // Only the element showing the original can say the original is unreadable: a preview that
+  // fails to load (or one still loading from before the original was ready) says nothing.
+  function imageFailed() {
+    if (!photo.is_video && originalReady) originalFailed();
+  }
 
   async function getOriginal() {
     fetching = true;
@@ -129,9 +138,9 @@
     <div class="media">
       {#if photo.is_video && originalReady}
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video src={videoUrl(photo.id)} controls autoplay onerror={originalFailed}></video>
+        <video src={videoUrl(photo.id)} poster={poster ?? undefined} controls autoplay onerror={originalFailed}></video>
       {:else}
-        {#key photo.id}<img {src} alt={`${photo.is_video ? 'Video' : 'Photo'} from ${dateTime(photo.taken_at)}`} style="transform: translateY({pullY}px) scale({zoom}); opacity: {1 - Math.min(0.5, pullY / 400)}" ondblclick={() => (zoom = zoom > 1 ? 1 : 2.5)} onerror={originalFailed} />{/key}
+        {#key photo.id}{#if src}<img {src} alt={`${photo.is_video ? 'Video' : 'Photo'} from ${dateTime(photo.taken_at)}`} style="transform: translateY({pullY}px) scale({zoom}); opacity: {1 - Math.min(0.5, pullY / 400)}" ondblclick={() => (zoom = zoom > 1 ? 1 : 2.5)} onerror={imageFailed} />{/if}{/key}
       {/if}
       {#if detail && !originalReady}
         <div class="overlay">

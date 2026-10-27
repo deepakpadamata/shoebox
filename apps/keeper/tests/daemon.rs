@@ -563,3 +563,188 @@ async fn status_mentions_a_newer_release() {
     assert!(keeper::render::status(&s).contains("A newer version is available: 99.1.0"));
     d.shutdown().await.unwrap();
 }
+
+/// The keeper's command line can do what an admin can: change roles, make an admin, remove a
+/// device and replace the recovery phrase, with or without the phrase as the rules say. Devices
+/// are named by id, the start of an id or their name.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_keeper_manages_devices_from_its_command_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let node = Node::open(NodeConfig::local_only(dir.path().join("laptop"), "laptop"))
+        .await
+        .unwrap();
+    let backend = HybridBackend::for_node(node.clone(), SystemClock);
+    let root = KeyPair::generate();
+    let (lib, cap) = backend.create_library(&root.root_public()).await.unwrap();
+    let ln = LibraryNode::new(node.clone(), Arc::new(lib), SystemClock).with_capability(cap);
+    let kit = ln
+        .create_identity(&root, Role::Companion, "laptop")
+        .await
+        .unwrap();
+    let phrase = kit.phrase();
+
+    let ticket = ln
+        .start_pairing(Role::Keeper, Duration::from_secs(300), accept())
+        .await
+        .unwrap();
+    let d = Daemon::start(opts(dir.path())).await.unwrap();
+    Client::connect(d.control_path())
+        .await
+        .unwrap()
+        .pair(&ticket.to_string(), "pi", |_| true)
+        .await
+        .unwrap();
+    let phone = Node::open(NodeConfig::local_only(dir.path().join("phone"), "phone"))
+        .await
+        .unwrap();
+    let t = ln
+        .start_pairing(Role::Companion, Duration::from_secs(300), accept())
+        .await
+        .unwrap();
+    phone.pair_join(&t, "phone", accept()).await.unwrap();
+
+    let call = |req: Value| {
+        let path = d.control_path().to_path_buf();
+        async move { Client::connect(&path).await.unwrap().call_raw(req).await }
+    };
+    let row = |name: &'static str| {
+        let path = d.control_path().to_path_buf();
+        async move {
+            let v = Client::connect(&path)
+                .await
+                .unwrap()
+                .call_raw(serde_json::json!({"cmd":"devices"}))
+                .await
+                .unwrap();
+            v["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|d| d["name"] == name)
+                .cloned()
+        }
+    };
+    assert!(
+        wait_for(30, || async { row("phone").await.is_some() }).await,
+        "the keeper hears about the phone"
+    );
+
+    // A plain member cannot change roles; the wrong phrase does not help.
+    let err = call(serde_json::json!({"cmd":"role","device":"phone","role":"viewer"}))
+        .await
+        .unwrap_err();
+    assert!(
+        format!("{err:#}").to_lowercase().contains("admin"),
+        "{err:#}"
+    );
+    let err = call(
+        serde_json::json!({"cmd":"role","device":"phone","role":"viewer","phrase":"wrong words"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        format!("{err:#}").contains("24-word") || format!("{err:#}").contains("phrase"),
+        "{err:#}"
+    );
+    // With the phrase it can, naming the device.
+    call(serde_json::json!({"cmd":"role","device":"phone","role":"viewer","phrase":phrase}))
+        .await
+        .unwrap();
+    assert!(
+        wait_for(30, || async {
+            row("phone").await.is_some_and(|r| r["role"] == "viewer")
+        })
+        .await,
+        "the role change reaches the keeper's view"
+    );
+    let err =
+        call(serde_json::json!({"cmd":"role","device":"nobody","role":"viewer","phrase":phrase}))
+            .await
+            .unwrap_err();
+    assert!(format!("{err:#}").contains("no device matches"), "{err:#}");
+    let err =
+        call(serde_json::json!({"cmd":"role","device":"phone","role":"boss","phrase":phrase}))
+            .await
+            .unwrap_err();
+    assert!(
+        format!("{err:#}").contains("keeper, companion or viewer"),
+        "{err:#}"
+    );
+
+    // Making the keeper an admin needs the phrase; after that it needs none.
+    let err = call(serde_json::json!({"cmd":"make_admin","device":"pi"}))
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("phrase"), "{err:#}");
+    let pi = row("pi").await.unwrap();
+    let id = pi["id"].as_str().unwrap().to_string();
+    call(serde_json::json!({"cmd":"make_admin","device":&id[..8],"phrase":phrase}))
+        .await
+        .unwrap();
+    assert!(
+        wait_for(30, || async {
+            row("pi").await.is_some_and(|r| r["admin"] == true)
+        })
+        .await,
+        "the keeper is an admin"
+    );
+    call(serde_json::json!({"cmd":"role","device":"phone","role":"companion"}))
+        .await
+        .unwrap();
+    assert!(
+        wait_for(30, || async {
+            row("phone").await.is_some_and(|r| r["role"] == "companion")
+        })
+        .await,
+        "an admin keeper changes a role without the phrase"
+    );
+
+    // Removing a device moves the library to a new epoch.
+    let before = Client::connect(d.control_path())
+        .await
+        .unwrap()
+        .status()
+        .await
+        .unwrap()["library"]["id"]
+        .clone();
+    call(serde_json::json!({"cmd":"revoke","device":"phone"}))
+        .await
+        .unwrap();
+    assert!(
+        wait_for(30, || async {
+            row("phone").await.is_some_and(|r| r["revoked"] == true)
+        })
+        .await,
+        "the phone is removed"
+    );
+    assert!(
+        wait_for(30, || async {
+            Client::connect(d.control_path())
+                .await
+                .unwrap()
+                .status()
+                .await
+                .unwrap()["library"]["id"]
+                != before
+        })
+        .await,
+        "removing a device moves the library to a new epoch"
+    );
+
+    // Replacing the phrase needs the current one and retires it.
+    let err = call(serde_json::json!({"cmd":"replace_phrase","phrase":"wrong words"}))
+        .await
+        .unwrap_err();
+    assert!(!format!("{err:#}").is_empty());
+    let new = call(serde_json::json!({"cmd":"replace_phrase","phrase":phrase}))
+        .await
+        .unwrap();
+    let new_phrase = new["phrase"].as_str().unwrap().to_string();
+    assert_eq!(new_phrase.split_whitespace().count(), 24);
+    assert_ne!(new_phrase, phrase);
+    call(serde_json::json!({"cmd":"replace_phrase","phrase":phrase}))
+        .await
+        .unwrap_err();
+    d.shutdown().await.unwrap();
+    phone.shutdown().await.ok();
+}

@@ -358,6 +358,15 @@ Behaviour that will come back as features or needs a decision.
   every start while the `pin/` blob tags stayed: after a restart a pinned original was no longer planned and free-up
   could release it. It now keeps pins and the keep rules too (`pins_survive_a_restart`).
 
+- **A-095 · the keeper's CLI as an admin (2026-10-27)** · `shoebox-keeper devices remove|role|make-admin|replace-phrase` call the
+  same node operations as the app (`revoke_and_rotate[_with_phrase]`, `set_device_role[_with_phrase]`,
+  `make_admin_with_phrase`, `rotate_root`) over the control socket. The recovery phrase travels over the 0600 Unix
+  socket in the request and is never logged; the terminal prompt hides the typing with `stty -echo` (or reads a line
+  when stdin is piped). Devices are named by full id, unique id prefix (≥4 hex digits) or name. Until now `devices
+  revoke` only marked the device revoked and did not move the library to a new epoch (the app did): fixed, so a
+  device removed from the keeper is locked out of what is written next like one removed in the app. Not offered on
+  the keeper: adding devices (the "Add a device" code needs a screen), pairing codes for other devices.
+
 ### Rules for future changes
 
 Not open questions, but they must be honoured by any format or protocol change, and re-checked on every iroh upgrade (shared albums still run on iroh-docs).

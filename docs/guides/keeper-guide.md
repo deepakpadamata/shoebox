@@ -58,7 +58,11 @@ back up the 24-word recovery phrase separately.
 |---|---|
 | `status [--json]` | what the keeper holds and who it talks to |
 | `alerts` / `alerts ack` | security alerts: a new admin device, or a replaced recovery phrase; `status` shows them first until you `ack` |
-| `devices` / `devices revoke <id>` | list devices, remove one (the keeper must be an admin; admin devices themselves are removed from the app with the recovery phrase) |
+| `devices` | list devices (by id, name, role) |
+| `devices remove <device> [--phrase]` | remove a device (a device is its name or the start of its id). The keeper must be an admin, and the device not one; with `--phrase` any device can go |
+| `devices role <device> keeper\|companion\|viewer [--phrase]` | change a device's role |
+| `devices make-admin <device>` | make a device an admin (asks for your recovery phrase; typing is hidden). Run it on the keeper itself to make the keeper an admin: `devices make-admin <this keeper's name>` |
+| `devices replace-phrase` | replace the recovery phrase after it may have been seen; prints the new 24 words once |
 | `address` | the link another device needs to recover through this keeper |
 | `album list` / `album join <invitation>` / `album keep <id>` / `album drop <id>` | shared albums the keeper is in; `keep` makes it hold every original of an album |
 | `stop` | shut the daemon down cleanly |

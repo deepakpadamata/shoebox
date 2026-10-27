@@ -11,7 +11,9 @@ use crate::status;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use shoebox_core::ids::EndpointId;
-use shoebox_node::{LibraryTicket, PairTicket, PairingCode};
+use shoebox_core::store::LibraryStore;
+use shoebox_node::{LibraryNode, LibraryTicket, PairTicket, PairingCode};
+use shoebox_store::Library;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -81,6 +83,62 @@ async fn handle(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
     Ok(())
 }
 
+/// The recovery phrase a request carries, if any.
+fn phrase(req: &Value) -> Option<String> {
+    req["phrase"]
+        .as_str()
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+}
+
+async fn library(shared: &Arc<Shared>) -> Result<LibraryNode<Library>> {
+    shared
+        .library
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| anyhow!("not paired with a library yet"))
+}
+
+/// A device named by its full id, a unique id prefix (as `devices` prints it) or its name.
+/// Removed devices only match when `include_revoked`.
+async fn resolve_device(
+    ln: &LibraryNode<Library>,
+    text: &str,
+    include_revoked: bool,
+) -> Result<EndpointId> {
+    let text = text.trim();
+    anyhow::ensure!(!text.is_empty(), "missing `device`");
+    let list = ln.store().device_list().await?;
+    let live: Vec<_> = list
+        .devices
+        .iter()
+        .filter(|d| include_revoked || !d.revoked)
+        .collect();
+    let lower = text.to_ascii_lowercase();
+    let mut hits: Vec<_> = live
+        .iter()
+        .filter(|d| hex::encode(d.device.0) == lower)
+        .collect();
+    if hits.is_empty() && lower.len() >= 4 && lower.chars().all(|c| c.is_ascii_hexdigit()) {
+        hits = live
+            .iter()
+            .filter(|d| hex::encode(d.device.0).starts_with(&lower))
+            .collect();
+    }
+    if hits.is_empty() {
+        hits = live
+            .iter()
+            .filter(|d| d.name.to_ascii_lowercase() == lower)
+            .collect();
+    }
+    match hits.as_slice() {
+        [one] => Ok(one.device),
+        [] => bail!("no device matches `{text}` (see `shoebox-keeper devices`)"),
+        _ => bail!("`{text}` matches more than one device: use more of its id"),
+    }
+}
+
 async fn dispatch(shared: &Arc<Shared>, cmd: &str, req: &Value) -> Result<Value> {
     match cmd {
         "status" => status::report(shared).await,
@@ -91,19 +149,50 @@ async fn dispatch(shared: &Arc<Shared>, cmd: &str, req: &Value) -> Result<Value>
             Ok(json!({}))
         }
         "revoke" => {
-            let id = req["device"]
-                .as_str()
-                .ok_or_else(|| anyhow!("missing `device`"))?;
-            let bytes: [u8; 32] = hex::decode(id.trim())
-                .ok()
-                .and_then(|b| b.try_into().ok())
-                .ok_or_else(|| anyhow!("`device` must be a 64-digit hex device id"))?;
-            let guard = shared.library.lock().await;
-            let ln = guard
-                .as_ref()
-                .ok_or_else(|| anyhow!("not paired with a library yet"))?;
-            ln.revoke_device(&EndpointId(bytes)).await?;
+            let ln = library(shared).await?;
+            let device = resolve_device(&ln, req["device"].as_str().unwrap_or(""), false).await?;
+            // The library moves to a new epoch either way, so the removed device is locked out
+            // of what is written next (the same as removing it in the app).
+            match phrase(req) {
+                Some(p) => ln.revoke_and_rotate_with_phrase(&p, &device).await?,
+                None => ln.revoke_and_rotate(&device).await?,
+            };
             Ok(json!({}))
+        }
+        "role" => {
+            let ln = library(shared).await?;
+            let device = resolve_device(&ln, req["device"].as_str().unwrap_or(""), false).await?;
+            let role = match req["role"]
+                .as_str()
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "keeper" => shoebox_core::model::Role::Keeper,
+                "companion" | "phone" => shoebox_core::model::Role::Companion,
+                "viewer" => shoebox_core::model::Role::Viewer,
+                other => bail!("a role is keeper, companion or viewer, not `{other}`"),
+            };
+            match phrase(req) {
+                Some(p) => ln.set_device_role_with_phrase(&p, &device, role).await?,
+                None => ln.set_device_role(&device, role).await?,
+            }
+            Ok(json!({}))
+        }
+        "make_admin" => {
+            let ln = library(shared).await?;
+            let device = resolve_device(&ln, req["device"].as_str().unwrap_or(""), false).await?;
+            let p =
+                phrase(req).ok_or_else(|| anyhow!("making an admin needs the recovery phrase"))?;
+            ln.make_admin_with_phrase(&p, &device).await?;
+            Ok(json!({}))
+        }
+        "replace_phrase" => {
+            let ln = library(shared).await?;
+            let p = phrase(req)
+                .ok_or_else(|| anyhow!("replacing the recovery phrase needs the current one"))?;
+            let kit = ln.rotate_root(&p).await?;
+            Ok(json!({ "phrase": kit.phrase(), "kit": kit.to_text() }))
         }
         "address" => Ok(json!({
             "link": shoebox_node::PeerLink(shoebox_node::from_endpoint_addr(&shared.node.addr())).to_string(),

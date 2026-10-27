@@ -65,7 +65,7 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// List the library's devices, or revoke one.
+    /// List the library's devices, or manage them: remove one, change a role, make an admin.
     Devices {
         #[command(subcommand)]
         action: Option<DevicesCmd>,
@@ -101,8 +101,30 @@ enum AlertsCmd {
 
 #[derive(Subcommand)]
 enum DevicesCmd {
-    /// Revoke a device (this keeper must be an admin).
-    Revoke { id: String },
+    /// Remove a device from the library: it can no longer connect. Without --phrase this keeper
+    /// must be an admin and the device must not be one; with the recovery phrase any device can
+    /// be removed. The device is given by its id (or the start of it, as `devices` prints it) or its name.
+    #[command(alias = "revoke")]
+    Remove {
+        device: String,
+        /// Use the recovery phrase (asked for with the typing hidden).
+        #[arg(long)]
+        phrase: bool,
+    },
+    /// Give a device another role: keeper, companion or viewer. Without --phrase this keeper
+    /// must be an admin.
+    Role {
+        device: String,
+        role: String,
+        #[arg(long)]
+        phrase: bool,
+    },
+    /// Make a device an admin, so it can add devices, change roles and remove devices without the
+    /// phrase. Always needs the recovery phrase (asked for with the typing hidden).
+    MakeAdmin { device: String },
+    /// Replace the recovery phrase (for example after it may have been seen). Prints the new 24
+    /// words once; every device keeps working. Needs the current phrase.
+    ReplacePhrase,
 }
 
 #[derive(Subcommand)]
@@ -150,6 +172,31 @@ fn relay(s: &str) -> Result<RelaySetting> {
 
 async fn client(storage: &std::path::Path) -> Result<Client> {
     Client::connect(&storage.join("control.sock")).await
+}
+
+/// Ask for a recovery phrase on the terminal with the typing hidden (so it stays out of the
+/// screen and the shell history). When input is piped it is read as a line.
+fn ask_phrase(prompt: &str) -> Result<String> {
+    use std::io::IsTerminal;
+    eprint!("{prompt}");
+    let _ = std::io::stderr().flush();
+    let hide = std::io::stdin().is_terminal()
+        && std::process::Command::new("stty")
+            .arg("-echo")
+            .status()
+            .is_ok_and(|s| s.success());
+    let mut line = String::new();
+    let read = std::io::stdin().read_line(&mut line);
+    if hide {
+        let _ = std::process::Command::new("stty").arg("echo").status();
+        eprintln!();
+    }
+    read?;
+    let line = line.trim().to_string();
+    if line.is_empty() {
+        bail!("no recovery phrase given");
+    }
+    Ok(line)
 }
 
 fn print(json_out: bool, data: &Value, text: impl FnOnce(&Value) -> String) {
@@ -235,13 +282,7 @@ async fn main() -> Result<()> {
         Cmd::Recover { from, phrase, name } => {
             let phrase = match phrase {
                 Some(p) => p,
-                None => {
-                    print!("Recovery phrase (24 words): ");
-                    let _ = std::io::stdout().flush();
-                    let mut line = String::new();
-                    std::io::stdin().read_line(&mut line)?;
-                    line
-                }
+                None => ask_phrase("Recovery phrase (24 words): ")?,
             };
             let done = client(&storage)
                 .await?
@@ -295,14 +336,50 @@ async fn main() -> Result<()> {
             print(json, &data, render::devices);
         }
         Cmd::Devices {
-            action: Some(DevicesCmd::Revoke { id }),
+            action: Some(action),
             ..
         } => {
-            client(&storage)
-                .await?
-                .call_raw(json!({"cmd":"revoke","device":id}))
-                .await?;
-            println!("Revoked {id}. It can no longer connect to this library.");
+            let mut c = client(&storage).await?;
+            match action {
+                DevicesCmd::Remove { device, phrase } => {
+                    let phrase = phrase
+                        .then(|| ask_phrase("Recovery phrase (24 words): "))
+                        .transpose()?;
+                    c.call_raw(json!({"cmd":"revoke","device":device,"phrase":phrase}))
+                        .await?;
+                    println!("Removed {device}. It can no longer connect to this library.");
+                }
+                DevicesCmd::Role {
+                    device,
+                    role,
+                    phrase,
+                } => {
+                    let phrase = phrase
+                        .then(|| ask_phrase("Recovery phrase (24 words): "))
+                        .transpose()?;
+                    c.call_raw(json!({"cmd":"role","device":device,"role":role,"phrase":phrase}))
+                        .await?;
+                    println!("{device} is now a {role}. It follows as soon as it hears about the change.");
+                }
+                DevicesCmd::MakeAdmin { device } => {
+                    let phrase = ask_phrase("Recovery phrase (24 words): ")?;
+                    c.call_raw(json!({"cmd":"make_admin","device":device,"phrase":phrase}))
+                        .await?;
+                    println!("{device} is now an admin. Your other devices are told.");
+                }
+                DevicesCmd::ReplacePhrase => {
+                    let phrase = ask_phrase("Current recovery phrase (24 words): ")?;
+                    let d = c
+                        .call_raw(json!({"cmd":"replace_phrase","phrase":phrase}))
+                        .await?;
+                    println!(
+                        "The recovery phrase was replaced. The old one no longer works.\n\n\
+                         NEW RECOVERY PHRASE (shown once; write it down and keep it offline):\n\n  {}\n\n{}",
+                        d["phrase"].as_str().unwrap_or(""),
+                        d["kit"].as_str().unwrap_or("")
+                    );
+                }
+            }
         }
         Cmd::Album { action } => {
             let mut c = client(&storage).await?;

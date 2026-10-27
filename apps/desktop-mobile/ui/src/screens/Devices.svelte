@@ -163,7 +163,7 @@
 
   <List>
     {#each devices.filter((d) => !d.revoked) as d (d.id)}
-      <Row title={d.is_this_device ? `${d.name} (this device)` : d.name} subtitle={`${d.role}${d.admin ? ' · admin' : ''}${d.latency_ms != null ? ` · ${d.latency_ms} ms` : ''}`}>
+      <Row stack title={d.is_this_device ? `${d.name} (this device)` : d.name} subtitle={`${d.role}${d.admin ? ' · admin' : ''}${d.latency_ms != null ? ` · ${d.latency_ms} ms` : ''}`}>
         {#snippet lead()}<Avatar name={d.name} />{/snippet}
         {#snippet trail()}
           <span class="row-flex">

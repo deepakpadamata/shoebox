@@ -1,18 +1,24 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  interface Props { icon?: string; title: string; subtitle?: string; onclick?: () => void; lead?: Snippet; trail?: Snippet; }
-  let { icon, title, subtitle, onclick, lead, trail }: Props = $props();
+  interface Props { icon?: string; title: string; subtitle?: string; onclick?: () => void; lead?: Snippet; trail?: Snippet; /** On a phone, put `trail` on its own line under the title (many actions). */ stack?: boolean; }
+  let { icon, title, subtitle, onclick, lead, trail, stack = false }: Props = $props();
 </script>
 
-<svelte:element this={onclick ? 'button' : 'div'} class="row" class:click={!!onclick} role={onclick ? undefined : 'listitem'} {onclick}>
+<svelte:element this={onclick ? 'button' : 'div'} class="row" class:click={!!onclick} class:stack role={onclick ? undefined : 'listitem'} {onclick}>
   {#if lead}{@render lead()}{:else if icon}<span class="ico" aria-hidden="true">{icon}</span>{/if}
   <span class="grow"><span class="t1">{title}</span>{#if subtitle}<span class="t2">{subtitle}</span>{/if}</span>
-  {#if trail}{@render trail()}{/if}
+  {#if trail}<span class="trail">{@render trail()}</span>{/if}
 </svelte:element>
 
 <style>
   .row { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border: 0; border-top: 1px solid var(--line); background: transparent; width: 100%; text-align: left; }
   .row:first-child { border-top: 0; }
+  .grow { flex: 1; min-width: 0; }
+  .trail { display: flex; align-items: center; flex: none; }
+  @media (max-width: 720px) {
+    .stack { flex-wrap: wrap; row-gap: 6px; }
+    .stack .trail { flex-basis: 100%; justify-content: flex-end; }
+  }
   .click { cursor: pointer; }
   .click:hover { background: var(--surface-2); }
   .ico { width: 36px; height: 36px; border-radius: 10px; flex: none; display: grid; place-items: center; background: var(--surface-2); font-size: 18px; }

@@ -323,14 +323,14 @@ Behaviour that will come back as features or needs a decision.
   - An original that cannot be read when the viewer asks for it (the file changed or vanished) triggers a gallery
     check; if the photo is still referenced after that, this phone stops holding it and reports it as not here, so the
     viewer shows the preview and fetches the original from another device. A released blob counts as not here
-    (`BlobStore::kept`) until collection removes it; fetching it waits for that (up to one GC interval).
+    (`BlobStore::kept`) until collection removes it; fetching it waits for that (up to 90 s, normally under 30 s).
   - More than 50 gone at once and more than a quarter of the tracked photos waits for the person (banner: delete them
     too, or keep them in the library; kept ones are no longer held by this phone).
   - Free-up never counts `place/` originals: the file is the gallery's. Free-up on a phone only frees originals it
     fetched or copied in.
   - Upgrading: a phone whose `backup.json` predates this looks at the whole roll again; each photo comes back as a
     duplicate, and a stored copy is released and re-referenced once the store's collection has removed it (`moving`;
-    up to one GC interval, 5 minutes).
+    up to one GC interval: the app collects every 20 s once idle for 10 s, a phone's battery cost is a tag listing per pass).
   - Desktop imports still copy (a folder on a computer is not a gallery that deletes on its own); a by-reference import
     for folders the person promises not to change remains possible (A-028).
   - Checked on the S25 (Android 16, access to selected photos only, 2026-10-27): the selected files are readable by path,

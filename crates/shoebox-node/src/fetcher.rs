@@ -266,11 +266,16 @@ impl<L: LibraryStore> LibraryNode<L> {
                 device: self.device(),
             });
         }
-        if self.node().blobs().has(&blob).await? {
-            // Released and waiting for collection: the store would answer from it.
-            anyhow::bail!(
-                "this device is letting go of its copy of that file; the original can be fetched in a few minutes"
+        // Released and waiting for the store's collection (a gallery file this device stopped
+        // referencing): the store would answer from it, so wait for it to go.
+        let mut waited = 0;
+        while self.node().blobs().has(&blob).await? {
+            anyhow::ensure!(
+                waited < 90,
+                "this device is still letting go of its copy of that file; try again in a minute"
             );
+            waited += 1;
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
         let source = self.fetch_from_holders(&blob).await?;
         self.publish_holdings(vec![(blob, kind)]).await?;

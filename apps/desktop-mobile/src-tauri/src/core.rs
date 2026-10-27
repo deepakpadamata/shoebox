@@ -59,7 +59,9 @@ impl Default for AppOptions {
             secrets: None,
             background: true,
             update_feed: default_update_feed(),
-            gc_interval: None,
+            // Released blobs (a deleted gallery photo's reference, a copy turned into a
+            // reference) are collected on the next pass: keep the wait short.
+            gc_interval: Some(Duration::from_secs(20)),
         }
     }
 }
@@ -240,7 +242,9 @@ impl AppCore {
             .unwrap_or_else(|| opts.relay.clone());
         config.mdns = opts.mdns;
         if let Some(every) = opts.gc_interval {
-            config = config.with_gc_interval(every);
+            config = config
+                .with_gc_interval(every)
+                .with_gc_quiet((every / 2).min(Duration::from_secs(10)));
         }
         let node = match &opts.secrets {
             Some(store) => {

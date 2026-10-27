@@ -1,6 +1,7 @@
 <script lang="ts">
   // Full-size viewer (M3-08/09): the preview shows at once, the original replaces it when it is
   // here or once fetched on demand; the info panel says where every copy is stored.
+  import { onMount } from 'svelte';
   import { api, blobUrl, type PhotoDetail, type PhotoSummary } from '../lib/api';
   import { bytes, dateTime, plural } from '../lib/format';
   import { fail, toast } from '../lib/store.svelte';
@@ -11,6 +12,20 @@
 
   interface Props { items: PhotoSummary[]; index: number; onclose: () => void; onmove: (delta: number) => void; }
   let { items, index, onclose, onmove }: Props = $props();
+
+  // The viewer takes one history entry, so the system back gesture (Android) closes it and
+  // returns to the library instead of leaving the app. Closing it any other way gives the
+  // entry back.
+  onMount(() => {
+    const mine = { viewer: Math.random() };
+    history.pushState(mine, '');
+    const onpop = () => onclose();
+    addEventListener('popstate', onpop);
+    return () => {
+      removeEventListener('popstate', onpop);
+      if (history.state?.viewer === mine.viewer) history.back();
+    };
+  });
 
   const photo = $derived(items[index]);
   let detail = $state<PhotoDetail | null>(null);

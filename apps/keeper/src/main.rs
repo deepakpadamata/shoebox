@@ -26,8 +26,9 @@ struct Cli {
 enum Cmd {
     /// Run the daemon in the foreground.
     Run {
-        #[arg(long, default_value = "keeper")]
-        name: String,
+        /// The name other devices show (default: the one given to `pair`, else "keeper").
+        #[arg(long)]
+        name: Option<String>,
         /// `default`, `off`, or the URL of your own relay.
         #[arg(long, default_value = "default")]
         relay: String,
@@ -45,8 +46,9 @@ enum Cmd {
     /// Pair this keeper with a library using a ticket from “Add a device”.
     Pair {
         ticket: String,
-        #[arg(long, default_value = "keeper")]
-        name: String,
+        /// The name other devices show for this keeper (kept from then on).
+        #[arg(long)]
+        name: Option<String>,
         /// Skip the interactive code check (not recommended).
         #[arg(long)]
         yes: bool,
@@ -253,7 +255,8 @@ async fn main() -> Result<()> {
                 )
                 .with_ansi(false)
                 .init();
-            let mut opts = KeeperOptions::new(&storage, name);
+            let mut opts = KeeperOptions::new(&storage, name.as_deref().unwrap_or("keeper"));
+            opts.prefer_saved_name = name.is_none();
             opts.relay = relay(&r)?;
             opts.mdns = !no_mdns;
             opts.create_storage = !no_create;
@@ -272,7 +275,7 @@ async fn main() -> Result<()> {
             let mut c = client(&storage).await?;
             println!("Contacting the device that made this ticket…");
             let done = c
-                .pair(&ticket, &name, |code| {
+                .pair(&ticket, name.as_deref().unwrap_or(""), |code| {
                     println!(
                         "\nCheck that the other device shows this code:\n\n    {}\n",
                         code.sas

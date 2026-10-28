@@ -209,7 +209,7 @@ async fn a_restarted_keeper_stays_paired_and_finishes_fetching() {
     Client::connect(d.control_path())
         .await
         .unwrap()
-        .pair(&ticket.to_string(), "pi", |_| true)
+        .pair(&ticket.to_string(), "nest", |_| true)
         .await
         .unwrap();
     // Stop right away, most likely before every original arrived.
@@ -230,6 +230,11 @@ async fn a_restarted_keeper_stays_paired_and_finishes_fetching() {
         })
         .await,
         "after the restart the keeper is still paired and completes its fetch"
+    );
+    assert_eq!(
+        d.node().config().name,
+        "nest",
+        "the name given to pair outlives the restart (the service runs without --name)"
     );
     d.shutdown().await.unwrap();
 }

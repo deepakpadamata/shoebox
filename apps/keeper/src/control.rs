@@ -251,10 +251,12 @@ async fn pair(
         .ok_or_else(|| anyhow!("missing `ticket`"))?
         .parse()
         .map_err(|e| anyhow!("{e}"))?;
-    let name = req["name"]
+    // A name given here becomes the keeper's name, also after a restart (`keeper.json`).
+    let given = req["name"]
         .as_str()
-        .unwrap_or(&shared.opts.name)
-        .to_string();
+        .map(str::trim)
+        .filter(|n| !n.is_empty());
+    let name = given.map_or_else(|| shared.node.config().name, str::to_string);
 
     let (code_tx, mut code_rx) = mpsc::unbounded_channel::<(PairingCode, oneshot::Sender<bool>)>();
     let decide: shoebox_node::DecideFn = Arc::new(move |code| {
@@ -284,6 +286,9 @@ async fn pair(
         cap: grant.cap.clone(),
         peers: grant.peers.clone(),
     };
+    if let Some(given) = given {
+        shared.node.update_config(|c| c.name = given.to_string())?;
+    }
     shared.attach(library_ticket.clone()).await?;
     shared.save(&library_ticket)?;
     Ok(json!({

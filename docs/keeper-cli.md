@@ -8,8 +8,8 @@ be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held w
 
 | Command | What it does |
 |---|---|
-| `run [--name N] [--relay default\|off\|URL] [--no-mdns] [--no-create]` | run the daemon in the foreground (logs to stderr, journald friendly); `--no-create` (the service's) fails when the storage folder is missing instead of starting a new, empty keeper there |
-| `pair <ticket> [--name N] [--yes]` | join a library; shows a 6-digit code to compare with the other device |
+| `run [--name N] [--relay default\|off\|URL] [--no-mdns] [--no-create]` | run the daemon in the foreground (logs to stderr, journald friendly); `--no-create` (the service's) fails when the storage folder is missing instead of starting a new, empty keeper there; without `--name` the keeper uses the name it was paired with (else "keeper") |
+| `pair <ticket> [--name N] [--yes]` | join a library; shows a 6-digit code to compare with the other device; `--name` is the name the other devices show, kept in `keeper.json` from then on |
 | `recover --from <link> [--phrase P] [--name N]` | rejoin a library with the 24-word recovery phrase through a surviving device (prompts for the phrase, typing hidden, if omitted) |
 | `address` | print this keeper's link (`shoebox-peer1…`), which a recovering device uses to reach it |
 | `status [--json]` | library counts, at-risk, devices and paths |

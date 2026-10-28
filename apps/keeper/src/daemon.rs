@@ -34,6 +34,9 @@ pub struct KeeperOptions {
     /// before its disk was mounted, a keeper made a new, empty storage (with a new identity, a
     /// stranger to the library) in the folder under the mount point and ran on that.
     pub create_storage: bool,
+    /// Use the name saved at pairing (`keeper.json`) over `name`. `run` turns this off when
+    /// `--name` is given.
+    pub prefer_saved_name: bool,
 }
 
 impl KeeperOptions {
@@ -46,6 +49,7 @@ impl KeeperOptions {
             mdns: false,
             update_feed: shoebox_node::update::PLACEHOLDER_FEED.to_string(),
             create_storage: true,
+            prefer_saved_name: true,
         }
     }
 
@@ -58,6 +62,7 @@ impl KeeperOptions {
             update_feed: std::env::var("SHOEBOX_UPDATE_FEED")
                 .unwrap_or_else(|_| shoebox_node::update::PLACEHOLDER_FEED.to_string()),
             create_storage: true,
+            prefer_saved_name: true,
         }
     }
 }
@@ -135,7 +140,7 @@ impl Shared {
         // A rotation replaces the capability: remember the new one so a restart rejoins it.
         let mut events = self.node.events();
         let storage = self.opts.storage.clone();
-        let name = self.opts.name.clone();
+        let node = self.node.clone();
         let peers = ticket.peers.clone();
         tokio::spawn(async move {
             while let Ok(ev) = events.recv().await {
@@ -170,7 +175,7 @@ impl Shared {
                         peers: peers.clone(),
                     };
                     let state = KeeperState {
-                        name: name.clone(),
+                        name: node.config().name,
                         ticket: ticket.to_string(),
                     };
                     if let Ok(bytes) = serde_json::to_vec_pretty(&state) {
@@ -185,7 +190,7 @@ impl Shared {
     /// Persist the pairing so the next start rejoins the library.
     pub(crate) fn save(&self, ticket: &LibraryTicket) -> Result<()> {
         let state = KeeperState {
-            name: self.opts.name.clone(),
+            name: self.node.config().name,
             ticket: ticket.to_string(),
         };
         let path = state_path(&self.opts.storage);
@@ -219,6 +224,19 @@ impl Daemon {
         }
 
         shoebox_node::format::ensure_format(&opts.storage)?;
+        let saved = state_path(&opts.storage);
+        let state: Option<KeeperState> = match saved.exists() {
+            true => Some(
+                serde_json::from_slice(&std::fs::read(&saved)?).context("reading keeper.json")?,
+            ),
+            false => None,
+        };
+        let mut opts = opts;
+        if let Some(state) = state.as_ref().filter(|_| opts.prefer_saved_name) {
+            if !state.name.is_empty() {
+                opts.name = state.name.clone();
+            }
+        }
         let mut config = NodeConfig::local_only(&opts.storage, &opts.name);
         config.role = Role::Keeper;
         config.relay = opts.relay.clone();
@@ -252,10 +270,7 @@ impl Daemon {
             });
         }
 
-        let saved = state_path(&opts.storage);
-        if saved.exists() {
-            let state: KeeperState =
-                serde_json::from_slice(&std::fs::read(&saved)?).context("reading keeper.json")?;
+        if let Some(state) = state {
             let ticket: LibraryTicket = state
                 .ticket
                 .parse()

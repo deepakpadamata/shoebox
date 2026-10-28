@@ -161,7 +161,7 @@ fn analyze_inner(path: &Path) -> Result<ImportResult, AnalyzeError> {
                 detect::Format::Heic => (render::decode_heic(&bytes)?, 1),
                 _ => unreachable!("videos and unknown handled above"),
             };
-            let image = render::orient(image, orientation);
+            let (thumb, preview, (width, height)) = render::renditions(image, orientation)?;
             let (taken_at, source) = match meta.taken_at_ms {
                 Some(ms) => (Timestamp(ms), TakenAtSource::Exif),
                 None => (Timestamp(mtime_ms(path)?), TakenAtSource::FileMtime),
@@ -170,13 +170,11 @@ fn analyze_inner(path: &Path) -> Result<ImportResult, AnalyzeError> {
                 camera_make: meta.make,
                 camera_model: meta.model,
                 lens: meta.lens,
-                width: image.width(),
-                height: image.height(),
+                width,
+                height,
                 gps: meta.gps,
             };
             // For RAW the "display" size is the preview's; the sensor size is not in the summary.
-            let thumb = render::thumbnail(&image)?;
-            let preview = render::preview(&image)?;
             Ok(ImportResult {
                 hash,
                 size: bytes.len() as u64,

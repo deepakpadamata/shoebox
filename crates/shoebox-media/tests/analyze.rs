@@ -81,6 +81,17 @@ fn large_images_get_a_2048_long_edge_preview() {
     assert_eq!(decode(&preview.bytes).dimensions(), (2048, 1536));
     assert_eq!((preview.width, preview.height), (2048, 1536));
     assert_eq!((r.exif.width, r.exif.height), (4000, 3000));
+
+    // Turned a quarter (EXIF 6): the preview and the size are upright.
+    let path = write(
+        dir.path(),
+        "big6.jpg",
+        &render_jpeg(&spec(4000, 3000, 6), 5),
+    );
+    let r = analyze(&path).unwrap();
+    let preview = r.preview.unwrap();
+    assert_eq!(decode(&preview.bytes).dimensions(), (1536, 2048));
+    assert_eq!((r.exif.width, r.exif.height), (3000, 4000));
 }
 
 #[test]

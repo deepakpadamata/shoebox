@@ -121,14 +121,27 @@ pub fn thumbnail(image: &DynamicImage) -> Result<Rendition, AnalyzeError> {
     )
 }
 
-/// Long edge at most [`PREVIEW_LONG_EDGE`]; never upscaled.
-pub fn preview(image: &DynamicImage) -> Result<Rendition, AnalyzeError> {
-    if image.width().max(image.height()) > PREVIEW_LONG_EDGE {
-        encode_jpeg(
-            &image.resize(PREVIEW_LONG_EDGE, PREVIEW_LONG_EDGE, FilterType::Triangle),
-            85,
-        )
+/// The thumbnail and the preview (long edge at most [`PREVIEW_LONG_EDGE`], never upscaled) of a
+/// decoded picture that is not yet upright, and its upright size. The work is done on the
+/// smallest picture that serves: the preview is cut from the full image and turned upright, the
+/// thumbnail is cut from the preview. (For a 12 MP photo, cutting the thumbnail from the full
+/// image cost 21 ms against 6, and turning it upright 12 ms against 4.)
+pub fn renditions(
+    image: DynamicImage,
+    exif_orientation: u16,
+) -> Result<(Rendition, Rendition, (u32, u32)), AnalyzeError> {
+    let (w, h) = (image.width(), image.height());
+    // Orientations 5 to 8 turn the picture a quarter.
+    let upright = if (5..=8).contains(&exif_orientation) {
+        (h, w)
     } else {
-        encode_jpeg(image, 85)
-    }
+        (w, h)
+    };
+    let small = if w.max(h) > PREVIEW_LONG_EDGE {
+        image.resize(PREVIEW_LONG_EDGE, PREVIEW_LONG_EDGE, FilterType::Triangle)
+    } else {
+        image
+    };
+    let small = orient(small, exif_orientation);
+    Ok((thumbnail(&small)?, encode_jpeg(&small, 85)?, upright))
 }

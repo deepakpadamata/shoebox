@@ -40,6 +40,8 @@ pub enum AlbumTouched {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct AlbumEffect {
     pub touched: Vec<AlbumTouched>,
+    /// Membership index for `touched`: a linear `contains` made one write of n items quadratic.
+    seen: std::collections::HashSet<AlbumTouched>,
 }
 
 impl AlbumEffect {
@@ -47,7 +49,7 @@ impl AlbumEffect {
         !self.touched.is_empty()
     }
     fn touch(&mut self, t: AlbumTouched) {
-        if !self.touched.contains(&t) {
+        if self.seen.insert(t) {
             self.touched.push(t);
         }
     }

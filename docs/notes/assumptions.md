@@ -76,8 +76,8 @@ No remote exists, so CI and the release workflows have never run.
 
 - **A-001 · M0-01** · `shoebox-core` and the other crates use one workspace version (0.1.0 since R1-01; the Tauri app and UI follow it) and `publish = false`.
   Why: nothing is released yet. Reverse: bump in `[workspace.package]`.
-- **A-002 · M0-02** · `repository` is an `example.invalid` placeholder since no remote exists yet.
-  Reverse: set the real URL in `[workspace.package]` once a remote is created.
+- **A-002 · M0-02** · `repository` is `https://github.com/deepakpadamata/shoebox` (set in R1-13; an `example.invalid`
+  placeholder before the remote existed). The About screen's source offer and the keeper's `licences` show it.
 - **A-006 · M0-03** · CI cannot run yet (no remote), so the workflow in `.github/workflows/ci.yml` is unexecuted;
   its steps were reproduced locally (`cargo fmt/clippy/test`, `cargo deny check licenses sources`,
   `scripts/check-no-app-deps.py`). The "deliberate AGPL dependency" acceptance check was verified locally
@@ -87,7 +87,7 @@ No remote exists, so CI and the release workflows have never run.
   lib target). Bin-only apps can't be depended on anyway.
 - **A-065 · M2-09** · Release automation is written but never ran: `release.yml` (tag `keeper-v*`; musl x86_64 natively, aarch64 through `cross`, macOS universal via `lipo`; SHA256SUMS signed
   with minisign from repo secrets) and `scripts/install-keeper.sh` (verifies the *signature of SHA256SUMS* then the tarball checksum; refuses to install without `minisign`). The
-  project public key is a placeholder (`MINISIGN_PUBKEY`) and the repo/owner is `OWNER/shoebox` until a remote and key exist. Not verified: musl/cross builds of the iroh stack, the macOS lipo
+  project public key is a placeholder (`MINISIGN_PUBKEY`) and the repo/owner is `deepakpadamata/shoebox` (set in R1-13). Not verified: musl/cross builds of the iroh stack, the macOS lipo
   step, real minisign verification, the Debian/Raspberry Pi OS install runs. `scripts/test-install-keeper.sh` covers the script's control flow with a fake minisign (CI runs it).
 
 ### Checks that need real networks or hardware

@@ -12,7 +12,7 @@ set -eu
 
 # The release signing key (public). Replace after generating the key pair; see the release workflow.
 MINISIGN_PUBKEY="${SHOEBOX_MINISIGN_PUBKEY:-RWQ_REPLACE_WITH_THE_PROJECT_PUBLIC_KEY}"
-REPO="${SHOEBOX_REPO:-OWNER/shoebox}"
+REPO="${SHOEBOX_REPO:-deepakpadamata/shoebox}"
 VERSION="${SHOEBOX_VERSION:-latest}"
 PREFIX="${SHOEBOX_PREFIX:-/usr/local/bin}"
 

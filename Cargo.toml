@@ -21,7 +21,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.89"
-repository = "https://example.invalid/shoebox" # placeholder until a remote exists
+repository = "https://github.com/deepakpadamata/shoebox"
 
 [workspace.dependencies]
 # --- iroh stack: pinned exactly; bump deliberately (see docs/notes/iroh-versions.md) ---

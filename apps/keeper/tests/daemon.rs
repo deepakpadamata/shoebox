@@ -60,6 +60,28 @@ fn accept() -> shoebox_node::DecideFn {
     Arc::new(|_| Box::pin(async { true }))
 }
 
+/// The service's keeper, started before its disk is mounted, must not set up a new, empty
+/// storage under the mount point: it fails (and the service tries again) until the folder is there.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_keeper_told_not_to_create_its_storage_waits_for_the_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let mount_point = dir.path().join("pool");
+    let mut o = opts(&mount_point);
+    o.create_storage = false;
+    let storage = o.storage.clone();
+    let err = Daemon::start(o.clone())
+        .await
+        .err()
+        .expect("no storage folder, no start");
+    assert!(
+        format!("{err:#}").contains("is its disk mounted?"),
+        "{err:#}"
+    );
+    assert!(!mount_point.exists(), "nothing was created");
+    std::fs::create_dir_all(&storage).unwrap();
+    Daemon::start(o).await.unwrap().shutdown().await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_second_daemon_on_the_same_storage_refuses_to_start() {
     let dir = tempfile::tempdir().unwrap();

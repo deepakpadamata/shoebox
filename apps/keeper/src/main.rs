@@ -37,6 +37,10 @@ enum Cmd {
         /// Do not look for newer releases (twice a day, on the Shoebox website).
         #[arg(long)]
         no_update_check: bool,
+        /// Fail if the storage folder does not exist instead of creating it (the service does
+        /// this: a disk that is not mounted yet must not get a new, empty keeper).
+        #[arg(long)]
+        no_create: bool,
     },
     /// Pair this keeper with a library using a ticket from “Add a device”.
     Pair {
@@ -240,6 +244,7 @@ async fn main() -> Result<()> {
             relay: r,
             no_mdns,
             no_update_check,
+            no_create,
         } => {
             tracing_subscriber::fmt()
                 .with_env_filter(
@@ -251,6 +256,7 @@ async fn main() -> Result<()> {
             let mut opts = KeeperOptions::new(&storage, name);
             opts.relay = relay(&r)?;
             opts.mdns = !no_mdns;
+            opts.create_storage = !no_create;
             if no_update_check {
                 opts.update_feed = shoebox_node::update::PLACEHOLDER_FEED.to_string();
             }

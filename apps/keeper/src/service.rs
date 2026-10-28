@@ -18,7 +18,7 @@ pub fn systemd_unit(spec: &ServiceSpec, system: bool) -> String {
     let mut u = String::new();
     u.push_str("[Unit]\nDescription=Shoebox keeper (always-on photo backstop)\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\n");
     u.push_str(&format!(
-        "ExecStart={} --storage {} run\n",
+        "ExecStart={} --storage {} run --no-create\n",
         quote(&spec.exe),
         quote(&spec.storage)
     ));
@@ -63,6 +63,7 @@ pub fn launchd_plist(spec: &ServiceSpec, log_dir: &Path) -> String {
     <string>--storage</string>
     <string>{storage}</string>
     <string>run</string>
+    <string>--no-create</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -105,7 +106,7 @@ mod tests {
     fn systemd_user_unit_restarts_and_logs_to_the_journal() {
         let u = systemd_unit(&spec(), false);
         assert!(u.contains(
-            "ExecStart=/usr/local/bin/shoebox-keeper --storage \"/srv/photo store\" run"
+            "ExecStart=/usr/local/bin/shoebox-keeper --storage \"/srv/photo store\" run --no-create"
         ));
         assert!(u.contains("Restart=always"));
         assert!(u.contains("StandardOutput=journal"));
@@ -129,6 +130,7 @@ mod tests {
         s.storage = "/Users/a&b/shoebox".into();
         let p = launchd_plist(&s, Path::new("/tmp/logs"));
         assert!(p.contains("<string>/Users/a&amp;b/shoebox</string>"));
+        assert!(p.contains("<string>run</string>\n    <string>--no-create</string>"));
         assert!(p.contains("<key>KeepAlive</key><true/>"));
         assert!(p.contains("<key>RunAtLoad</key><true/>"));
         assert!(p.contains("/tmp/logs/keeper.log"));

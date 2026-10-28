@@ -30,6 +30,10 @@ pub struct KeeperOptions {
     pub mdns: bool,
     /// Where to look for a newer release (R1-07); the placeholder is never contacted.
     pub update_feed: String,
+    /// Create the storage folder when it does not exist. The service turns this off: started
+    /// before its disk was mounted, a keeper made a new, empty storage (with a new identity, a
+    /// stranger to the library) in the folder under the mount point and ran on that.
+    pub create_storage: bool,
 }
 
 impl KeeperOptions {
@@ -41,6 +45,7 @@ impl KeeperOptions {
             relay: RelaySetting::Disabled,
             mdns: false,
             update_feed: shoebox_node::update::PLACEHOLDER_FEED.to_string(),
+            create_storage: true,
         }
     }
 
@@ -52,6 +57,7 @@ impl KeeperOptions {
             mdns: true,
             update_feed: std::env::var("SHOEBOX_UPDATE_FEED")
                 .unwrap_or_else(|_| shoebox_node::update::PLACEHOLDER_FEED.to_string()),
+            create_storage: true,
         }
     }
 }
@@ -190,6 +196,12 @@ impl Shared {
 
 impl Daemon {
     pub async fn start(opts: KeeperOptions) -> Result<Daemon> {
+        if !opts.create_storage && !opts.storage.is_dir() {
+            bail!(
+                "the storage folder {} does not exist (is its disk mounted?); not creating a new one",
+                opts.storage.display()
+            );
+        }
         std::fs::create_dir_all(&opts.storage)
             .with_context(|| format!("creating {}", opts.storage.display()))?;
         let lock = File::options()

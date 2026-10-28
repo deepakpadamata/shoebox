@@ -49,7 +49,9 @@ shoebox-keeper service install --print    # show the unit without installing
 ```
 
 Data lives in `~/.local/share/shoebox` (`~/Library/Application Support/shoebox` on macOS) unless you pass
-`--storage DIR` or set `$SHOEBOX_STORAGE`. Put it on the big disk. Back up that directory *only* if you also
+`--storage DIR` or set `$SHOEBOX_STORAGE`. Put it on the big disk, in a folder of its own (not the disk's
+top folder): the service waits for that folder, so a keeper that starts before the disk is mounted retries
+until it is, instead of starting an empty keeper on the system disk. Back up that directory *only* if you also
 back up the 24-word recovery phrase separately.
 
 ## Everyday commands

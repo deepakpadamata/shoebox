@@ -2,7 +2,6 @@
 
 The technical plan for the MVP. The first milestones prove the core loop on real hardware: **import → sync metadata → fetch blobs by role →
 see copy counts → pair a keeper → share an album**. Later milestones turn it into a shippable MVP.
-The issue-level breakdown is in [`planning/`](../planning/README.md).
 
 > iroh API names below were checked in **M0-01** against the pinned 1.x line
 > (`iroh 1.4.1`, `iroh-blobs 0.103.1`, `iroh-gossip 0.101.0`, `iroh-docs 0.101.0`).
@@ -245,8 +244,7 @@ mockup CSS tokens become the design tokens.
 
 ## 7. Milestones
 
-Solo developer, strictly linear (decision #20). Issue IDs are in execution order. Full issues are in
-[`planning/issues/`](../planning/issues/) and the roll-up with totals is in [`planning/README.md`](../planning/README.md).
+Solo developer, strictly linear (decision #20). Issue IDs are in execution order.
 
 | # | Milestone | Exit criteria (demo on real devices) |
 |---|---|---|

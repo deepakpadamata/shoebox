@@ -1,6 +1,6 @@
 # Assumptions log
 
-Reasonable assumptions made while implementing the issues in `planning/issues/`, recorded for review.
+Reasonable assumptions made while implementing the issues (IDs like M2-02), recorded for review.
 Each entry: **ID** · issue · assumption · why · how to reverse.
 
 **Active** entries still matter for the remaining work, grouped by area. **Settled** entries describe decisions

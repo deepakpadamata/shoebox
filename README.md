@@ -15,11 +15,6 @@ photos/
 │   ├── 03-architecture.md     ← how features map onto iroh (endpoints, blobs, docs, gossip)
 │   ├── 04-open-questions.md   ← decisions log + what's still open
 │   └── 05-prototype-plan.md   ← crate layout, LibraryStore trait, keeper CLI, Tauri shell, milestones
-├── planning/
-│   ├── README.md              ← roadmap: milestones, timeline, all issues in execution order
-│   ├── issues/                ← 81 implementable issues (M0-01 … M7-04)
-│   ├── epics/                 ← v2 epics + v1.x backlog
-│   └── scripts/               ← GitHub import script (dry run by default)
 └── design/
     ├── README.md              ← screen inventory + design notes
     └── mockups/
@@ -40,7 +35,7 @@ photos/
 2. Open `design/mockups/index.html` in a browser. Every screen is tagged with the
    feature IDs it covers.
 3. Collect decisions in `docs/04-open-questions.md`.
-4. Technical plan: `docs/05-prototype-plan.md`; issue-level roadmap: `planning/README.md`.
+4. Technical plan: `docs/05-prototype-plan.md`.
 
 ```bash
 open design/mockups/index.html

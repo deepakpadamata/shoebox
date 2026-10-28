@@ -51,5 +51,5 @@ regenerates the checked-in sample files. See [fixtures/README.md](fixtures/READM
 
 ## Workflow
 
-- Work is tracked in [planning/issues](planning/issues). Write the failing test first, then the code.
+- Write the failing test first, then the code.
 - Assumptions made while implementing are recorded in [docs/notes/assumptions.md](docs/notes/assumptions.md) for review.

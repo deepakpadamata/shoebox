@@ -6,4 +6,7 @@ node_modules/
 dist/
 
 # Local dev-server and preview configs: they hold this machine's paths.
-.claude/launch.json
+.claude/
+
+# Planning and bookkeeping (issues, epics, progress): kept locally, not part of the codebase.
+/planning/

@@ -60,7 +60,7 @@
   async function recover() {
     busy = true;
     try {
-      await api.recover(link.trim(), phrase, name.trim() || defaultName);
+      await api.recover(link.trim(), phrase, name.trim() || defaultName, role);
       await refreshState();
     } catch (e) {
       fail(e);
@@ -78,6 +78,16 @@
   }
 </script>
 
+{#snippet roleChoice()}
+<div>
+  <div class="label">What does this device do?</div>
+  <Segmented bind:value={role} options={[{ value: 'keeper', label: 'Keeper' }, { value: 'companion', label: 'Companion' }, { value: 'viewer', label: 'Viewer' }]} />
+  <p class="small muted" style="margin-top:6px">
+    {role === 'keeper' ? 'Keeps a full copy of every original. Best for a computer or a home server that is usually on.' : role === 'companion' ? 'Keeps recent and favourite photos in full and previews of the rest; older originals live on your keepers and are fetched when you open them.' : 'Browses only; never stores originals.'}
+  </p>
+</div>
+{/snippet}
+
 <div class="onboarding">
   <div class="card panel">
     {#if step === 'welcome'}
@@ -94,13 +104,7 @@
       <p class="muted small">Other devices will show this name.</p>
       <div class="stack">
         <input class="input" placeholder={handheld ? 'Pixel 9' : 'MacBook Pro'} bind:value={name} />
-        <div>
-          <div class="label">What does this device do?</div>
-          <Segmented bind:value={role} options={[{ value: 'keeper', label: 'Keeper' }, { value: 'companion', label: 'Companion' }, { value: 'viewer', label: 'Viewer' }]} />
-          <p class="small muted" style="margin-top:6px">
-            {role === 'keeper' ? 'Keeps a full copy of every original. Best for a computer or a home server that is usually on.' : role === 'companion' ? 'Keeps recent and favourite photos in full and previews of the rest; older originals live on your keepers and are fetched when you open them.' : 'Browses only; never stores originals.'}
-          </p>
-        </div>
+        {@render roleChoice()}
         <Button kind="primary" block disabled={busy} onclick={create}>{busy ? 'Creating…' : 'Create library'}</Button>
         <Button kind="ghost" block onclick={() => (step = 'welcome')}>Back</Button>
       </div>
@@ -137,6 +141,7 @@
         <input class="input" placeholder="Name this device" bind:value={name} />
         <input class="input mono" placeholder="shoebox-peer1…" bind:value={link} />
         <textarea class="input" rows="3" placeholder="24-word recovery phrase" bind:value={phrase}></textarea>
+        {@render roleChoice()}
         <Button kind="primary" block disabled={busy || !link.trim() || !phrase.trim()} onclick={recover}>{busy ? 'Waiting for the other device…' : 'Restore'}</Button>
         {#if busy}<p class="muted small">If that device has a screen, allow this there within two minutes. A keeper lets it through by itself.</p>{/if}
         <Button kind="ghost" block onclick={() => (step = 'welcome')}>Back</Button>

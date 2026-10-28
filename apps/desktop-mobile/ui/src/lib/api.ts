@@ -118,7 +118,8 @@ export const api = {
   appState: () => call<AppState>('app_state'),
   createLibrary: (device_name: string, role: string) => call<CreatedLibrary>('create_library', { device_name, role }),
   join: (ticket: string, device_name: string) => call<{}>('join', { ticket, device_name }),
-  recover: (link: string, phrase: string, device_name: string) => call<{}>('recover', { link, phrase, device_name }),
+  recover: (link: string, phrase: string, device_name: string, role: string) =>
+    call<{}>('recover', { link, phrase, device_name, role }),
   confirmPairing: (accept: boolean) => call<{}>('confirm_pairing', { accept }),
   /** Let in (or refuse) the device rejoining through this one with the recovery phrase. */
   about: () => call<AboutInfo>('about'),
@@ -194,5 +195,7 @@ export const api = {
   deviceLink: () => call<string>('device_link'),
   diagnostics: () => call<DiagnosticsBundle>('diagnostics'),
   exportLibrary: (dest: string) => call<ExportReport>('export_library', { dest }),
+  /** Set this device's data aside and restart at first run (to create or join another library). */
+  leaveLibrary: () => call<{ kept: string }>('leave_library'),
   watchFolder: (dir: string) => call<{}>('watch_folder', { dir }),
 };

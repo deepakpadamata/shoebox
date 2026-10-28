@@ -709,28 +709,31 @@ impl AppCore {
         Ok(())
     }
 
-    /// Rejoin a library with the recovery phrase through a surviving device (`shoebox-peer1…`).
+    /// Rejoin a library with the recovery phrase through a surviving device (`shoebox-peer1…`), as
+    /// `role` (a phone rejoins as a companion, not a keeper that fetches every original).
     pub async fn recover(
         self: &Arc<Self>,
         link: &str,
         phrase: &str,
         device_name: &str,
+        role: &str,
     ) -> Result<()> {
         ensure!(
             self.library.read().await.is_none(),
             "this device already has a library"
         );
+        let role = parse_role(role)?;
         let link: shoebox_node::PeerLink = link.parse().map_err(|e| anyhow!("{e}"))?;
         let now = now_ms();
         let grant = self
             .node
-            .recover(&link, phrase, Role::Keeper, device_name, now)
+            .recover(&link, phrase, role, device_name, now)
             .await?;
         let ticket = LibraryTicket {
             cap: grant.cap,
             peers: grant.peers,
         };
-        self.remember(&ticket, device_name, Role::Keeper)?;
+        self.remember(&ticket, device_name, role)?;
         self.attach(ticket).await?;
         Ok(())
     }
@@ -1533,6 +1536,32 @@ impl AppCore {
         std::fs::rename(tmp, path)?;
         self.emit(AppEvent::LibraryChanged);
         Ok(())
+    }
+
+    // ---------- leaving ----------
+
+    /// Leave this device's library, to create a new one or join another: the data folder is set
+    /// aside next to itself as `<folder>.left-<library>-<seconds>` (nothing is deleted, so it can
+    /// be put back) and the app starts at first run once it is restarted, which the shell does.
+    /// The device key is kept. The other devices list this one until an admin removes it.
+    pub async fn leave_library(&self) -> Result<String> {
+        let id = match self.library.read().await.as_ref() {
+            Some(ln) => hex::encode(ln.library_id().0),
+            None => bail!("this device has no library to leave"),
+        };
+        let name = self
+            .dir
+            .file_name()
+            .ok_or_else(|| anyhow!("the data folder has no name"))?
+            .to_string_lossy()
+            .into_owned();
+        let aside =
+            self.dir
+                .with_file_name(format!("{name}.left-{}-{}", &id[..8], now_ms() / 1000));
+        std::fs::rename(&self.dir, &aside)
+            .with_context(|| format!("setting {} aside", self.dir.display()))?;
+        tracing::info!(kept = %aside.display(), "left the library");
+        Ok(aside.display().to_string())
     }
 
     // ---------- export ----------

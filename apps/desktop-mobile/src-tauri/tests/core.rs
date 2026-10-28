@@ -569,7 +569,8 @@ async fn a_recovery_through_this_app_asks_first() {
 
     let b = open(db.path()).await;
     let (b2, link2, phrase2) = (b.clone(), link.clone(), created.phrase.clone());
-    let joining = tokio::spawn(async move { b2.recover(&link2, &phrase2, "Laptop").await });
+    let joining =
+        tokio::spawn(async move { b2.recover(&link2, &phrase2, "Laptop", "companion").await });
     assert!(
         wait(20, || async {
             a.app_state().await.unwrap().recovery_request.is_some()
@@ -580,7 +581,8 @@ async fn a_recovery_through_this_app_asks_first() {
     let q = a.app_state().await.unwrap().recovery_request.unwrap();
     assert_eq!(
         (q.device_name.as_str(), q.role.as_str()),
-        ("Laptop", "keeper")
+        ("Laptop", "companion"),
+        "a recovering phone asks for the role it picked, not keeper"
     );
     a.answer_recovery(true).unwrap();
     joining.await.unwrap().unwrap();
@@ -595,7 +597,8 @@ async fn a_recovery_through_this_app_asks_first() {
 
     let c = open(dc.path()).await;
     let (c2, link3, phrase3) = (c.clone(), link.clone(), created.phrase.clone());
-    let refused = tokio::spawn(async move { c2.recover(&link3, &phrase3, "Unknown").await });
+    let refused =
+        tokio::spawn(async move { c2.recover(&link3, &phrase3, "Unknown", "keeper").await });
     assert!(
         wait(20, || async {
             a.app_state().await.unwrap().recovery_request.is_some()
@@ -666,6 +669,41 @@ async fn about_names_the_version_the_source_and_the_licences() {
     core.shutdown().await.unwrap();
 }
 
+/// Leaving a library sets the data folder aside (nothing deleted) so the next start is a first
+/// run that can create a new library; the old folder still holds the old library.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn leaving_a_library_sets_its_data_aside_and_the_next_start_is_a_first_run() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("org.shoebox.desktop");
+    let a = open(&dir).await;
+    assert!(a.leave_library().await.is_err(), "nothing to leave yet");
+    a.create_library("MacBook", "keeper").await.unwrap();
+    let old = a.app_state().await.unwrap().library_id.unwrap();
+    let kept = std::path::PathBuf::from(a.leave_library().await.unwrap());
+    assert!(!dir.exists(), "the data folder was moved, not copied");
+    assert!(
+        kept.join("app.json").exists(),
+        "the old library is kept: {}",
+        kept.display()
+    );
+    assert!(
+        kept.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with(&format!("org.shoebox.desktop.left-{}-", &old[..8])),
+        "{} next to the data folder, named after the library",
+        kept.display()
+    );
+
+    let b = open(&dir).await;
+    assert!(
+        !b.app_state().await.unwrap().has_library,
+        "starts at first run"
+    );
+    b.create_library("MacBook", "keeper").await.unwrap();
+    assert!(b.app_state().await.unwrap().has_library);
+}
+
 /// R1-06: a security alert raised here (the phrase was replaced on another app) is handed out
 /// once for a system notification (Android's worker, the desktop app with its window hidden), and
 /// stays in the app state as a banner until dismissed.
@@ -676,7 +714,8 @@ async fn security_alerts_are_notified_once() {
     let created = a.create_library("MacBook", "keeper").await.unwrap();
     let b = open(db.path()).await;
     let (b2, link, phrase) = (b.clone(), a.device_link(), created.phrase.clone());
-    let joining = tokio::spawn(async move { b2.recover(&link, &phrase, "Laptop").await });
+    let joining =
+        tokio::spawn(async move { b2.recover(&link, &phrase, "Laptop", "companion").await });
     assert!(
         wait(20, || async {
             a.app_state().await.unwrap().recovery_request.is_some()

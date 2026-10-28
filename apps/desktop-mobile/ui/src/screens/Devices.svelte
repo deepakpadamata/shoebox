@@ -102,6 +102,11 @@
     });
   });
 
+  $effect(() => {
+    app.addDeviceOpen = addOpen;
+    return () => { app.addDeviceOpen = false; };
+  });
+
   function closeAdd() {
     addOpen = false;
     pair = null;

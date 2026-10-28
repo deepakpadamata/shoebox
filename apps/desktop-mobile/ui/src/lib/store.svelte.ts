@@ -19,6 +19,8 @@ export const app = $state({
   pairingError: '',
   /** Bumped when a pairing this device took part in finished. */
   pairVersion: 0,
+  /** The Devices screen's "Add a device" sheet is open (it shows the pairing code itself). */
+  addDeviceOpen: false,
   importProgress: null as null | { done: number; total: number },
   removed: false,
   /** Other devices reachable right now, and recent at-risk counts for the ETA. */

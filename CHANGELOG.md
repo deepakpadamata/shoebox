@@ -25,6 +25,14 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
 - Large originals (8 MB and up) come from all the devices that hold them at once, in pieces, each verified as it
   arrives; a device that cannot help is skipped (A-099). On home Wi-Fi a phone got 128 MB from a Mac and a Linux keeper
   together in about 5 s, against 6.5 s from the Mac alone and 12 s from the keeper alone.
+- Settings → Leave this library: the device stops syncing and starts over at first run, to create a new library or
+  join another. Its data folder is set aside next to itself (`….left-<library>-<time>`), not deleted.
+- The six-digit pairing code shows wherever you are in the app: with the "Add a device" sheet closed (the code
+  copied out of it), it had nowhere to appear and the other device waited until the pairing timed out.
+- Restoring with the recovery phrase asks what the device does (keeper, companion, viewer), as creating a library
+  does: a phone restored as a keeper and fetched every original.
+- `shoebox-keeper pair --name` is the keeper's name from then on; it was used only during pairing, and the keeper
+  showed as "keeper" afterwards.
 - The app and the keeper tell you when a newer version is out (Settings → About → Check for new versions; the keeper's
   `status`). Nothing is installed automatically.
 - A phone keeps one copy of each photo: gallery photos are read where they are, never copied into Shoebox, and a photo

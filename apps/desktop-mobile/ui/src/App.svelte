@@ -5,6 +5,7 @@
   import Onboarding from './screens/Onboarding.svelte';
   import Shell from './screens/Shell.svelte';
   import MobileShell from './screens/MobileShell.svelte';
+  import PairingPrompt from './screens/PairingPrompt.svelte';
   import { viewport } from './lib/viewport.svelte';
   import Components from './dev/Components.svelte';
 
@@ -24,6 +25,8 @@
 {:else}
   <Shell />
 {/if}
+
+{#if app.state?.has_library}<PairingPrompt />{/if}
 
 {#if app.toast}<div class="toast" role="status">{app.toast}</div>{/if}
 

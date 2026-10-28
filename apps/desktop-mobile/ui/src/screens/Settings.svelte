@@ -67,6 +67,21 @@
     }
   }
 
+  // Leaving the library: the data folder is set aside (not deleted) and the app restarts at first run.
+  let leaveOpen = $state(false);
+  let leaving = $state(false);
+  const handheld = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  async function leave() {
+    leaving = true;
+    try {
+      await api.leaveLibrary();
+      toast(handheld ? 'Left the library. Shoebox closes; open it again to start over.' : 'Left the library. Shoebox is restarting…');
+    } catch (e) {
+      fail(e);
+      leaving = false;
+    }
+  }
+
   async function showDiagnostics() {
     try { diag = await api.diagnostics(); } catch (e) { fail(e); }
   }
@@ -217,6 +232,12 @@
       <div><Button size="sm" onclick={() => { replaceOpen = true; newKit = null; oldPhrase = ''; }}>Replace recovery phrase…</Button></div>
     </div>
 
+    <div class="section">Leave this library</div>
+    <div class="card pad small stack">
+      <div class="muted">To create a new library on this device or join another one. This device stops syncing with this library; its data here is set aside, not deleted.</div>
+      <div><Button size="sm" kind="danger" onclick={() => (leaveOpen = true)}>Leave this library…</Button></div>
+    </div>
+
     <div class="section">About</div>
     <div class="card pad small stack">
       {#if about}
@@ -253,6 +274,15 @@
       <Button block onclick={() => { replaceOpen = false; oldPhrase = ''; }}>Cancel</Button>
     </div>
   {/if}
+</Sheet>
+
+<Sheet open={leaveOpen} title="Leave this library?" onclose={() => { if (!leaving) leaveOpen = false; }} width={460}>
+  <div class="stack">
+    <p class="small">This device stops syncing and Shoebox starts over at first run, where you can create a new library or join another one.</p>
+    <p class="small muted">Nothing is deleted: this device's copy of the library is moved aside in its data folder. Originals only this device holds are no longer backed up anywhere; check Health first. The other devices keep listing this one until an admin removes it.</p>
+    <Button kind="danger" block disabled={leaving} onclick={leave}>{leaving ? 'Leaving…' : 'Leave this library'}</Button>
+    <Button block disabled={leaving} onclick={() => (leaveOpen = false)}>Cancel</Button>
+  </div>
 </Sheet>
 
 <Sheet open={diag !== null} title="Diagnostics report" onclose={() => (diag = null)} width={640}>

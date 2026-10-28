@@ -34,9 +34,18 @@ async fn core_when_ready(app: &tauri::AppHandle) -> Result<Arc<AppCore>, String>
 #[tauri::command]
 async fn command(app: tauri::AppHandle, cmd: String, args: Option<Value>) -> Result<Value, String> {
     let core = core_when_ready(&app).await?;
-    dispatch(&core, &cmd, args.unwrap_or(Value::Null))
+    let reply = dispatch(&core, &cmd, args.unwrap_or(Value::Null))
         .await
-        .map_err(|e| user_message(&e))
+        .map_err(|e| user_message(&e))?;
+    if cmd == "leave_library" {
+        // Start again on an empty data folder: at first run. (Android has no relaunch: the app
+        // closes and opens at first run next time.)
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+            app.restart();
+        });
+    }
+    Ok(reply)
 }
 
 /// `shoebox://localhost/blob/<photo id>?kind=thumb|preview|original`

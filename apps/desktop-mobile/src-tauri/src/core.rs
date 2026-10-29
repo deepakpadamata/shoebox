@@ -19,7 +19,7 @@ use shoebox_node::{
     NodeConfig, NodeEvent, PairTicket, PathKind, PresenceConfig, RelaySetting,
 };
 use shoebox_store::{HybridBackend, Library};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -213,6 +213,20 @@ pub struct AppCore {
     pub(crate) photo_source: Mutex<Option<Arc<dyn crate::photos_source::PhotoSource>>>,
     pub(crate) backup: tokio::sync::Mutex<crate::backup::BackupState>,
     pub(crate) backup_running: tokio::sync::Mutex<()>,
+    /// Which photo each blob belongs to, and the fetch queue's counts, for [`AppCore::transfers`].
+    transfer_cache: tokio::sync::Mutex<TransferCache>,
+}
+
+/// Rebuilt at most this often: the Devices screen asks every second or two.
+const TRANSFER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
+#[derive(Default)]
+struct TransferCache {
+    blobs: HashMap<Blake3Hash, (Blake3Hash, BlobKind)>,
+    blobs_at: Option<std::time::Instant>,
+    /// The fetch queue: blob, kind and size.
+    waiting: Vec<(Blake3Hash, BlobKind, u64)>,
+    waiting_at: Option<std::time::Instant>,
 }
 
 impl AppCore {
@@ -283,6 +297,7 @@ impl AppCore {
             photo_source: Mutex::new(None),
             backup: tokio::sync::Mutex::new(backup_state),
             backup_running: tokio::sync::Mutex::new(()),
+            transfer_cache: tokio::sync::Mutex::new(TransferCache::default()),
         });
         core.forward_node_events();
         core.start_update_checks();
@@ -1380,6 +1395,106 @@ impl AppCore {
                 other_bytes: s.other_bytes as f64,
             })
             .collect())
+    }
+
+    /// What is moving right now and what this device still has to fetch (Devices screen).
+    pub async fn transfers(&self) -> Result<crate::types::Transfers> {
+        use crate::types::{TransferItem, Transfers};
+        let ln = self.ln().await?;
+        let snap = self.node.transfers();
+        let mut cache = self.transfer_cache.lock().await;
+        let stale =
+            |at: Option<std::time::Instant>| at.is_none_or(|t| t.elapsed() > TRANSFER_CACHE_TTL);
+        let unknown = snap
+            .downloads
+            .iter()
+            .chain(&snap.uploads)
+            .any(|t| !cache.blobs.contains_key(&t.hash));
+        if stale(cache.blobs_at)
+            || (unknown && cache.blobs_at.is_none_or(|t| t.elapsed().as_secs() >= 1))
+        {
+            let mut blobs = HashMap::new();
+            for rec in ln
+                .store()
+                .photos_by_time(TimeRange::ALL, Page::all())
+                .await?
+            {
+                blobs.insert(rec.thumb.hash, (rec.id, BlobKind::Thumb));
+                blobs.insert(rec.preview.hash, (rec.id, BlobKind::Preview));
+                // Last: a video's thumbnail and preview are its original.
+                blobs.insert(rec.original.hash, (rec.id, BlobKind::Original));
+            }
+            cache.blobs = blobs;
+            cache.blobs_at = Some(std::time::Instant::now());
+        }
+        if stale(cache.waiting_at) {
+            cache.waiting = ln
+                .missing_blobs()
+                .await?
+                .into_iter()
+                .map(|q| (q.item.blob.hash, q.item.kind, q.item.blob.size))
+                .collect();
+            cache.waiting_at = Some(std::time::Instant::now());
+        }
+        let item = |t: &shoebox_node::Transfer| {
+            let known = cache.blobs.get(&t.hash);
+            TransferItem {
+                photo: known.map(|(p, _)| p.to_string()),
+                kind: known
+                    .map_or("other", |(_, k)| match k {
+                        BlobKind::Thumb => "thumb",
+                        BlobKind::Preview => "preview",
+                        BlobKind::Original => "original",
+                    })
+                    .into(),
+                peer: t.peer.map(|p| hex::encode(p.0)),
+                size: t.size.map(|s| s as f64),
+                done: t.done as f64,
+            }
+        };
+        let downloading: Vec<TransferItem> = snap.downloads.iter().map(item).collect();
+        let sending: Vec<TransferItem> = snap.uploads.iter().map(item).collect();
+        let in_flight: HashSet<Blake3Hash> = snap.downloads.iter().map(|t| t.hash).collect();
+        let (mut thumbs, mut previews, mut originals, mut bytes) = (0u32, 0u32, 0u32, 0u64);
+        for (hash, kind, size) in &cache.waiting {
+            if in_flight.contains(hash) || self.node.blobs().has(hash).await? {
+                continue;
+            }
+            match kind {
+                BlobKind::Thumb => thumbs += 1,
+                BlobKind::Preview => previews += 1,
+                BlobKind::Original => originals += 1,
+            }
+            bytes += size;
+        }
+        drop(cache);
+        let paused = if ln.fetcher_paused() {
+            let policy = self.backup.lock().await.policy.clone();
+            let source = self.photo_source.lock().unwrap().clone();
+            let conditions = match source {
+                Some(src) => src.conditions().await.ok(),
+                None => None,
+            };
+            Some(
+                conditions
+                    .and_then(|c| crate::backup::pause_reason(&policy, &c))
+                    .unwrap_or("paused")
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        Ok(Transfers {
+            downloading,
+            sending,
+            download_rate: snap.download_rate as f64,
+            upload_rate: snap.upload_rate as f64,
+            waiting_thumbs: thumbs,
+            waiting_previews: previews,
+            waiting_originals: originals,
+            waiting_bytes: bytes as f64,
+            paused,
+        })
     }
 
     /// How a device is named everywhere in the app. The name a device reports about itself is the

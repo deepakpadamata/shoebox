@@ -24,6 +24,7 @@ mod recover;
 mod rotation;
 mod sync;
 mod ticket;
+mod transfers;
 pub mod update;
 
 pub use activity::Activity;
@@ -50,3 +51,4 @@ pub use presence::{DeviceStatus, PresenceConfig};
 pub use recover::{PeerLink, RecoverGrant, RecoveryDecideFn, RecoveryRequest};
 pub use sync::{SyncConfig, SyncPhase};
 pub use ticket::{LibraryTicket, TicketError};
+pub use transfers::{Transfer, TransferSnapshot};

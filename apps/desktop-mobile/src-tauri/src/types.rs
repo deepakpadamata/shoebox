@@ -221,6 +221,38 @@ ts_type! {
 }
 
 ts_type! {
+    /// One blob on its way in or out right now (Devices screen).
+    pub struct TransferItem {
+        /// The photo it belongs to; `None` for library metadata.
+        pub photo: Option<String>,
+        /// `thumb`, `preview`, `original`, or `other` (library metadata).
+        pub kind: String,
+        /// The device (hex id) it comes from or goes to, when known.
+        pub peer: Option<String>,
+        pub size: Option<f64>,
+        pub done: f64,
+    }
+}
+
+ts_type! {
+    /// What this device is moving and has still to fetch.
+    pub struct Transfers {
+        pub downloading: Vec<TransferItem>,
+        pub sending: Vec<TransferItem>,
+        /// Bytes per second over the last few seconds.
+        pub download_rate: f64,
+        pub upload_rate: f64,
+        /// Still to fetch here, not counting what is in flight.
+        pub waiting_thumbs: u32,
+        pub waiting_previews: u32,
+        pub waiting_originals: u32,
+        pub waiting_bytes: f64,
+        /// Why this device's fetching is paused, if it is.
+        pub paused: Option<String>,
+    }
+}
+
+ts_type! {
     pub struct PairStart {
         /// The ticket text (what the QR encodes).
         pub ticket: String,

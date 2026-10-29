@@ -989,3 +989,20 @@ async fn the_media_server_serves_any_range_and_only_with_the_token() {
     let (status, _, _) = http_get(&base, &format!("/blob/{id}?kind=original"), None).await;
     assert!(status.contains("404"), "no token: {status}");
 }
+
+/// The Devices screen's transfers: nothing moving and nothing waiting on a device that has
+/// everything of its library.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn transfers_are_empty_when_nothing_moves() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = open(dir.path()).await;
+    assert!(a.transfers().await.is_err(), "no library yet");
+    a.create_library("MacBook", "keeper").await.unwrap();
+    let t = a.transfers().await.unwrap();
+    assert!(t.downloading.is_empty() && t.sending.is_empty());
+    assert_eq!(
+        (t.waiting_thumbs, t.waiting_previews, t.waiting_originals),
+        (0, 0, 0)
+    );
+    assert_eq!(t.paused, None);
+}

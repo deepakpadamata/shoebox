@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>07 · Devices with storage and transfers — Shoebox mockups</title>
+<style>
+  /* The app's own tokens (apps/desktop-mobile/ui/src/app.css), so this looks like the real thing. */
+  :root {
+    --bg: #ecebe6; --surface: #ffffff; --surface-2: #f5f4f0; --surface-3: #e6e3dc;
+    --ink: #1d1c1a; --ink-2: #5e5b55; --ink-3: #6e6a62; --line: #e2e0da;
+    --accent: #a9540f; --accent-ink: #fff; --accent-soft: #fbeedf;
+    --ok: #287a42; --ok-soft: #e3f3e7; --warn: #8a5a0c; --warn-soft: #fbf1dc;
+    --risk: #c2412d; --risk-soft: #fbe6e1; --info: #2f6db5; --info-soft: #e3edf9;
+    --scrim: rgba(0,0,0,.35); --shadow: 0 10px 30px rgba(0,0,0,.15);
+    --radius: 14px; --radius-sm: 9px;
+    --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', Roboto, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  :root[data-theme='dark'] {
+    --bg: #121110; --surface: #1c1b19; --surface-2: #262522; --surface-3: #33312d;
+    --ink: #f1efe9; --ink-2: #b2aea5; --ink-3: #96938b; --line: #34322e;
+    --accent: #e08a3c; --accent-ink: #1b1005; --accent-soft: #3b2815;
+    --ok: #5cc27d; --ok-soft: #173424; --warn: #e2b04f; --warn-soft: #3a2f14;
+    --risk: #ef7a66; --risk-soft: #3d1c16; --info: #7aaee8; --info-soft: #1a2c44;
+    --scrim: rgba(0,0,0,.6); --shadow: 0 10px 30px rgba(0,0,0,.5);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b0b0a; color: var(--ink); font: 14px/1.4 var(--font); }
+  :root:not([data-theme='dark']) body { background: #d8d6cf; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1500px; margin: 0 auto; padding: 24px 16px 60px; }
+  .top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 18px; }
+  .top h1 { font-size: 20px; margin: 0; color: #f1efe9; }
+  :root:not([data-theme='dark']) .top h1 { color: #1d1c1a; }
+  .top .intro { color: #96938b; max-width: 760px; font-size: 13px; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+  .seg { display: inline-flex; background: #262522; border-radius: 10px; padding: 3px; }
+  :root:not([data-theme='dark']) .seg { background: #f5f4f0; }
+  .seg button { border: 0; background: none; color: #b2aea5; font: 600 12.5px var(--font); padding: 6px 11px; border-radius: 8px; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: var(--accent-ink); }
+  .stage { display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 28px; align-items: start; }
+  @media (max-width: 1100px) { .stage { grid-template-columns: 1fr; } .phone { margin: 0 auto; } }
+  .label { color: #96938b; font: 600 11px var(--font); letter-spacing: .08em; text-transform: uppercase; margin: 0 0 8px 4px; }
+
+  /* ---------- shared pieces ---------- */
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+  .grow { flex: 1; }
+  .desk-scroll { overflow-x: auto; padding-bottom: 6px; }
+  .muted { color: var(--ink-2); } .small { font-size: 12.5px; } .tiny { font-size: 11.5px; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); } .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.mute { background: var(--surface-2); color: var(--ink-2); } .pill.info { background: var(--info-soft); color: var(--info); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-3); display: inline-block; flex: none; }
+  .dot.on { background: var(--ok); } .dot.relay { background: var(--warn); }
+  .avatar { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; color: #fff; flex: none; }
+  .bar { position: relative; display: flex; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+  .bar .orig { background: var(--accent); } .bar .prev { background: var(--ink-3); opacity: .7; }
+  .bar.thin { height: 4px; }
+  .prog { height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+  .prog > span { display: block; height: 100%; background: var(--info); border-radius: 2px; transition: width .6s linear; }
+  .prog.ok > span { background: var(--ok); }
+  .btn { border: 0; background: none; color: var(--accent); font: 600 13px var(--font); padding: 6px 10px; border-radius: 8px; cursor: pointer; }
+  .btn:hover { background: var(--accent-soft); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); }
+  .btn.danger { color: var(--risk); }
+  .arrow { font-weight: 700; color: var(--info); }
+  .arrow.up { color: var(--ok); }
+  .mono { font-family: var(--mono); }
+  .new { outline: 1.5px dashed var(--info); outline-offset: 3px; border-radius: 8px; }
+  body:not(.marks) .new { outline: none; }
+
+  /* ---------- activity card (both layouts) ---------- */
+  .activity { padding: 14px 16px; display: grid; gap: 10px; }
+  .activity .headline { display: flex; align-items: center; gap: 10px; }
+  .activity .headline b { font-size: 15px; }
+  .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--info-soft); border-top-color: var(--info); animation: spin 1s linear infinite; flex: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .activity.idle .spinner { animation: none; border-color: var(--ok); background: var(--ok); }
+  .activity.paused .spinner { animation: none; border-color: var(--warn); }
+  .queue { display: none; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .activity.open .queue { display: grid; }
+  .qrow { display: grid; grid-template-columns: 34px minmax(0,1fr) auto; gap: 10px; align-items: center; }
+  .thumb { width: 34px; height: 34px; border-radius: 7px; background: linear-gradient(135deg, #6b5a44, #2f3a46); }
+  .counts { display: flex; gap: 14px; flex-wrap: wrap; }
+  .counts span b { color: var(--ink); }
+
+  /* ---------- desktop window ---------- */
+  .window { min-width: 1000px; border-radius: 12px; overflow: hidden; border: 1px solid #000; box-shadow: 0 20px 60px rgba(0,0,0,.45); background: var(--bg); }
+  .titlebar { height: 34px; background: var(--surface-2); display: flex; align-items: center; gap: 7px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+  .titlebar i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; } .titlebar i:nth-child(2) { background: #febc2e; } .titlebar i:nth-child(3) { background: #28c840; }
+  .titlebar span { margin: 0 auto; color: var(--ink-3); font-size: 12px; }
+  .app { display: grid; grid-template-columns: 200px minmax(0,1fr); min-height: 640px; }
+  .sidebar { background: var(--surface); border-right: 1px solid var(--line); padding: 14px 10px; font-size: 13.5px; }
+  .sidebar .brand { font-weight: 700; padding: 4px 8px 12px; }
+  .sidebar .grp { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 12px 8px 4px; }
+  .sidebar .it { display: flex; gap: 8px; padding: 6px 8px; border-radius: 8px; color: var(--ink-2); }
+  .sidebar .it.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .main { padding: 18px 22px; display: grid; gap: 14px; align-content: start; }
+  .main header { display: flex; align-items: center; gap: 12px; }
+  .main header h2 { margin: 0; font-size: 22px; }
+  .main header .grow { flex: 1; }
+  .table { overflow: hidden; }
+  .thead, .trow { display: grid; grid-template-columns: minmax(170px,1.3fr) minmax(120px,.8fr) minmax(220px,1.6fr) minmax(190px,1.3fr) 40px; gap: 16px; align-items: center; padding: 12px 16px; }
+  .thead { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding-top: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .trow + .trow { border-top: 1px solid var(--line); }
+  .trow:hover { background: var(--surface-2); }
+  .who { display: flex; gap: 12px; align-items: center; min-width: 0; }
+  .who .t1 { font-weight: 600; } .who .t2 { color: var(--ink-2); font-size: 12.5px; }
+  .conn { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .store { display: grid; gap: 5px; }
+  .store .nums { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+  .act { display: grid; gap: 5px; font-size: 12.5px; }
+  .act.none { color: var(--ink-3); }
+  .menu-wrap { position: relative; }
+  .kebab { border: 0; background: none; color: var(--ink-2); font-size: 18px; width: 32px; height: 32px; border-radius: 8px; cursor: pointer; }
+  .kebab:hover { background: var(--surface-3); }
+  .menu { position: absolute; right: 0; top: 36px; z-index: 5; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 5px; min-width: 170px; display: none; }
+  .menu.open { display: grid; }
+  .menu button { text-align: left; border: 0; background: none; color: var(--ink); font: 13.5px var(--font); padding: 8px 10px; border-radius: 7px; cursor: pointer; }
+  .menu button:hover { background: var(--surface-2); } .menu button.danger { color: var(--risk); }
+  .foot { color: var(--ink-3); font-size: 12px; }
+
+  /* ---------- phone ---------- */
+  .phone { width: 390px; border-radius: 44px; padding: 10px; background: #050505; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+  .screen { border-radius: 36px; overflow: hidden; background: var(--bg); height: 820px; display: flex; flex-direction: column; position: relative; }
+  .status { display: flex; justify-content: space-between; padding: 12px 26px 4px; font-weight: 600; font-size: 14px; }
+  .pbody { flex: 1; overflow-y: auto; padding: 6px 14px 14px; display: grid; gap: 12px; align-content: start; }
+  .pbody::-webkit-scrollbar { display: none; }
+  .ptitle { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 2px; }
+  .ptitle h2 { margin: 0; font-size: 30px; }
+  .plist .prow { padding: 13px 14px; display: grid; gap: 9px; cursor: pointer; }
+  .plist .prow + .prow { border-top: 1px solid var(--line); }
+  .plist .prow:active { background: var(--surface-2); }
+  .prow .line1 { display: flex; gap: 12px; align-items: center; }
+  .prow .line1 .grow { flex: 1; min-width: 0; }
+  .prow .t1 { font-weight: 600; font-size: 15.5px; } .prow .t2 { color: var(--ink-2); font-size: 13px; }
+  .prow .chev { color: var(--ink-3); font-size: 20px; }
+  .tabs { display: grid; grid-template-columns: repeat(4,1fr); border-top: 1px solid var(--line); background: var(--surface); padding: 8px 0 20px; font-size: 11.5px; color: var(--ink-3); text-align: center; }
+  .tabs .on { color: var(--accent); }
+  .tabs div span { display: block; font-size: 18px; }
+  .sheet-scrim { position: absolute; inset: 0; background: var(--scrim); display: none; }
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--surface); border-radius: 18px 18px 0 0; padding: 10px 18px 26px; display: none; gap: 12px; }
+  .sheet .grab { width: 38px; height: 5px; border-radius: 3px; background: var(--surface-3); margin: 0 auto 4px; }
+  .screen.sheet-open .sheet-scrim { display: block; }
+  .screen.sheet-open .sheet { display: grid; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13px; }
+  .kv dt { color: var(--ink-2); } .kv dd { margin: 0; text-align: right; }
+  .sheet .acts { display: grid; gap: 4px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .sheet .acts .btn { text-align: left; padding: 10px 4px; font-size: 15px; }
+
+  /* ---------- notes ---------- */
+  .notes { margin-top: 30px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .note { background: #1c1b19; border: 1px solid #34322e; border-radius: 12px; padding: 14px 16px; color: #b2aea5; font-size: 13px; }
+  :root:not([data-theme='dark']) .note { background: #fff; border-color: #e2e0da; color: #5e5b55; }
+  .note h3 { margin: 0 0 8px; font-size: 14px; color: #f1efe9; }
+  :root:not([data-theme='dark']) .note h3 { color: #1d1c1a; }
+  .note ul { margin: 0; padding-left: 18px; display: grid; gap: 5px; }
+  .note .newtag { color: #7aaee8; font-weight: 600; }
+</style>
+</head>
+<body class="marks">
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>07 · Devices, with storage and transfers in one list</h1>
+      <div class="intro">One row per device: who it is, how it's connected, what it keeps, and what it's sending or getting right now.
+        A card at the top sums up what's moving, and opens into this device's queue. Click things: the ⋯ menu and the activity card on desktop, a device row and the card on the phone.</div>
+    </div>
+    <div class="controls">
+      <div class="seg" id="stateSeg"><button data-s="busy" class="on">Backing up</button><button data-s="paused">Paused</button><button data-s="idle">All done</button></div>
+      <div class="seg" id="themeSeg"><button data-t="dark" class="on">Dark</button><button data-t="light">Light</button></div>
+      <div class="seg" id="markSeg"><button data-m="on" class="on">Show what's new</button><button data-m="off">Hide</button></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <!-- ================= DESKTOP ================= -->
+    <div>
+      <div class="label">Desktop (Mac)</div>
+      <div class="desk-scroll"><div class="window">
+        <div class="titlebar"><i></i><i></i><i></i><span>Shoebox</span></div>
+        <div class="app">
+          <nav class="sidebar">
+            <div class="brand">📦 Shoebox</div>
+            <div class="grp">Library</div>
+            <div class="it">▦ Library</div><div class="it">♥ Favorites</div><div class="it">▤ Albums</div><div class="it">👥 Shared</div><div class="it">🗑 Recently Deleted</div>
+            <div class="grp">More</div>
+            <div class="it on">⇄ Devices</div><div class="it">◔ Storage</div><div class="it">⚙︎ Settings</div>
+          </nav>
+          <div class="main">
+            <header><h2>Devices</h2><span class="grow muted small">Devices that hold this library. Everything stays between them.</span><button class="btn primary">＋ Add a device</button></header>
+
+            <div class="card activity new" data-activity>
+              <div class="headline"><span class="spinner"></span><b data-head></b><span class="grow"></span><button class="btn" data-toggle>Show queue</button></div>
+              <div class="prog"><span data-overall style="width:34%"></span></div>
+              <div class="small muted" data-sub></div>
+              <div class="queue">
+                <div class="counts small muted"><span>Thumbnails <b>0</b></span><span>Previews <b>0</b></span><span>Originals <b data-qn>12</b> waiting</span><span>Sending <b>3</b> to nest</span></div>
+                <div class="qrow"><div class="thumb"></div><div><div class="small">IMG_20261027_181204.jpg <span class="muted">· to nest</span></div><div class="prog"><span data-p1 style="width:62%"></span></div></div><span class="tiny muted mono">4.1 / 6.6 MB</span></div>
+                <div class="qrow"><div class="thumb" style="background:linear-gradient(135deg,#3f5a3a,#a08a5a)"></div><div><div class="small">VID_20261026_093011.mp4 <span class="muted">· to nest</span></div><div class="prog"><span data-p2 style="width:18%"></span></div></div><span class="tiny muted mono">88 / 486 MB</span></div>
+                <div class="qrow"><div class="thumb" style="background:linear-gradient(135deg,#5a3a4a,#3a4a6a)"></div><div><div class="small">IMG_20261026_201544.jpg <span class="muted">· to nest</span></div><div class="prog"><span data-p3 style="width:91%"></span></div></div><span class="tiny muted mono">5.9 / 6.4 MB</span></div>
+              </div>
+            </div>
+
+            <div class="card table">
+              <div class="thead"><span>Device</span><span>Connection</span><span>Keeps</span><span>Right now</span><span></span></div>
+
+              <div class="trow">
+                <div class="who"><div class="avatar" style="background:#2f8f86">M</div><div><div class="t1">MBA <span class="muted">(this device)</span></div><div class="t2">companion · admin</div></div></div>
+                <div class="conn"><span class="pill mute">This device</span></div>
+                <div class="store"><div class="bar"><span class="orig" style="width:8.9%"></span><span class="prev" style="width:2.4%"></span></div><div class="nums"><span class="muted">428 originals · 7.8 GB · previews 2.1 GB</span><b>10.0 GB</b></div></div>
+                <div class="act" data-act-mba></div>
+                <div class="menu-wrap"><button class="kebab" data-menu>⋯</button><div class="menu"><button>Role…</button><button>Rename…</button></div></div>
+              </div>
+
+              <div class="trow">
+                <div class="who"><div class="avatar" style="background:#b06a3b">S</div><div><div class="t1">S25</div><div class="t2">companion</div></div></div>
+                <div class="conn"><span class="pill ok">Same network</span><span class="dot on"></span><span class="tiny muted">8 ms</span></div>
+                <div class="store"><div class="bar"><span class="orig" style="width:97.5%"></span><span class="prev" style="width:2.5%"></span></div><div class="nums"><span class="muted">6,114 originals · 85.4 GB · previews 2.2 GB</span><b>87.6 GB</b></div></div>
+                <div class="act new" data-act-s25></div>
+                <div class="menu-wrap"><button class="kebab" data-menu>⋯</button><div class="menu"><button>Make admin…</button><button>Role…</button><button class="danger">Remove…</button></div></div>
+              </div>
+
+              <div class="trow">
+                <div class="who"><div class="avatar" style="background:#3a9a4e">N</div><div><div class="t1">nest</div><div class="t2">keeper · admin</div></div></div>
+                <div class="conn"><span class="pill ok">Same network</span><span class="dot on"></span><span class="tiny muted">3 ms</span></div>
+                <div class="store"><div class="bar"><span class="orig" data-nest-bar style="width:35.3%"></span><span class="prev" style="width:2.4%"></span></div><div class="nums"><span class="muted"><span data-nest-n>2,574</span> originals · <span data-nest-gb>30.9</span> GB · previews 2.1 GB</span><b data-nest-tot>33.0 GB</b></div></div>
+                <div class="act new" data-act-nest></div>
+                <div class="menu-wrap"><button class="kebab" data-menu>⋯</button><div class="menu"><button>Role…</button><button class="danger">Remove…</button></div></div>
+              </div>
+            </div>
+            <div class="foot">Bars share one scale (the device that keeps most). Orange: originals; grey: previews and thumbnails. As this device last heard; photos outside Shoebox are not counted.</div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- ================= PHONE ================= -->
+    <div>
+      <div class="label">Phone (S25)</div>
+      <div class="phone">
+        <div class="screen" id="phoneScreen">
+          <div class="status"><span>4:16</span><span>▴ ◔ 38</span></div>
+          <div class="pbody">
+            <div class="ptitle"><h2>Devices</h2><button class="btn primary">＋ Add</button></div>
+
+            <div class="card activity new" data-activity>
+              <div class="headline"><span class="spinner"></span><b data-head></b></div>
+              <div class="prog"><span data-overall style="width:34%"></span></div>
+              <div class="small muted" data-sub></div>
+              <div class="queue">
+                <div class="counts small muted"><span>Originals <b data-qn>12</b> waiting</span><span>Sending <b>3</b></span></div>
+                <div class="qrow"><div class="thumb"></div><div><div class="small">IMG_…181204.jpg</div><div class="prog"><span data-p1 style="width:62%"></span></div></div><span class="tiny muted mono">4.1/6.6 MB</span></div>
+                <div class="qrow"><div class="thumb" style="background:linear-gradient(135deg,#3f5a3a,#a08a5a)"></div><div><div class="small">VID_…093011.mp4</div><div class="prog"><span data-p2 style="width:18%"></span></div></div><span class="tiny muted mono">88/486 MB</span></div>
+              </div>
+              <button class="btn" data-toggle style="justify-self:start;padding-left:0">Show queue</button>
+            </div>
+
+            <div class="card plist">
+              <div class="prow" data-sheet="s25">
+                <div class="line1"><div class="avatar" style="background:#b06a3b">S</div><div class="grow"><div class="t1">S25 <span class="muted">(this device)</span></div><div class="t2">companion</div></div><span class="chev">›</span></div>
+                <div class="bar thin"><span class="orig" style="width:97.5%"></span><span class="prev" style="width:2.5%"></span></div>
+                <div class="tiny muted" style="display:flex;justify-content:space-between"><span>6,114 originals · previews 2.2 GB</span><b style="color:var(--ink)">87.6 GB</b></div>
+                <div class="act small new" data-act-s25p></div>
+              </div>
+              <div class="prow" data-sheet="nest">
+                <div class="line1"><div class="avatar" style="background:#3a9a4e">N</div><div class="grow"><div class="t1">nest</div><div class="t2">keeper · admin</div></div><span class="pill ok">Same network</span><span class="dot on"></span><span class="chev">›</span></div>
+                <div class="bar thin"><span class="orig" data-nest-bar style="width:35.3%"></span><span class="prev" style="width:2.4%"></span></div>
+                <div class="tiny muted" style="display:flex;justify-content:space-between"><span><span data-nest-n>2,574</span> originals · previews 2.1 GB</span><b style="color:var(--ink)" data-nest-tot>33.0 GB</b></div>
+                <div class="act small new" data-act-nestp></div>
+              </div>
+              <div class="prow" data-sheet="mba">
+                <div class="line1"><div class="avatar" style="background:#2f8f86">M</div><div class="grow"><div class="t1">MBA</div><div class="t2">companion · admin</div></div><span class="pill ok">Same network</span><span class="dot on"></span><span class="chev">›</span></div>
+                <div class="bar thin"><span class="orig" style="width:8.9%"></span><span class="prev" style="width:2.4%"></span></div>
+                <div class="tiny muted" style="display:flex;justify-content:space-between"><span>428 originals · previews 2.1 GB</span><b style="color:var(--ink)">10.0 GB</b></div>
+              </div>
+            </div>
+            <div class="tiny muted" style="padding:0 4px">Orange: originals; grey: previews. As this phone last heard.</div>
+          </div>
+          <div class="tabs"><div><span>▦</span>Library</div><div><span>▤</span>Albums</div><div><span>👥</span>Shared</div><div class="on"><span>⇄</span>Devices</div></div>
+
+          <div class="sheet-scrim" data-close></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div style="display:flex;gap:12px;align-items:center"><div class="avatar" data-sh-av style="background:#3a9a4e">N</div><div><div style="font-weight:700;font-size:17px" data-sh-name>nest</div><div class="muted small" data-sh-role>keeper · admin</div></div></div>
+            <dl class="kv">
+              <dt>Connection</dt><dd data-sh-conn>Same network · 3 ms</dd>
+              <dt>Originals</dt><dd data-sh-orig>2,574 · 30.9 GB</dd>
+              <dt>Previews and thumbnails</dt><dd data-sh-prev>2.1 GB</dd>
+              <dt>Right now</dt><dd data-sh-now>Getting 3 from S25</dd>
+              <dt>Version</dt><dd>0.1.0</dd>
+            </dl>
+            <div class="acts" data-sh-acts><button class="btn">Make admin…</button><button class="btn">Change role…</button><button class="btn danger">Remove from library…</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><h3>What changes</h3><ul>
+      <li>The Storage list is gone; each device row carries its own bar and numbers, on one shared scale.</li>
+      <li>Make admin / Role / Remove move off the row: a ⋯ menu on desktop, a sheet when you tap a device on the phone. The rows stop being a wall of orange links.</li>
+      <li>A card at the top says what's moving, for how long, and opens into this device's queue. When nothing moves it shrinks to one green line, "Everything is backed up".</li>
+      <li>"Right now" on a row: what that device is getting or sending, and from whom.</li>
+    </ul></div>
+    <div class="note"><h3>Where the numbers come from</h3><ul>
+      <li>Storage per device, connection, latency: <b>exist today</b> (device list, holdings, presence).</li>
+      <li>"Originals waiting" on this device: <b>exists</b> (the fetch queue).</li>
+      <li>Time left: the at-risk rate the Storage screen already estimates with.</li>
+      <li><span class="newtag">New (dashed outline):</span> what's in flight with byte progress, transfer speed, and what this device is <i>sending</i>. The fetcher and the blob server have to start counting these.</li>
+      <li><span class="newtag">New:</span> "nest is getting from S25" on the phone is inferred from nest's holdings rising, not measured on nest.</li>
+    </ul></div>
+    <div class="note"><h3>States</h3><ul>
+      <li><b>Backing up</b>: spinner, overall bar, time left.</li>
+      <li><b>Paused</b>: amber, with the reason ("on mobile data", "battery low", "nest offline") and no bar.</li>
+      <li><b>All done</b>: one green line; the queue is empty and hidden.</li>
+      <li>Light and dark both use the app's own tokens.</li>
+    </ul></div>
+  </div>
+</div>
+
+<script>
+  const state = { s: 'busy', held: 2574, p: [62, 18, 91] };
+  const fmt = (n) => n.toLocaleString('en-US');
+  const TOTAL = 6114;
+  function render() {
+    const left = TOTAL - state.held;
+    const gb = (state.held * 0.012).toFixed(1);
+    document.querySelectorAll('[data-nest-n]').forEach((e) => (e.textContent = fmt(state.held)));
+    document.querySelectorAll('[data-nest-gb]').forEach((e) => (e.textContent = gb));
+    document.querySelectorAll('[data-nest-tot]').forEach((e) => (e.textContent = (state.held * 0.012 + 2.1).toFixed(1) + ' GB'));
+    document.querySelectorAll('[data-nest-bar]').forEach((e) => (e.style.width = ((state.held * 0.012) / 87.6 * 100).toFixed(1) + '%'));
+    const mins = Math.round(left / 44);
+    const eta = mins >= 60 ? `about ${Math.floor(mins / 60)} h ${mins % 60} min` : `about ${mins} min`;
+    document.querySelectorAll('[data-activity]').forEach((card) => {
+      card.classList.toggle('idle', state.s === 'idle');
+      card.classList.toggle('paused', state.s === 'paused');
+      const head = card.querySelector('[data-head]'), sub = card.querySelector('[data-sub]'), bar = card.querySelector('[data-overall]');
+      const toggle = card.querySelector('[data-toggle]');
+      if (state.s === 'busy') {
+        head.textContent = `Backing up ${fmt(left)} originals to nest`;
+        sub.innerHTML = `${fmt(state.held)} of ${fmt(TOTAL)} · ${eta} left · <span class="arrow up">↑</span> 24 MB/s from S25`;
+        bar.parentElement.style.display = ''; bar.style.width = (state.held / TOTAL * 100).toFixed(1) + '%';
+      } else if (state.s === 'paused') {
+        head.textContent = `Paused · ${fmt(left)} originals not on nest yet`;
+        sub.textContent = 'S25 is on mobile data. It carries on when it is back on Wi-Fi (Settings → Backup to change).';
+        bar.parentElement.style.display = 'none';
+      } else {
+        head.textContent = 'Everything is backed up';
+        sub.textContent = 'Every original is on nest. Nothing waiting.';
+        bar.parentElement.style.display = 'none';
+        card.classList.remove('open');
+      }
+      if (toggle) toggle.style.display = state.s === 'idle' ? 'none' : '';
+      if (toggle) toggle.textContent = card.classList.contains('open') ? 'Hide queue' : 'Show queue';
+    });
+    const busy = state.s === 'busy';
+    const s25 = busy ? `<div><span class="arrow up">↑</span> Sending 3 originals to nest · 24 MB/s</div><div class="prog ok"><span style="width:${state.p[0]}%"></span></div>`
+      : state.s === 'paused' ? '<span class="pill warn">Paused: mobile data</span>' : '<span class="muted">Idle</span>';
+    const nest = busy ? `<div><span class="arrow">↓</span> Getting from S25 · ${fmt(left)} left</div><div class="muted tiny">${eta}</div>`
+      : state.s === 'paused' ? `<span class="muted">Waiting for S25 · ${fmt(left)} left</span>` : '<span class="pill ok">Has every original</span>';
+    const mba = busy ? '<span class="muted">Idle · has what it keeps</span>' : '<span class="muted">Idle</span>';
+    document.querySelector('[data-act-s25]').innerHTML = s25;
+    document.querySelector('[data-act-nest]').innerHTML = nest;
+    document.querySelector('[data-act-mba]').innerHTML = mba;
+    document.querySelector('[data-act-s25p]').innerHTML = busy ? `<div style="display:flex;justify-content:space-between"><span><span class="arrow up">↑</span> Sending 3 to nest</span><span class="muted">24 MB/s</span></div><div class="prog ok" style="margin-top:4px"><span style="width:${state.p[0]}%"></span></div>` : state.s === 'paused' ? '<span class="pill warn">Paused: mobile data</span>' : '';
+    document.querySelector('[data-act-nestp]').innerHTML = busy ? `<span class="arrow">↓</span> Getting from S25 · ${fmt(left)} left · ${eta}` : state.s === 'paused' ? `<span class="muted">Waiting · ${fmt(left)} left</span>` : '<span class="pill ok">Has every original</span>';
+    ['p1', 'p2', 'p3'].forEach((k, i) => document.querySelectorAll(`[data-${k}]`).forEach((e) => (e.style.width = state.p[i] + '%')));
+    document.querySelectorAll('[data-qn]').forEach((e) => (e.textContent = busy ? 12 : state.s === 'paused' ? 12 : 0));
+  }
+  setInterval(() => {
+    if (state.s !== 'busy') return;
+    state.p = state.p.map((v, i) => { const n = v + [9, 3, 14][i]; if (n >= 100) { state.held = Math.min(TOTAL, state.held + 1); return 4; } return n; });
+    state.held = Math.min(TOTAL, state.held + 3);
+    if (state.held >= TOTAL) { state.s = 'idle'; segOn('stateSeg', 'idle'); }
+    render();
+  }, 900);
+  function segOn(id, v) { document.querySelectorAll(`#${id} button`).forEach((b) => b.classList.toggle('on', Object.values(b.dataset)[0] === v)); }
+  document.querySelectorAll('#stateSeg button').forEach((b) => b.onclick = () => { state.s = b.dataset.s; if (state.s === 'idle') state.held = TOTAL; else if (state.held >= TOTAL) state.held = 2574; segOn('stateSeg', state.s); render(); });
+  document.querySelectorAll('#themeSeg button').forEach((b) => b.onclick = () => { document.documentElement.dataset.theme = b.dataset.t; segOn('themeSeg', b.dataset.t); });
+  document.querySelectorAll('#markSeg button').forEach((b) => b.onclick = () => { document.body.classList.toggle('marks', b.dataset.m === 'on'); segOn('markSeg', b.dataset.m); });
+  document.querySelectorAll('[data-toggle]').forEach((b) => b.onclick = () => { b.closest('[data-activity]').classList.toggle('open'); render(); });
+  document.querySelectorAll('[data-menu]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); const m = b.nextElementSibling; const was = m.classList.contains('open'); document.querySelectorAll('.menu').forEach((x) => x.classList.remove('open')); m.classList.toggle('open', !was); });
+  document.addEventListener('click', () => document.querySelectorAll('.menu').forEach((x) => x.classList.remove('open')));
+  const sheets = {
+    s25: { av: ['S', '#b06a3b'], name: 'S25 (this device)', role: 'companion', conn: 'This device', orig: '6,114 · 85.4 GB', prev: '2.2 GB', now: () => state.s === 'busy' ? 'Sending 3 to nest · 24 MB/s' : state.s === 'paused' ? 'Paused: mobile data' : 'Idle', acts: ['Make admin…', 'Change role…', 'Leave this library…'] },
+    nest: { av: ['N', '#3a9a4e'], name: 'nest', role: 'keeper · admin', conn: 'Same network · 3 ms', orig: () => `${fmt(state.held)} · ${(state.held * 0.012).toFixed(1)} GB`, prev: '2.1 GB', now: () => state.s === 'busy' ? `Getting from S25 · ${fmt(TOTAL - state.held)} left` : state.s === 'paused' ? 'Waiting for S25' : 'Has every original', acts: ['Change role…', 'Remove from library…'] },
+    mba: { av: ['M', '#2f8f86'], name: 'MBA', role: 'companion · admin', conn: 'Same network · 8 ms', orig: '428 · 7.8 GB', prev: '2.1 GB', now: () => 'Idle', acts: ['Change role…', 'Remove from library…'] },
+  };
+  const scr = document.getElementById('phoneScreen');
+  const val = (v) => (typeof v === 'function' ? v() : v);
+  document.querySelectorAll('[data-sheet]').forEach((r) => r.onclick = () => {
+    const d = sheets[r.dataset.sheet];
+    const q = (k) => scr.querySelector(`[data-sh-${k}]`);
+    q('av').textContent = d.av[0]; q('av').style.background = d.av[1];
+    q('name').textContent = d.name; q('role').textContent = d.role; q('conn').textContent = d.conn;
+    q('orig').textContent = val(d.orig); q('prev').textContent = d.prev; q('now').textContent = d.now();
+    q('acts').innerHTML = d.acts.map((a) => `<button class="btn ${/Remove|Leave/.test(a) ? 'danger' : ''}">${a}</button>`).join('');
+    scr.classList.add('sheet-open');
+  });
+  scr.querySelector('[data-close]').onclick = () => scr.classList.remove('sheet-open');
+  render();
+</script>
+</body>
+</html>

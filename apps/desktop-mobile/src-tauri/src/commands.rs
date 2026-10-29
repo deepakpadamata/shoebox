@@ -77,6 +77,7 @@ pub const COMMANDS: &[&str] = &[
     "watch_folder",
     "export_library",
     "leave_library",
+    "transfers",
     "rename_album",
     "set_poster",
     "backup_status",
@@ -399,6 +400,7 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
         "diagnostics" => out(core.diagnostics().await?),
         "export_library" => out(core.export_library(&arg::<String>(&args, "dest")?).await?),
         "leave_library" => out(json!({ "kept": core.leave_library().await? })),
+        "transfers" => out(core.transfers().await?),
         other => bail!("unknown command `{other}`"),
     }
 }

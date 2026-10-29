@@ -32,13 +32,15 @@ import type { PhotoPage } from '../bindings/PhotoPage';
 import type { PhotoSummary } from '../bindings/PhotoSummary';
 import type { AboutInfo } from '../bindings/AboutInfo';
 import type { UpdateInfo } from '../bindings/UpdateInfo';
+import type { TransferItem } from '../bindings/TransferItem';
+import type { Transfers } from '../bindings/Transfers';
 import type { Settings } from '../bindings/Settings';
 import type { Profile } from '../bindings/Profile';
 
 export type {
   AboutInfo, AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
   AlbumInfo, AppEvent, BackupFolder, BackupPolicy, BackupScope, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, Health, ImportSummary,
-  LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, Settings,
+  LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, Settings, TransferItem, Transfers,
 };
 
 export type BlobKind = 'thumb' | 'preview' | 'original' | 'poster';
@@ -157,6 +159,8 @@ export const api = {
   albumPage: (album: string, cursor: PageCursor | null, limit = 500) => call<PhotoPage>('album_page', { album, cursor, limit }),
   devices: () => call<DeviceInfo[]>('devices'),
   deviceStorage: () => call<DeviceStorageInfo[]>('device_storage'),
+  /** What this device is downloading and sending right now, and what it still has to fetch. */
+  transfers: () => call<Transfers>('transfers'),
   /** `phrase`: the recovery phrase, needed to remove an admin device or when this device is no admin. */
   revokeDevice: (id: string, phrase?: string) => call<{}>('revoke_device', { id, phrase: phrase ?? null }),
   /** `phrase`: the recovery phrase, needed when this device is no admin. */

@@ -176,3 +176,62 @@ async fn a_small_blob_comes_from_the_next_holder_when_the_first_has_not_got_it()
         n.shutdown().await.unwrap();
     }
 }
+
+/// The Devices screen's "right now": a download shows on the fetching node while it runs, the
+/// holder shows what it sends, and both report a speed afterwards.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_fetch_shows_as_a_download_here_and_an_upload_on_the_holder() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, c) = (open(&dir, "a").await, open(&dir, "c").await);
+    let bytes = data(16 * 1024 * 1024, 3);
+    let hash = a
+        .blobs()
+        .add_bytes(bytes.clone(), Protection::Library)
+        .await
+        .unwrap();
+    c.add_peer_addr(a.addr());
+
+    let fetch = {
+        let (c, from) = (c.clone(), a.id());
+        let len = bytes.len() as u64;
+        tokio::spawn(async move {
+            c.fetch_blob_from(&[from], &hash, Some(len), Protection::Library)
+                .await
+        })
+    };
+    let (mut seen_down, mut seen_up) = (false, false);
+    let a_core = shoebox_node::from_iroh_id(&a.id());
+    let c_core = shoebox_node::from_iroh_id(&c.id());
+    let end = Instant::now() + WAIT;
+    while !fetch.is_finished() && Instant::now() < end {
+        let down = c.transfers();
+        if let Some(t) = down.downloads.iter().find(|t| t.hash == hash) {
+            assert_eq!(t.size, Some(bytes.len() as u64));
+            assert_eq!(t.peer, Some(a_core));
+            seen_down = true;
+        }
+        if a.transfers()
+            .uploads
+            .iter()
+            .any(|t| t.hash == hash && t.peer == Some(c_core))
+        {
+            seen_up = true;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    fetch.await.unwrap().unwrap();
+    assert!(seen_down, "the download was listed while it ran");
+    assert!(
+        seen_up,
+        "the holder listed what it was sending, and to whom"
+    );
+    assert!(
+        c.transfers().downloads.is_empty(),
+        "and nothing once it is done"
+    );
+    assert!(c.transfers().download_rate > 0);
+    assert!(a.transfers().upload_rate > 0);
+    for n in [&a, &c] {
+        n.shutdown().await.unwrap();
+    }
+}

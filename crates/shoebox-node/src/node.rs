@@ -449,6 +449,8 @@ struct Inner {
     album_slot: crate::ext::ExtSlot,
     /// Most recent measured round-trip time per peer.
     rtts: Mutex<HashMap<EndpointId, Duration>>,
+    /// Blobs on their way in and out right now.
+    transfers: crate::transfers::Transfers,
 }
 
 /// A running Shoebox node. Cheap to clone; all clones share one runtime.
@@ -559,8 +561,12 @@ impl Node {
                 .spawn(endpoint.clone(), (**blobs.raw()).clone(), gossip.clone())
                 .await
                 .map_err(|e| anyhow!("starting docs: {e}"))?;
+            let transfers = crate::transfers::Transfers::default();
             let router = Router::builder(endpoint.clone())
-                .accept(BLOBS_ALPN, BlobsProtocol::new(blobs.raw(), None))
+                .accept(
+                    BLOBS_ALPN,
+                    BlobsProtocol::new(blobs.raw(), Some(transfers.provider_events())),
+                )
                 .accept(GOSSIP_ALPN, gossip.clone())
                 .accept(DOCS_ALPN, docs.clone())
                 .accept(PING_ALPN, Ping)
@@ -602,6 +608,7 @@ impl Node {
                     recover_slot,
                     album_slot,
                     rtts: Mutex::new(HashMap::new()),
+                    transfers,
                 }),
             })
         }
@@ -727,6 +734,11 @@ impl Node {
     /// Would a (non-pairing) connection with `id` be refused right now?
     pub fn is_refused(&self, id: EndpointId) -> bool {
         self.inner.tracker.refuses(&id, b"")
+    }
+
+    /// What this device is downloading and sending right now, and how fast.
+    pub fn transfers(&self) -> crate::transfers::TransferSnapshot {
+        self.inner.transfers.snapshot()
     }
 
     pub fn events(&self) -> NodeEvents {
@@ -886,6 +898,7 @@ impl Node {
             })
             .await
             .map_err(|e| anyhow!("protecting in-flight download: {e}"))?;
+        let _transfer = self.inner.transfers.start_download(*hash, size, holders[0]);
         let started = Instant::now();
         let mut received: HashMap<EndpointId, u64> = HashMap::new();
         if let Some(size) = size.filter(|s| holders.len() > 1 && *s >= SPLIT_MIN) {
@@ -1001,6 +1014,7 @@ impl Node {
                             let bytes = total.fetch_add(stats.payload_bytes_read, Ordering::Relaxed)
                                 + stats.payload_bytes_read;
                             node.note_activity();
+                            node.inner.transfers.download_progress(hash, peer, bytes);
                             let _ = node.inner.events.send(NodeEvent::BlobProgress {
                                 hash: *hash,
                                 from: peer,
@@ -1059,6 +1073,7 @@ impl Node {
                 DownloadProgressItem::TryProvider { id, .. } => current = id,
                 DownloadProgressItem::Progress(bytes) => {
                     self.note_activity();
+                    self.inner.transfers.download_progress(hash, current, bytes);
                     // Throttle: a large blob reports thousands of chunks; a UI wants a few updates.
                     if bytes >= last_reported + PROGRESS_STEP {
                         last_reported = bytes;

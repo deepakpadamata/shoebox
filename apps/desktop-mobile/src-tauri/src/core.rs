@@ -19,6 +19,7 @@ use shoebox_node::{
     NodeConfig, NodeEvent, PairTicket, PathKind, PresenceConfig, RelaySetting,
 };
 use shoebox_store::{HybridBackend, Library};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -943,36 +944,76 @@ impl AppCore {
 
     // ---------- timeline ----------
 
-    async fn summary(&self, ln: &LibraryNode<Library>, rec: &PhotoRecord) -> Result<PhotoSummary> {
-        let holders = ln.store().holders(&rec.original.hash).await?;
-        let copies = holders
+    /// The grid's view of `recs`. What every photo shares (the copies target, the keepers, which
+    /// blobs are kept, the poster frames) is looked up once, and the blob store is asked about
+    /// many photos at a time: one by one, a phone spent a second per 2,000 photos waiting on it.
+    async fn summaries(
+        &self,
+        ln: &LibraryNode<Library>,
+        recs: &[PhotoRecord],
+    ) -> Result<Vec<PhotoSummary>> {
+        use futures::{StreamExt, TryStreamExt};
+        if recs.is_empty() {
+            return Ok(vec![]);
+        }
+        let target = ln.redundancy_target().await? as usize;
+        let keepers: HashSet<EndpointId> = ln
+            .store()
+            .device_list()
+            .await?
+            .devices
             .iter()
-            .filter(|h| h.kind == BlobKind::Original)
-            .count() as u32;
-        // Safe once enough devices hold it, or once any keeper does.
-        let backed_up = copies >= ln.redundancy_target().await? as u32 || {
-            let list = ln.store().device_list().await?;
-            holders.iter().any(|h| {
-                h.kind == BlobKind::Original
-                    && list
-                        .devices
-                        .iter()
-                        .any(|d| d.device == h.device && d.role == Role::Keeper && !d.revoked)
+            .filter(|d| d.role == Role::Keeper && !d.revoked)
+            .map(|d| d.device)
+            .collect();
+        let blobs = self.node.blobs().clone();
+        let protected = Arc::new(blobs.protected().await?);
+        let posters: HashSet<String> = std::fs::read_dir(self.dir.join("posters"))
+            .map(|dir| {
+                dir.flatten()
+                    .filter_map(|e| e.file_name().into_string().ok())
+                    .collect()
             })
-        };
-        Ok(PhotoSummary {
-            id: rec.id.to_string(),
-            taken_at: rec.taken_at.0 as f64,
-            favorite: rec.favorite.value,
-            is_video: rec.original.mime.starts_with("video/"),
-            copies,
-            backed_up,
-            has_thumb: self.node.blobs().has(&rec.thumb.hash).await?,
-            has_poster: self.poster_path(&rec.id).exists(),
-            has_original: self.node.blobs().kept(&rec.original.hash).await?,
-            width: rec.exif.width,
-            height: rec.exif.height,
-        })
+            .unwrap_or_default();
+        // (thumbnail stored, original kept), many requests in flight. Owned values only: a
+        // borrowing closure here would make every command's future not `Send`.
+        let wanted: Vec<(Blake3Hash, Blake3Hash)> = recs
+            .iter()
+            .map(|r| (r.thumb.hash, r.original.hash))
+            .collect();
+        let stored: Vec<(bool, bool)> = futures::stream::iter(wanted)
+            .map(move |(thumb, original)| {
+                let (blobs, protected) = (blobs.clone(), protected.clone());
+                async move {
+                    let has_thumb = blobs.has(&thumb).await?;
+                    let kept = protected.contains(&original) && blobs.has(&original).await?;
+                    anyhow::Ok((has_thumb, kept))
+                }
+            })
+            .buffered(32)
+            .try_collect()
+            .await?;
+        let mut out = Vec::with_capacity(recs.len());
+        for (rec, (has_thumb, has_original)) in recs.iter().zip(stored) {
+            let holders = ln.store().holders(&rec.original.hash).await?;
+            let originals = || holders.iter().filter(|h| h.kind == BlobKind::Original);
+            let copies = originals().count();
+            out.push(PhotoSummary {
+                id: rec.id.to_string(),
+                taken_at: rec.taken_at.0 as f64,
+                favorite: rec.favorite.value,
+                is_video: rec.original.mime.starts_with("video/"),
+                copies: copies as u32,
+                // Safe once enough devices hold it, or once any keeper does.
+                backed_up: copies >= target || originals().any(|h| keepers.contains(&h.device)),
+                has_thumb,
+                has_poster: posters.contains(&format!("{}.jpg", rec.id)),
+                has_original,
+                width: rec.exif.width,
+                height: rec.exif.height,
+            });
+        }
+        Ok(out)
     }
 
     /// A page of the timeline, newest first.
@@ -991,10 +1032,7 @@ impl AppCore {
             .store()
             .photos_by_time(TimeRange::ALL, Page { after, limit })
             .await?;
-        let mut items = Vec::with_capacity(recs.len());
-        for rec in &recs {
-            items.push(self.summary(&ln, rec).await?);
-        }
+        let items = self.summaries(&ln, &recs).await?;
         let next = (recs.len() == limit)
             .then(|| recs.last())
             .flatten()
@@ -1145,11 +1183,8 @@ impl AppCore {
     /// Recently Deleted, most recently deleted first.
     pub async fn recently_deleted(&self) -> Result<Vec<PhotoSummary>> {
         let ln = self.ln().await?;
-        let mut out = vec![];
-        for rec in ln.recently_deleted().await? {
-            out.push(self.summary(&ln, &rec).await?);
-        }
-        Ok(out)
+        let recs = ln.recently_deleted().await?;
+        self.summaries(&ln, &recs).await
     }
 
     pub async fn import_paths(&self, paths: &[String]) -> Result<ImportSummary> {
@@ -1302,14 +1337,15 @@ impl AppCore {
             .store()
             .album_items(&parse_album(album)?, Page { after, limit })
             .await?;
-        let mut items = vec![];
+        let mut recs = vec![];
         for id in &ids {
             if let Some(rec) = ln.store().photo(id).await? {
                 if rec.deleted_at.value.is_none() {
-                    items.push(self.summary(&ln, &rec).await?);
+                    recs.push(rec);
                 }
             }
         }
+        let items = self.summaries(&ln, &recs).await?;
         let next = (ids.len() == limit)
             .then(|| ids.last())
             .flatten()

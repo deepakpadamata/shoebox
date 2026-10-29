@@ -31,6 +31,8 @@ mod net;
 #[cfg(feature = "loro")]
 mod persist;
 #[cfg(feature = "loro")]
+mod verdicts;
+#[cfg(feature = "loro")]
 mod wire;
 
 #[cfg(feature = "loro")]

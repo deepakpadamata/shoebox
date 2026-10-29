@@ -320,3 +320,112 @@ async fn records_wait_for_their_authors_certificate_and_then_apply() {
     // The certificate arrives; the waiting record is retried and accepted.
     assert!(a.photo(&hash(20)).await.unwrap().is_some());
 }
+
+/// A replica left alone compacts and saves the signatures it checked; reopened, it keeps exactly
+/// what a full check would keep: a demoted author's records go, a damaged verdicts file changes
+/// nothing.
+#[tokio::test]
+async fn a_quiet_replica_compacts_and_its_remembered_signatures_change_nothing_a_restart_keeps() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = KeyPair::from_seed(ROOT_SEED);
+    let net = LoroNetwork::new();
+    let backend = |k: u8, net: &LoroNetwork| {
+        LoroBackend::new(net.clone(), key(k).endpoint_id(), ManualClock::new(1_000))
+            .with_signer(key(k))
+    };
+    let (a, cap) = backend(1, &net)
+        .with_data_dir(dir.path())
+        .create_library(&root.root_public())
+        .await
+        .unwrap();
+    let h = |ms| Hlc {
+        physical_ms: ms,
+        counter: 0,
+        device: key(1).endpoint_id(),
+    };
+    a.apply_device_change(SignedDeviceChange::Admin(issue_admin_cert(
+        &root,
+        cap.library,
+        key(1).endpoint_id(),
+        h(1),
+        None,
+    )))
+    .await
+    .unwrap();
+    let certify = |k: u8, role, ms| {
+        SignedDeviceChange::Device(issue_device_cert(
+            &root,
+            cap.library,
+            key(k).endpoint_id(),
+            role,
+            "d",
+            h(ms),
+            false,
+        ))
+    };
+    for k in [1u8, 2] {
+        a.apply_device_change(certify(k, Role::Keeper, 2))
+            .await
+            .unwrap();
+    }
+    let b = backend(2, &net).open_library(&cap).await.unwrap();
+    b.sync_with(&PeerAddr::id_only(key(1).endpoint_id()))
+        .await
+        .unwrap();
+    for n in 0..1_500 {
+        b.upsert_photo(photo(n, key(2).endpoint_id()))
+            .await
+            .unwrap();
+    }
+    a.sync_with(&PeerAddr::id_only(key(2).endpoint_id()))
+        .await
+        .unwrap();
+    assert_eq!(count(&a).await, 1_500);
+
+    let replica = dir.path().join(hex::encode(cap.library.0));
+    let (_, log) = a.disk_usage();
+    a.compact_if_idle(std::time::Duration::from_secs(3_600));
+    assert_eq!(a.disk_usage().1, log, "not quiet long enough: left alone");
+    a.compact_if_idle(std::time::Duration::ZERO);
+    let (snapshot, log) = a.disk_usage();
+    assert!(snapshot > 0 && log == 0, "compacted");
+    assert!(
+        replica.join("verdicts.bin").exists(),
+        "checked signatures saved"
+    );
+    drop(a);
+
+    let reopen = || async {
+        LoroBackend::new(
+            LoroNetwork::new(),
+            key(1).endpoint_id(),
+            ManualClock::new(2_000),
+        )
+        .with_signer(key(1))
+        .with_data_dir(dir.path())
+        .open_library(&cap)
+        .await
+    };
+    let a = reopen().await.unwrap();
+    assert_eq!(count(&a).await, 1_500, "reopened from the snapshot");
+    drop(a);
+
+    // A damaged file only means checking again.
+    std::fs::write(replica.join("verdicts.bin"), b"damaged").unwrap();
+    let a = reopen().await.unwrap();
+    assert_eq!(count(&a).await, 1_500);
+
+    // Device 2 becomes a viewer. A restart judges every record against the certificates as they
+    // are now, so its photos go, even though their signatures are remembered.
+    a.compact().unwrap();
+    a.apply_device_change(certify(2, Role::Viewer, 3))
+        .await
+        .unwrap();
+    drop(a);
+    let a = reopen().await.unwrap();
+    assert_eq!(
+        count(&a).await,
+        0,
+        "a viewer's records are refused on reopening"
+    );
+}

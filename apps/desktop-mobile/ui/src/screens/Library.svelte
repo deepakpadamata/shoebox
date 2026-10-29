@@ -1,7 +1,7 @@
 <script lang="ts">
   // The timeline (M3-06): photos grouped by day, virtualised so 100k photos scroll smoothly,
   // with multi-select and the actions of mockup 2b.
-  import { onMount, untrack } from 'svelte';
+  import { untrack } from 'svelte';
   import { api, type PageCursor, type PhotoPage, type PhotoSummary } from '../lib/api';
   import { dayLabel, plural } from '../lib/format';
   import { buildLayout, visibleRows } from '../lib/timeline';
@@ -46,8 +46,11 @@
 
   const GAP = 2;
   const HEAD = 44;
-  let items = $state<PhotoSummary[]>([]);
+  // Replaced whole, never changed in place: no need for deep reactivity on thousands of photos.
+  let items = $state.raw<PhotoSummary[]>([]);
   let loaded = $state(false);
+  // Every photo is in `items` (not only the newest, still arriving).
+  let complete = $state(false);
   let width = $state(900);
   let viewport = $state(600);
   let scrollTop = $state(0);
@@ -106,35 +109,83 @@
   const range = $derived(visibleRows(layout, scrollTop, viewport));
   const shown = $derived(layout.rows.slice(range[0], range[1]));
 
+  // The first time, the newest photos show as soon as a screenful has arrived and the rest
+  // follows; later reloads keep the grid as it is until the new list is whole.
+  const FIRST_PAGE = 120;
+  const PAGE = 2000;
+  // One load at a time: a change during a load asks for one more pass after it.
+  let loading: Promise<void> | null = null;
+  let again = false;
+  // Bumped when the source changes: a load for the old one stops and the next pass starts over.
+  let generation = 0;
+
+  function reload() {
+    if (loading) {
+      again = true;
+      return;
+    }
+    loading = (async () => {
+      try {
+        do {
+          again = false;
+          await load();
+        } while (again);
+      } catch (e) {
+        fail(e);
+      } finally {
+        loading = null;
+      }
+    })();
+  }
+
   async function load() {
+    const gen = generation;
+    const keep = (all: PhotoSummary[]) => (source === 'favorites' ? all.filter((p) => p.favorite) : all.slice());
+    const progressive = !loaded;
     const out: PhotoSummary[] = [];
     let cursor: PageCursor | null = null;
-    for (;;) {
-      const page: PhotoPage = source === 'album' && album ? await api.albumPage(album, cursor, 2000) : await api.libraryPage(cursor, 2000);
+    for (let size = progressive ? FIRST_PAGE : PAGE; ; size = PAGE) {
+      const page: PhotoPage = source === 'album' && album ? await api.albumPage(album, cursor, size) : await api.libraryPage(cursor, size);
+      if (gen !== generation) return;
       out.push(...page.items);
       if (!page.next) break;
       cursor = page.next;
+      if (progressive) {
+        items = keep(out);
+        loaded = true;
+      }
     }
-    items = source === 'favorites' ? out.filter((p) => p.favorite) : out;
-    selected = selected.filter((id) => items.some((p) => p.id === id));
+    items = keep(out);
     loaded = true;
+    complete = true;
+    const ids = new Set(items.map((p) => p.id));
+    selected = selected.filter((id) => ids.has(id));
   }
 
-  onMount(() => {
-    load().catch(fail);
-  });
-
-  // Reload when the library changes (debounced), when the source changes.
+  // Reload when the library changes (debounced); start over when the source changes.
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let showing = '';
   $effect(() => {
     app.version;
-    source;
-    album;
+    const key = `${source}/${album ?? ''}`;
     untrack(() => {
       clearTimeout(timer);
-      timer = setTimeout(() => load().catch(fail), loaded ? 350 : 0);
+      if (key !== showing) {
+        showing = key;
+        generation++;
+        loaded = false;
+        complete = false;
+        reload();
+      } else {
+        timer = setTimeout(reload, 350);
+      }
     });
   });
+
+  async function selectAll() {
+    while (!complete && loading) await loading;
+    selected = items.map((p) => p.id);
+  }
 
   function click(i: number, e: MouseEvent) {
     const id = items[i].id;
@@ -166,7 +217,7 @@
     if ((e.key === 'Delete' || e.key === 'Backspace') && selecting && !(e.target instanceof HTMLInputElement)) removeSelected();
     if ((e.metaKey || e.ctrlKey) && e.key === 'a' && !(e.target instanceof HTMLInputElement)) {
       e.preventDefault();
-      selected = items.map((p) => p.id);
+      selectAll();
     }
   }
 
@@ -246,7 +297,7 @@
     use:pinch={{ onEnd: setDensity }}
     use:pullRefresh={{ onRefresh: refreshEverything }}
     use:longPressDrag={{ onStart: selectAt, onOver: selectAt, onEnd: () => {} }}>
-    {#if !loaded}
+    {#if !loaded || (items.length === 0 && !complete)}
       <div class="empty">Loading…</div>
     {:else if items.length === 0}
       <div class="empty">
@@ -282,6 +333,7 @@
           {/if}
         {/each}
       </div>
+      {#if !complete}<div class="more muted small" role="status">Loading older photos…</div>{/if}
     {/if}
   </div>
 </div>
@@ -316,6 +368,7 @@
   .selbar { display: flex; gap: 8px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--accent-soft); flex-wrap: wrap; }
   .scroller { flex: 1; overflow-y: auto; position: relative; min-height: 0; touch-action: pan-y; }
   .canvas { position: relative; }
+  .more { padding: 14px 18px 24px; text-align: center; }
   .head { position: absolute; left: 0; right: 0; display: flex; justify-content: space-between; align-items: baseline; padding: 20px 18px 6px; }
   .head b { font-size: 15px; }
   .head span { font-size: 12px; color: var(--ink-3); }

@@ -23,6 +23,7 @@ use iroh_blobs::store::fs::FsStore;
 use iroh_blobs::{BlobFormat, Hash, HashAndFormat};
 use shoebox_core::ids::Blake3Hash;
 use shoebox_core::model::AlbumId;
+use std::collections::HashSet;
 use std::ops::Range;
 use std::path::Path;
 
@@ -148,6 +149,24 @@ impl BlobStore {
     /// waiting for collection (a released gallery reference may not be readable any more).
     pub async fn kept(&self, hash: &Blake3Hash) -> Result<bool> {
         Ok(self.has(hash).await? && !self.protections(hash).await?.is_empty())
+    }
+
+    /// Every blob that something keeps (any [`Protection`]), from one listing of the tags: what
+    /// [`BlobStore::kept`] asks per blob, for many blobs at once.
+    pub async fn protected(&self) -> Result<HashSet<Blake3Hash>> {
+        let mut out = HashSet::new();
+        let mut tags = self.store.tags().list().await?;
+        while let Some(tag) = tags.next().await {
+            let tag = tag?;
+            let name = tag.name.as_ref();
+            if [&b"lib/"[..], b"pin/", b"place/", b"album/"]
+                .iter()
+                .any(|p| name.starts_with(p))
+            {
+                out.insert(core_hash(tag.hash));
+            }
+        }
+        Ok(out)
     }
 
     pub async fn has(&self, hash: &Blake3Hash) -> Result<bool> {

@@ -1,6 +1,7 @@
 use crate::auth;
 use crate::backend::Transport;
 use crate::persist::Persist;
+use crate::verdicts::{self, Verdicts};
 use async_trait::async_trait;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::stream::BoxStream;
@@ -21,6 +22,11 @@ use tracing::{debug, warn};
 const ENTRIES: &str = "entries";
 /// Records from authors whose certificate has not arrived yet wait here (bounded).
 const MAX_PENDING: usize = 50_000;
+/// How long a replica must go without writes before it compacts (see
+/// [`LibraryShared::compact_when_idle`]): a sync in progress is left alone.
+const IDLE_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
+/// Save the signature verdicts once this many are new, even without compacting.
+const SAVE_VERDICTS_AFTER: usize = 256;
 
 fn be(e: impl std::fmt::Display) -> StoreError {
     StoreError::Backend(e.to_string())
@@ -45,6 +51,8 @@ pub(crate) struct Inner {
     logged: VersionVector,
     /// Signed records whose author is not (yet) known to be certified: `key → sealed value`.
     pending: HashMap<String, Vec<u8>>,
+    /// Signatures already checked, kept across restarts next to the snapshot.
+    verdicts: Verdicts,
 }
 
 pub(crate) struct LibraryShared {
@@ -119,6 +127,7 @@ impl Inner {
             persist: None,
             logged: VersionVector::default(),
             pending: HashMap::new(),
+            verdicts: Verdicts::default(),
         };
         if let Some(base) = base_dir {
             let dir = base.join(hex::encode(library.0));
@@ -134,6 +143,7 @@ impl Inner {
             }
             inner.logged = inner.doc.oplog_vv();
             inner.persist = Some(persist);
+            inner.verdicts = Verdicts::load(&dir, library);
             inner.fold_all();
         }
         Ok(inner)
@@ -218,13 +228,15 @@ impl LibraryShared {
             subs: Mutex::new(vec![]),
         });
         if has_log {
-            // Flush the update log periodically (see `Persist::append`); ends with the library.
+            // Flush the update log periodically (see `Persist::append`) and compact once quiet;
+            // ends with the library.
             let weak = Arc::downgrade(&shared);
             std::thread::spawn(move || {
                 while let Some(shared) = weak.upgrade() {
                     if let Some(p) = shared.inner.lock().unwrap().persist.as_mut() {
                         let _ = p.flush();
                     }
+                    shared.compact_when_idle(IDLE_AFTER);
                     drop(shared);
                     std::thread::sleep(crate::persist::FLUSH_INTERVAL);
                 }
@@ -279,6 +291,67 @@ impl LibraryShared {
         }
         self.emit(vec![Change::DeviceListChanged]);
         Ok(old)
+    }
+
+    /// Once nothing has been written for `idle_after`: compact when the log is worth it, and
+    /// save the signature verdicts when enough are new. Exporting needs the lock; writing the
+    /// files does not, so a sync or a screen reading the library waits only for the export.
+    pub(crate) fn compact_when_idle(&self, idle_after: std::time::Duration) {
+        let (library, dir, snapshot, verdicts) = {
+            let mut inner = self.inner.lock().unwrap();
+            let Some(p) = &inner.persist else { return };
+            if p.idle_for() < idle_after {
+                return;
+            }
+            let (dir, log_len) = (p.dir().to_path_buf(), p.log_len());
+            let compact = log_len >= crate::persist::COMPACT_IDLE_MIN_LOG;
+            if !compact && inner.verdicts.unsaved() < SAVE_VERDICTS_AFTER {
+                return;
+            }
+            let snapshot = if compact {
+                match inner.doc.export(ExportMode::Snapshot) {
+                    Ok(s) => Some((s, log_len)),
+                    Err(e) => {
+                        warn!("could not export a snapshot: {e}");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            let verdicts = inner.verdicts_for_disk();
+            inner.verdicts.mark_saved();
+            (inner.library, dir, snapshot, verdicts)
+        };
+        if let Err(e) = verdicts::write(&dir, &verdicts) {
+            warn!("could not save signature verdicts: {e}");
+        }
+        let Some((snapshot, log_len)) = snapshot else {
+            return;
+        };
+        let tmp = match crate::persist::write_temp(&dir, "snapshot.idle.tmp", &snapshot) {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("compaction failed: {e}");
+                return;
+            }
+        };
+        let mut inner = self.inner.lock().unwrap();
+        // A rotation in the meantime replaced the replica (and removes this directory).
+        let installed = inner.library == library
+            && match inner.persist.as_mut() {
+                Some(p) => p
+                    .install_snapshot(&tmp, snapshot.len() as u64, log_len)
+                    .unwrap_or_else(|e| {
+                        warn!("compaction failed: {e}");
+                        false
+                    }),
+                None => false,
+            };
+        if !installed {
+            // Written to while exporting: the next quiet moment tries again.
+            let _ = std::fs::remove_file(&tmp);
+        }
     }
 
     pub(crate) fn device_of(&self) -> EndpointId {
@@ -414,12 +487,36 @@ impl Inner {
             Err(e) => warn!("could not export updates: {e}"),
         }
         if persist.should_compact() {
-            if let Ok(snapshot) = self.doc.export(ExportMode::Snapshot) {
-                if let Err(e) = persist.compact(&snapshot) {
-                    warn!("compaction failed: {e}");
-                }
+            if let Err(e) = self.compact_now() {
+                warn!("compaction failed: {e}");
             }
         }
+    }
+
+    /// Write a fresh snapshot, empty the log and save the signature verdicts, all under the lock
+    /// (see [`LibraryShared::compact_when_idle`] for the usual way, which writes off the lock).
+    fn compact_now(&mut self) -> Result<()> {
+        let snapshot = self.doc.export(ExportMode::Snapshot).map_err(be)?;
+        let verdicts = self.verdicts_for_disk();
+        if let Some(p) = &mut self.persist {
+            p.compact(&snapshot).map_err(be)?;
+            verdicts::write(p.dir(), &verdicts).map_err(be)?;
+            self.verdicts.mark_saved();
+        }
+        Ok(())
+    }
+
+    /// The verdicts file, keeping only verdicts for values still in the document.
+    fn verdicts_for_disk(&mut self) -> Vec<u8> {
+        let map = self.doc.get_map(ENTRIES);
+        let mut current = std::collections::HashSet::new();
+        map.for_each(|k, v| {
+            if let loro::ValueOrContainer::Value(LoroValue::Binary(b)) = v {
+                current.insert(verdicts::digest(k, &b));
+            }
+        });
+        self.verdicts.retain(&current);
+        self.verdicts.encode(self.library)
     }
 
     fn import(&mut self, bytes: &[u8]) -> Result<Vec<Change>> {
@@ -469,6 +566,7 @@ impl Inner {
                     &self.state,
                     self.library,
                     self.signer.is_some(),
+                    &self.verdicts,
                     &key,
                     &value,
                 );
@@ -479,12 +577,17 @@ impl Inner {
             .into_iter()
             .filter_map(|k| value_of(&k).map(|v| (k, v)))
             .collect();
-        let (state, library, strict) = (&self.state, self.library, self.signer.is_some());
+        let (state, library, strict, verdicts) = (
+            &self.state,
+            self.library,
+            self.signer.is_some(),
+            &self.verdicts,
+        );
         let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
         let judged: Vec<Judged> = if batch.len() < 2_000 || threads < 2 {
             batch
                 .iter()
-                .map(|(k, v)| judge(state, library, strict, k, v))
+                .map(|(k, v)| judge(state, library, strict, verdicts, k, v))
                 .collect()
         } else {
             let chunk = batch.len().div_ceil(threads);
@@ -494,7 +597,7 @@ impl Inner {
                     .map(|part| {
                         scope.spawn(move || {
                             part.iter()
-                                .map(|(k, v)| judge(state, library, strict, k, v))
+                                .map(|(k, v)| judge(state, library, strict, verdicts, k, v))
                                 .collect::<Vec<Judged>>()
                         })
                     })
@@ -513,6 +616,9 @@ impl Inner {
 
     /// Merge one judged record into the state (or park / drop it).
     fn admit(&mut self, key: &str, value: &[u8], judged: Judged, changes: &mut Vec<Change>) {
+        if let Some((digest, author)) = judged.checked {
+            self.verdicts.insert(digest, author);
+        }
         match judged.verdict {
             Verdict::Accept => {
                 if let Some(entry) = judged.entry {
@@ -547,6 +653,7 @@ impl Inner {
                 &self.state,
                 self.library,
                 self.signer.is_some(),
+                &self.verdicts,
                 &key,
                 &value,
             );
@@ -563,12 +670,15 @@ impl Inner {
 struct Judged {
     verdict: Verdict,
     entry: Option<StateEntry>,
+    /// A signature this judging checked (and found valid): remember it.
+    checked: Option<(verdicts::Digest, EndpointId)>,
 }
 
 fn rejected(why: &'static str) -> Judged {
     Judged {
         verdict: Verdict::Reject(why),
         entry: None,
+        checked: None,
     }
 }
 
@@ -578,6 +688,7 @@ fn judge(
     state: &LibraryState,
     library: LibraryId,
     strict: bool,
+    verdicts: &Verdicts,
     key: &str,
     value: &[u8],
 ) -> Judged {
@@ -590,13 +701,14 @@ fn judge(
     let Ok(entry) = decode_library_entry(record_key, opened.payload) else {
         return rejected("undecodable record");
     };
-    let accept = |entry| Judged {
+    let accept = |entry, checked| Judged {
         verdict: Verdict::Accept,
         entry: Some(entry),
+        checked,
     };
     // Certificates are judged by the certificate chain itself, whoever carries them.
     if matches!(entry, StateEntry::Device(_) | StateEntry::Admin(_)) {
-        return accept(entry);
+        return accept(entry, None);
     }
     let Ok(prefix_bytes) = hex::decode(prefix) else {
         return rejected("malformed author");
@@ -606,7 +718,7 @@ fn judge(
         return if strict && state.is_armed() {
             rejected("unsigned record in a library with certified devices")
         } else {
-            accept(entry)
+            accept(entry, None)
         };
     }
     let candidates = state.certified_with_prefix(&prefix_bytes);
@@ -614,26 +726,41 @@ fn judge(
         return Judged {
             verdict: Verdict::Pending,
             entry: None,
+            checked: None,
         };
     }
-    let Some((author, role)) = candidates
-        .into_iter()
-        .find(|(id, _)| auth::verify(&id.0, library, key, &opened))
-    else {
-        return rejected("bad signature");
+    // A signature checked before (see `verdicts`) is not checked again; who signed it must still
+    // be a certified device, and the rules below still apply as they are now.
+    let digest = verdicts::digest(key, value);
+    let known = verdicts
+        .author(&digest)
+        .and_then(|a| candidates.iter().find(|(id, _)| *id == a).copied());
+    let (author, role, checked) = match known {
+        Some((author, role)) => (author, role, None),
+        None => {
+            let Some((author, role)) = candidates
+                .into_iter()
+                .find(|(id, _)| auth::verify(&id.0, library, key, &opened))
+            else {
+                return rejected("bad signature");
+            };
+            (author, role, Some((digest, author)))
+        }
     };
-    match &entry {
+    let mut judged = match &entry {
         // A device may only publish its own holdings.
         StateEntry::Holding { device, .. } => {
             if *device == author {
-                accept(entry)
+                accept(entry, None)
             } else {
                 rejected("holdings of another device")
             }
         }
         _ if role == Role::Viewer => rejected("a viewer cannot publish library records"),
-        _ => accept(entry),
-    }
+        _ => accept(entry, None),
+    };
+    judged.checked = checked;
+    judged
 }
 
 /// A personal library replica on a Loro document.
@@ -712,14 +839,17 @@ impl LoroLibrary {
         self.shared.import_bytes(bytes)
     }
 
+    /// What the background thread does once the replica has been quiet for `idle_after`
+    /// (normally ten seconds): for tests.
+    #[cfg(feature = "testing")]
+    #[doc(hidden)]
+    pub fn compact_if_idle(&self, idle_after: std::time::Duration) {
+        self.shared.compact_when_idle(idle_after);
+    }
+
     /// Write a fresh snapshot now and empty the update log (normally automatic).
     pub fn compact(&self) -> Result<()> {
-        let mut inner = self.shared.inner.lock().unwrap();
-        let snapshot = inner.doc.export(ExportMode::Snapshot).map_err(be)?;
-        if let Some(p) = &mut inner.persist {
-            p.compact(&snapshot).map_err(be)?;
-        }
-        Ok(())
+        self.shared.inner.lock().unwrap().compact_now()
     }
 
     /// Bytes on disk: `(snapshot, update log)`; `(0, 0)` for a memory-only replica.
@@ -920,5 +1050,77 @@ mod tests {
             before,
             "the right epoch imports"
         );
+    }
+
+    /// A remembered verdict skips only the signature check: who signed must still be certified,
+    /// and the rules about roles still apply as the certificates are now.
+    #[test]
+    fn remembered_signatures_skip_only_the_cryptography() {
+        use shoebox_core::entry_codec::library_key;
+        use shoebox_core::hlc::Hlc;
+        use shoebox_core::identity::issue_device_cert;
+
+        let root = KeyPair::from_seed([42; 32]);
+        let lib = LibraryId([5; 16]);
+        let (author, other) = (KeyPair::from_seed([1; 32]), KeyPair::from_seed([9; 32]));
+        let hlc = |ms| Hlc {
+            physical_ms: ms,
+            counter: 0,
+            device: author.endpoint_id(),
+        };
+        let certify = |state: &mut LibraryState, role, ms| {
+            let cert =
+                issue_device_cert(&root, lib, author.endpoint_id(), role, "a", hlc(ms), false);
+            state.apply_entry(&StateEntry::Device(cert));
+        };
+        let mut state = LibraryState::with_root(EndpointId([3; 32]), root.root_public(), lib);
+        certify(&mut state, Role::Keeper, 1);
+
+        let entry = StateEntry::Setting {
+            key: "k".into(),
+            value: vec![1],
+            hlc: hlc(2),
+        };
+        let key = format!(
+            "{}/{}",
+            author_prefix(&author.endpoint_id()),
+            library_key(&entry)
+        );
+        let payload = encode_library_entry(&entry);
+        let good = auth::seal(Some(&author), lib, &key, &payload);
+        // Signed by a key that is not the author's: only a remembered verdict could let it in.
+        let forged = auth::seal(Some(&other), lib, &key, &payload);
+        let accepted = |j: &Judged| matches!(j.verdict, Verdict::Accept);
+
+        let none = Verdicts::default();
+        let j = judge(&state, lib, true, &none, &key, &good);
+        assert!(accepted(&j));
+        let (digest, signer) = j.checked.expect("a checked signature is reported");
+        assert_eq!(
+            (digest, signer),
+            (verdicts::digest(&key, &good), author.endpoint_id())
+        );
+        assert!(!accepted(&judge(&state, lib, true, &none, &key, &forged)));
+
+        let mut known = Verdicts::default();
+        known.insert(verdicts::digest(&key, &forged), author.endpoint_id());
+        let j = judge(&state, lib, true, &known, &key, &forged);
+        assert!(
+            accepted(&j),
+            "the remembered verdict stands in for the check"
+        );
+        assert!(j.checked.is_none(), "and nothing new was checked");
+
+        // Remembered for a device that is not certified: checked again (and refused).
+        let mut stranger = Verdicts::default();
+        stranger.insert(verdicts::digest(&key, &forged), other.endpoint_id());
+        assert!(!accepted(&judge(
+            &state, lib, true, &stranger, &key, &forged
+        )));
+
+        // The author is now a viewer: refused, remembered signature or not.
+        certify(&mut state, Role::Viewer, 3);
+        assert!(!accepted(&judge(&state, lib, true, &known, &key, &forged)));
+        assert!(!accepted(&judge(&state, lib, true, &none, &key, &good)));
     }
 }

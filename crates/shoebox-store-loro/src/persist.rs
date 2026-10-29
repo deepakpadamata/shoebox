@@ -6,7 +6,8 @@
 //!   tail from a crash is truncated away).
 //! * Compaction writes a fresh full snapshot to a temp file, renames it over the old one and
 //!   truncates the log. A crash between those two steps just replays updates the snapshot
-//!   already contains, which Loro ignores.
+//!   already contains, which Loro ignores. It happens once the replica has been quiet for a while
+//!   (see `LibraryShared::compact_when_idle`), or at once when the log grows very large.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -14,8 +15,11 @@ use std::path::{Path, PathBuf};
 
 const SNAPSHOT: &str = "snapshot.loro";
 const LOG: &str = "updates.log";
-/// Compact when the log exceeds this and is bigger than the snapshot.
+/// Compact at once (whatever is going on) when the log exceeds this and is bigger than the snapshot.
 const COMPACT_MIN_LOG: u64 = 8 * 1024 * 1024;
+/// Compact once quiet when the log has at least this much: replaying it is what slows opening
+/// (about a second for 4 MB on a phone), writing a snapshot costs far less than that.
+pub(crate) const COMPACT_IDLE_MIN_LOG: u64 = 256 * 1024;
 /// Longest a logged update may wait for its `fsync`.
 pub(crate) const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
 
@@ -30,6 +34,8 @@ pub(crate) struct Persist {
     /// Bytes were appended since the last `fsync`.
     unsynced: bool,
     last_sync: std::time::Instant,
+    /// When an update was last appended (or the store opened).
+    last_append: std::time::Instant,
 }
 
 fn frame_sum(bytes: &[u8]) -> [u8; 8] {
@@ -80,6 +86,7 @@ impl Persist {
                 snapshot_len,
                 unsynced: false,
                 last_sync: std::time::Instant::now(),
+                last_append: std::time::Instant::now(),
             },
             snapshot,
             updates,
@@ -94,6 +101,7 @@ impl Persist {
         self.log.write_all(&frame)?;
         self.log_len += frame.len() as u64;
         self.unsynced = true;
+        self.last_append = std::time::Instant::now();
         // Group commit: a burst of writes shares one fsync. The library's flusher thread syncs
         // what is left within `FLUSH_INTERVAL`, so a crash loses at most that much local work.
         if self.last_sync.elapsed() >= FLUSH_INTERVAL {
@@ -116,15 +124,37 @@ impl Persist {
         self.log_len > COMPACT_MIN_LOG && self.log_len > self.snapshot_len
     }
 
+    /// Time since the last append.
+    pub(crate) fn idle_for(&self) -> std::time::Duration {
+        self.last_append.elapsed()
+    }
+
+    pub(crate) fn log_len(&self) -> u64 {
+        self.log_len
+    }
+
     /// Replace the snapshot with `snapshot` (a full export of the document) and empty the log.
     pub(crate) fn compact(&mut self, snapshot: &[u8]) -> io::Result<()> {
-        let tmp = self.dir.join("snapshot.tmp");
-        {
-            let mut f = File::create(&tmp)?;
-            f.write_all(snapshot)?;
-            f.sync_all()?;
+        let tmp = write_temp(&self.dir, "snapshot.tmp", snapshot)?;
+        let log_len = self.log_len;
+        self.install_snapshot(&tmp, snapshot.len() as u64, log_len)?;
+        Ok(())
+    }
+
+    /// Make the snapshot written to `tmp` (see [`write_temp`]) the current one and empty the log,
+    /// if the log is still `log_len` long: the snapshot was exported when it was, so it holds
+    /// everything logged up to then and nothing after. Otherwise leave everything as it is
+    /// (`false`); the caller removes `tmp`.
+    pub(crate) fn install_snapshot(
+        &mut self,
+        tmp: &Path,
+        snapshot_len: u64,
+        log_len: u64,
+    ) -> io::Result<bool> {
+        if self.log_len != log_len {
+            return Ok(false);
         }
-        std::fs::rename(&tmp, self.dir.join(SNAPSHOT))?;
+        std::fs::rename(tmp, self.dir.join(SNAPSHOT))?;
         if let Ok(d) = File::open(&self.dir) {
             let _ = d.sync_all();
         }
@@ -132,13 +162,26 @@ impl Persist {
         self.log.sync_all()?;
         self.unsynced = false;
         self.log_len = 0;
-        self.snapshot_len = snapshot.len() as u64;
-        Ok(())
+        self.snapshot_len = snapshot_len;
+        Ok(true)
+    }
+
+    pub(crate) fn dir(&self) -> &Path {
+        &self.dir
     }
 
     pub(crate) fn sizes(&self) -> (u64, u64) {
         (self.snapshot_len, self.log_len)
     }
+}
+
+/// Write `bytes` durably to `dir/name`, ahead of renaming it into place.
+pub(crate) fn write_temp(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<PathBuf> {
+    let tmp = dir.join(name);
+    let mut f = File::create(&tmp)?;
+    f.write_all(bytes)?;
+    f.sync_all()?;
+    Ok(tmp)
 }
 
 impl Drop for Persist {

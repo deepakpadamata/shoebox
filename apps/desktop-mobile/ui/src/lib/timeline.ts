@@ -87,3 +87,35 @@ export function offsetOfDay(layout: Layout, key: string): number {
   }
   return best;
 }
+
+/** The day shown at the scroll offset `y`: that of the last day heading at or above it. */
+export function dayAt(layout: Layout, y: number): string | null {
+  let day: string | null = null;
+  for (const r of layout.rows) {
+    if (r.top > y) break;
+    if (r.type === 'head') day = r.day;
+  }
+  return day ?? (layout.rows[0]?.type === 'head' ? layout.rows[0].day : null);
+}
+
+export interface DateMark {
+  /** Scroll offset of the first heading of the month. */
+  top: number;
+  year: number;
+  /** 1–12. */
+  month: number;
+}
+
+/** One mark per month present in the timeline, newest first, for the date scroller. */
+export function dateMarks(layout: Layout): DateMark[] {
+  const out: DateMark[] = [];
+  let last = '';
+  for (const r of layout.rows) {
+    if (r.type !== 'head') continue;
+    const ym = r.day.slice(0, 7);
+    if (ym === last) continue;
+    last = ym;
+    out.push({ top: r.top, year: Number(ym.slice(0, 4)), month: Number(ym.slice(5, 7)) });
+  }
+  return out;
+}

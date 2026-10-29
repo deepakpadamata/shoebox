@@ -12,6 +12,7 @@
   import ProgressBar from '../components/ProgressBar.svelte';
   import { go } from '../lib/route.svelte';
   import Tile from '../components/Tile.svelte';
+  import DateRail from '../components/DateRail.svelte';
   import Button from '../components/Button.svelte';
   import Sheet from '../components/Sheet.svelte';
   import Viewer from './Viewer.svelte';
@@ -108,6 +109,8 @@
   const layout = $derived(buildLayout(items, { width, minTile, gap: GAP, headHeight: HEAD }));
   const range = $derived(visibleRows(layout, scrollTop, viewport));
   const shown = $derived(layout.rows.slice(range[0], range[1]));
+  // The date scroller, once there is more than a couple of screens to scroll through.
+  const showRail = $derived(loaded && items.length > 0 && layout.height > viewport * 2);
 
   // The first time, the newest photos show as soon as a screenful has arrived and the rest
   // follows; later reloads keep the grid as it is until the new list is whole.
@@ -292,7 +295,8 @@
     </div>
   {/if}
 
-  <div class="scroller" bind:this={scroller} bind:clientWidth={width} bind:clientHeight={viewport}
+  <div class="body">
+  <div class="scroller" id="timeline" class:railed={showRail} bind:this={scroller} bind:clientWidth={width} bind:clientHeight={viewport}
     onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}
     use:pinch={{ onEnd: setDensity }}
     use:pullRefresh={{ onRefresh: refreshEverything }}
@@ -336,6 +340,10 @@
       {#if !complete}<div class="more muted small" role="status">Loading older photos…</div>{/if}
     {/if}
   </div>
+  {#if showRail}
+    <DateRail {layout} {scrollTop} {viewport} onseek={(top) => { if (scroller) scroller.scrollTop = top; }} />
+  {/if}
+  </div>
 </div>
 
 {#if viewing !== null && items[viewing]}
@@ -366,7 +374,11 @@
   .wrap { height: 100%; display: flex; flex-direction: column; min-height: 0; }
   .sharebar { display: flex; gap: 8px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line); }
   .selbar { display: flex; gap: 8px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--accent-soft); flex-wrap: wrap; }
+  .body { flex: 1; position: relative; min-height: 0; display: flex; flex-direction: column; }
   .scroller { flex: 1; overflow-y: auto; position: relative; min-height: 0; touch-action: pan-y; }
+  .scroller.railed { scrollbar-width: none; }
+  .scroller.railed::-webkit-scrollbar { display: none; }
+  .scroller.railed .head { padding-right: 30px; }
   .canvas { position: relative; }
   .more { padding: 14px 18px 24px; text-align: center; }
   .head { position: absolute; left: 0; right: 0; display: flex; justify-content: space-between; align-items: baseline; padding: 20px 18px 6px; }

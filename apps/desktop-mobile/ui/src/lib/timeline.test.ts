@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PhotoSummary } from './api';
-import { buildLayout, offsetOfDay, visibleRows } from './timeline';
+import { buildLayout, dateMarks, dayAt, offsetOfDay, visibleRows } from './timeline';
 
 function photo(i: number, day: number): PhotoSummary {
   return {
@@ -60,5 +60,20 @@ describe('timeline layout', () => {
     const l = buildLayout(items, opts);
     const heads = l.rows.filter((r) => r.type === 'head');
     expect(offsetOfDay(l, '2024-05-09')).toBe(heads[1].top);
+  });
+
+  it('finds the day at an offset and one mark per month', () => {
+    const at = (i: number, y: number, m: number, d: number): PhotoSummary => ({ ...photo(i, d), taken_at: new Date(y, m - 1, d, 12).getTime() });
+    const items = [at(0, 2025, 3, 2), at(1, 2025, 3, 1), at(2, 2025, 1, 20), at(3, 2024, 12, 5)];
+    const l = buildLayout(items, opts);
+    const heads = l.rows.filter((r) => r.type === 'head');
+    expect(dayAt(l, 0)).toBe('2025-03-02');
+    expect(dayAt(l, heads[1].top + 1)).toBe('2025-03-01');
+    expect(dayAt(l, l.height)).toBe('2024-12-05');
+    expect(dateMarks(l)).toEqual([
+      { top: heads[0].top, year: 2025, month: 3 },
+      { top: heads[2].top, year: 2025, month: 1 },
+      { top: heads[3].top, year: 2024, month: 12 },
+    ]);
   });
 });

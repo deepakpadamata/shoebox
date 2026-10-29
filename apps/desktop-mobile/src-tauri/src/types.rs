@@ -257,6 +257,42 @@ ts_type! {
         pub charging_only: bool,
         /// Pause below this battery level unless charging.
         pub min_battery: u8,
+        /// Which gallery folders are backed up.
+        #[serde(default)]
+        pub scope: BackupScope,
+    }
+}
+
+/// Which gallery folders backup takes. A photo already in the library keeps following its edits
+/// and deletions whatever the scope. (Written out: `ts_type!` puts attributes before its derive.)
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "folders")]
+pub enum BackupScope {
+    /// What the camera takes: `DCIM`, without its screen-capture folders. The default.
+    #[default]
+    Camera,
+    /// Every folder, new ones included.
+    All,
+    /// Exactly these folders ([`BackupFolder::path`]).
+    Folders(Vec<String>),
+}
+
+ts_type! {
+    /// A gallery folder with photos or videos in it, for choosing what to back up.
+    pub struct BackupFolder {
+        /// The folder on this device: what [`BackupScope::Folders`] lists.
+        pub path: String,
+        /// Its own name ("Camera", "Screenshots").
+        pub name: String,
+        /// Where it is from the top of its storage ("DCIM/Camera", "SD card/DCIM/Camera"), to tell
+        /// folders of one name apart.
+        pub location: String,
+        pub photos: u32,
+        /// A camera folder: backed up by default.
+        pub camera: bool,
+        /// Backed up under the current scope.
+        pub included: bool,
     }
 }
 

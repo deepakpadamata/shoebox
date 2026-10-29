@@ -12,7 +12,9 @@ import type { SharedMemberInfo } from '../bindings/SharedMemberInfo';
 import type { AlbumInfo } from '../bindings/AlbumInfo';
 import type { AppEvent } from '../bindings/AppEvent';
 import type { AppState } from '../bindings/AppState';
+import type { BackupFolder } from '../bindings/BackupFolder';
 import type { BackupPolicy } from '../bindings/BackupPolicy';
+import type { BackupScope } from '../bindings/BackupScope';
 import type { BackupReport } from '../bindings/BackupReport';
 import type { BackupStatus } from '../bindings/BackupStatus';
 import type { CreatedLibrary } from '../bindings/CreatedLibrary';
@@ -35,7 +37,7 @@ import type { Profile } from '../bindings/Profile';
 
 export type {
   AboutInfo, AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
-  AlbumInfo, AppEvent, BackupPolicy, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, Health, ImportSummary,
+  AlbumInfo, AppEvent, BackupFolder, BackupPolicy, BackupScope, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, Health, ImportSummary,
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, Settings,
 };
 
@@ -173,6 +175,7 @@ export const api = {
   backupStatus: () => call<BackupStatus>('backup_status'),
   backupConfigure: (policy: BackupPolicy) => call<BackupStatus>('backup_configure', { policy }),
   backupRun: () => call<BackupReport>('backup_run'),
+  backupFolders: () => call<BackupFolder[]>('backup_folders'),
   sharedAlbums: () => call<SharedAlbumInfo[]>('shared_albums'),
   sharedCreate: (name: string) => call<SharedAlbumInfo>('shared_create', { name }),
   sharedInvite: (album: string, role: string, days = 7) => call<InviteOut>('shared_invite', { album, role, days }),

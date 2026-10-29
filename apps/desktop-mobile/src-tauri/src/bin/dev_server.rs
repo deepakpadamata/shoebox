@@ -23,6 +23,10 @@ struct Args {
     /// Look for new releases here (a `release.json`), e.g. a local test feed.
     #[arg(long)]
     update_feed: Option<String>,
+    /// Pretend this folder is the phone's gallery: every image and video under it is in the
+    /// camera roll (a fake photo source), to try backup and its folder choice in a browser.
+    #[arg(long)]
+    fake_camera_roll: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
@@ -39,6 +43,27 @@ async fn main() -> Result<()> {
         opts.update_feed = feed;
     }
     let core = desktop_mobile::AppCore::open(&args.data_dir, opts).await?;
+    if let Some(roll) = args.fake_camera_roll {
+        use desktop_mobile::photos_source::FakePhotoSource;
+        let source = std::sync::Arc::new(FakePhotoSource::new(args.data_dir.join("fake-picks")));
+        let mut todo = vec![roll];
+        let mut n = 0;
+        while let Some(dir) = todo.pop() {
+            for e in std::fs::read_dir(&dir)?.flatten() {
+                let p = e.path();
+                let media = p.extension().and_then(|x| x.to_str()).is_some_and(|x| {
+                    ["jpg", "jpeg", "png", "heic", "mp4"].contains(&x.to_lowercase().as_str())
+                });
+                if p.is_dir() {
+                    todo.push(p);
+                } else if media {
+                    n += 1;
+                    source.put(&format!("fake{n}"), &p, n);
+                }
+            }
+        }
+        core.set_photo_source(source);
+    }
     println!("listening on http://{}", args.listen);
     desktop_mobile::http::serve(core, args.listen, args.ui).await
 }

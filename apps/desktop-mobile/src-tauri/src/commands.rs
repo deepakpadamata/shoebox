@@ -82,6 +82,7 @@ pub const COMMANDS: &[&str] = &[
     "backup_status",
     "backup_configure",
     "backup_run",
+    "backup_folders",
     "sync_burst",
     "shared_albums",
     "shared_create",
@@ -299,6 +300,7 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
         "backup_status" => out(core.backup_status().await?),
         "backup_configure" => out(core.backup_configure(arg(&args, "policy")?).await?),
         "backup_run" => out(core.backup_run(true).await?),
+        "backup_folders" => out(core.backup_folders().await?),
         "sync_burst" => out(core
             .sync_burst(std::time::Duration::from_secs(
                 opt::<u64>(&args, "seconds")?.unwrap_or(25),

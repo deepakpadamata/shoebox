@@ -14,7 +14,9 @@
 
 use crate::core::{now_ms, AppCore};
 use crate::photos_source::{Asset, Conditions, Permission, PhotoSource, Picked};
-use crate::types::{AppEvent, BackupPolicy, BackupReport, BackupStatus, ImportSummary};
+use crate::types::{
+    AppEvent, BackupFolder, BackupPolicy, BackupReport, BackupScope, BackupStatus, ImportSummary,
+};
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use shoebox_core::ids::Blake3Hash;
@@ -38,6 +40,7 @@ impl Default for BackupPolicy {
             wifi_only: true,
             charging_only: false,
             min_battery: 20,
+            scope: BackupScope::Camera,
         }
     }
 }
@@ -198,6 +201,13 @@ impl AppCore {
         }
         {
             let mut st = self.backup.lock().await;
+            if st.policy.scope != policy.scope {
+                // What the old scope passed over is older than the token: look at everything again.
+                st.token = None;
+                let st = &mut *st;
+                st.pending
+                    .retain(|id, a| st.tracked.contains_key(id) || in_scope(&policy.scope, a));
+            }
             st.policy = policy;
             st.save(self.data_dir())?;
         }
@@ -236,7 +246,12 @@ impl AppCore {
         {
             let mut st = self.backup.lock().await;
             for a in scan.assets {
-                if st.tracked.get(&a.id).map(|t| t.modified_ms) != Some(a.modified_ms) {
+                // A photo already in the library keeps following its edits whatever the scope.
+                let tracked = st.tracked.get(&a.id).map(|t| t.modified_ms);
+                if tracked.is_none() && !in_scope(&st.policy.scope, &a) {
+                    continue;
+                }
+                if tracked != Some(a.modified_ms) {
                     st.pending.insert(a.id.clone(), a);
                 }
             }
@@ -270,6 +285,37 @@ impl AppCore {
         self.import_in_place(&ln, todo, &mut report, true).await?;
         report.pending = self.backup.lock().await.pending.len() as u32;
         Ok(report)
+    }
+
+    /// The gallery's folders with photos or videos in them, camera folders first, then the
+    /// fullest: what the person chooses from. A full look at the roll; nothing is imported.
+    pub async fn backup_folders(&self) -> Result<Vec<BackupFolder>> {
+        let source = self.source()?;
+        let scan = source.scan(None).await?;
+        let scope = self.backup.lock().await.policy.scope.clone();
+        let mut photos: BTreeMap<PathBuf, u32> = BTreeMap::new();
+        for a in &scan.assets {
+            if let Some(dir) = a.path.as_deref().and_then(|p| Path::new(p).parent()) {
+                *photos.entry(dir.to_path_buf()).or_default() += 1;
+            }
+        }
+        let mut folders: Vec<BackupFolder> = photos
+            .into_iter()
+            .map(|(dir, n)| BackupFolder {
+                path: dir.display().to_string(),
+                name: dir
+                    .file_name()
+                    .map_or_else(|| dir.display().to_string(), |n| n.to_string_lossy().into()),
+                location: folder_location(&dir),
+                photos: n,
+                camera: camera_folder(&dir),
+                included: folder_in_scope(&scope, &dir),
+            })
+            .collect();
+        folders.sort_by(|a, b| {
+            (b.camera, b.photos, &a.location).cmp(&(a.camera, a.photos, &b.location))
+        });
+        Ok(folders)
     }
 
     /// Add gallery photos by reference and track them. An edited photo (same asset, new content)
@@ -652,6 +698,66 @@ fn hashes(hex: &[String]) -> Vec<Blake3Hash> {
         .collect()
 }
 
+/// Folders under `DCIM` that hold screen captures, not camera photos (Samsung saves screenshots
+/// in `DCIM/Screenshots`, most others in `Pictures/Screenshots`).
+const NOT_CAMERA: [&str; 4] = [
+    "screenshots",
+    "screen recordings",
+    "screenrecords",
+    "screenrecorder",
+];
+
+/// Whether backup takes `a` under `scope`. A photo the app cannot read in place has no folder to
+/// tell by: it is kept, to be reported and retried as before.
+fn in_scope(scope: &BackupScope, a: &Asset) -> bool {
+    a.path
+        .as_deref()
+        .and_then(|p| Path::new(p).parent())
+        .is_none_or(|dir| folder_in_scope(scope, dir))
+}
+
+fn folder_in_scope(scope: &BackupScope, dir: &Path) -> bool {
+    match scope {
+        BackupScope::Camera => camera_folder(dir),
+        BackupScope::All => true,
+        BackupScope::Folders(chosen) => chosen.iter().any(|c| Path::new(c) == dir),
+    }
+}
+
+/// A folder the camera saves into: `DCIM` or one under it, except its screen-capture folders.
+/// Downloads, `Pictures/Screenshots` and messaging apps' folders are not.
+fn camera_folder(dir: &Path) -> bool {
+    let parts: Vec<String> = dir
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+        .collect();
+    let Some(dcim) = parts.iter().rposition(|p| p == "dcim") else {
+        return false;
+    };
+    parts.len() == dcim + 1 || !NOT_CAMERA.contains(&parts[dcim + 1].as_str())
+}
+
+/// `dir` from the top of its storage, for people: `DCIM/Camera`, `SD card/DCIM/Camera`.
+fn folder_location(dir: &Path) -> String {
+    let rel = dir
+        .strip_prefix("/storage/emulated")
+        .ok()
+        .and_then(|r| {
+            r.iter()
+                .skip(1)
+                .collect::<PathBuf>()
+                .into_os_string()
+                .into_string()
+                .ok()
+        })
+        .or_else(|| {
+            let r = dir.strip_prefix("/storage").ok()?;
+            let r: PathBuf = r.iter().skip(1).collect();
+            Some(Path::new("SD card").join(r).display().to_string())
+        });
+    rel.unwrap_or_else(|| dir.display().to_string())
+}
+
 /// The storage a gallery file lives on: `/storage/emulated/<user>` or `/storage/<card>` on
 /// Android, the file's folder elsewhere (tests).
 fn volume_root(path: &Path) -> Option<PathBuf> {
@@ -677,8 +783,73 @@ fn gone_from_gallery(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::volume_root;
+    use super::{camera_folder, folder_location, in_scope, volume_root};
+    use crate::photos_source::Asset;
+    use crate::types::BackupScope;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn camera_photos_are_the_ones_under_dcim_but_not_screenshots() {
+        let at = |path: &str| Asset {
+            id: "1".into(),
+            modified_ms: 0,
+            size: 1,
+            mime: "image/jpeg".into(),
+            path: Some(path.into()),
+        };
+        for yes in [
+            "/storage/emulated/0/DCIM/Camera/20261027_101500.jpg",
+            "/storage/1A2B-3C4D/DCIM/100ANDRO/DSC_0001.jpg",
+            "/storage/emulated/0/DCIM/IMG_0001.jpg",
+            "/storage/emulated/0/DCIM/Camera/sub/VID_0001.mp4",
+        ] {
+            assert!(in_scope(&BackupScope::Camera, &at(yes)), "{yes}");
+        }
+        for no in [
+            "/storage/emulated/0/Download/meme.jpg",
+            "/storage/emulated/0/Pictures/Screenshots/Screenshot_1.png",
+            "/storage/emulated/0/DCIM/Screenshots/Screenshot_1.png",
+            "/storage/emulated/0/DCIM/Screen recordings/rec.mp4",
+            "/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images/IMG-1.jpg",
+            "/storage/emulated/0/Pictures/Instagram/a.jpg",
+        ] {
+            assert!(!in_scope(&BackupScope::Camera, &at(no)), "{no}");
+            assert!(in_scope(&BackupScope::All, &at(no)), "{no}");
+        }
+        let chosen = BackupScope::Folders(vec!["/storage/emulated/0/Download".into()]);
+        assert!(in_scope(
+            &chosen,
+            &at("/storage/emulated/0/Download/meme.jpg")
+        ));
+        assert!(!in_scope(
+            &chosen,
+            &at("/storage/emulated/0/DCIM/Camera/a.jpg")
+        ));
+        assert!(in_scope(
+            &chosen,
+            &Asset {
+                path: None,
+                ..at("")
+            }
+        ));
+        assert!(camera_folder(Path::new("/storage/emulated/0/DCIM")));
+    }
+
+    #[test]
+    fn folders_are_named_from_the_top_of_their_storage() {
+        assert_eq!(
+            folder_location(Path::new("/storage/emulated/0/DCIM/Camera")),
+            "DCIM/Camera"
+        );
+        assert_eq!(
+            folder_location(Path::new("/storage/1A2B-3C4D/DCIM/Camera")),
+            "SD card/DCIM/Camera"
+        );
+        assert_eq!(
+            folder_location(Path::new("/tmp/x/Download")),
+            "/tmp/x/Download"
+        );
+    }
 
     #[test]
     fn the_volume_of_a_gallery_file() {

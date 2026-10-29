@@ -14,6 +14,8 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
   Android and on the desktop, and `shoebox-keeper status` / `alerts` on the keeper.
 - Recently Deleted can be emptied without waiting 30 days: *Delete N now* for the selection or *Delete all now*, on
   every device at once (A-103).
+- Android: backup takes only camera photos by default (`DCIM`, not screenshots, downloads or other apps' pictures).
+  *Back up camera roll → Choose folders* lists every folder with photos in it to pick from, or every folder (A-102).
 - Android: opening the app while a background backup is running no longer closes the app; the background run stops
   and hands over. Debug builds put the background run's log tail in its report (`adb logcat -s ShoeboxBurst`).
 - Long videos play on Android (they never started: the WebView re-applies byte ranges to the app's own URL scheme,

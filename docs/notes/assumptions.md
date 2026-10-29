@@ -48,6 +48,19 @@ The 300 MB at 100k photos target for phones is not met (about 500–700 MB).
   `jpeg-encoder` (13% smaller, 2.6× faster to encode than the `image` crate's 4:2:2). Not with optimized Huffman
   tables: zune-jpeg 0.5 decodes those 4:2:0 files to the wrong colours (macOS decodes them correctly), and Rust decodes
   whatever is imported. Only new imports get the new renditions. Reverse: `render::encode_jpeg`.
+
+- **A-102 · choosing what backup takes (owner's report, 2026-10-28)** · With access to all photos, backup took every image
+  and video MediaStore lists: downloads, screenshots, messaging apps' pictures. `BackupPolicy.scope` says what it takes:
+  `camera` (the default, also for a `backup.json` written before it: files under `DCIM`, except `DCIM/Screenshots` and
+  screen-recording folders, where Samsung keeps screenshots), `all` (every folder, new ones included) or `folders`
+  (exactly the chosen folders, by absolute path, so internal storage and a card are separate). *Choose folders* lists
+  every folder of the roll with its count, camera folders first (`AppCore::backup_folders`, a full scan grouped by each
+  file's folder: no platform code, so the fake photo source tests it). Decided in `backup.rs`; a photo already in the
+  library still follows its edits and deletions whatever the scope; narrowing the scope removes nothing, and any change
+  forgets the scan token so the next scan sees every folder. A photo with no readable path stays in scope (reported and
+  retried as before). Photos the person adds with ＋ are never filtered. Not covered: a camera folder that appears after
+  folders were chosen is not added by itself (`camera` and `all` follow new folders). `desktop-dev-server
+  --fake-camera-roll <dir>` serves a folder as the gallery to try this in a browser.
 - **A-103 · delete now from Recently Deleted (owner's request, 2026-10-28)** · *Recently Deleted* has *Delete N now*
   (the selection) and *Delete all now*, after a confirmation. `LibraryStore::purge_deleted(ids)` purges only photos that
   are soft-deleted (live and unknown ids are ignored) with the same purge marker as the 30-day purge, so it replicates

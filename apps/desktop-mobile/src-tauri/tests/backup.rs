@@ -2,7 +2,7 @@
 //! failures, restarts.
 
 use desktop_mobile::photos_source::{Conditions, FakePhotoSource, Permission, Picked};
-use desktop_mobile::types::BackupPolicy;
+use desktop_mobile::types::{BackupPolicy, BackupScope};
 use desktop_mobile::{pause_reason, AppCore, AppOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,6 +31,7 @@ fn policy(wifi: bool, charging: bool) -> BackupPolicy {
         wifi_only: wifi,
         charging_only: charging,
         min_battery: 20,
+        scope: BackupScope::Camera,
     }
 }
 
@@ -74,6 +75,7 @@ fn the_pause_rules() {
         wifi_only: w,
         charging_only: ch,
         min_battery: 20,
+        scope: BackupScope::Camera,
     };
     assert_eq!(pause_reason(&p(true, false), &c(true, false, 80)), None);
     assert_eq!(
@@ -147,7 +149,7 @@ async fn only_new_and_changed_photos_are_imported_and_the_gallery_decides_what_s
 
     // The same bytes under another asset id are recognised as a duplicate, and deleting one of
     // the two files keeps the photo.
-    let copy = r._dir.path().join("copy-of-a2.jpg");
+    let copy = r.files[2].with_file_name("copy-of-a2.jpg");
     std::fs::copy(&r.files[2], &copy).unwrap();
     r.source.put("copy", &copy, 500);
     let dup = r.core.backup_run(true).await.unwrap();
@@ -457,6 +459,109 @@ async fn the_gallery_is_followed_with_backup_off_but_not_without_access() {
     r.source.set_permission(Permission::Granted);
     r.core.gallery_check().await.unwrap();
     assert_eq!(photos(&r.core).await, 1);
+    r.core.shutdown().await.unwrap();
+}
+
+/// Camera-only (the default) skips downloads and screenshots; turning it off picks them up
+/// without waiting for them to change, and turning it back on keeps what is already backed up.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn camera_only_backs_up_what_the_camera_took() {
+    let r = rig().await;
+    let elsewhere = |folder: &str, from: &Path| {
+        let dir = r._dir.path().join(folder);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(from.file_name().unwrap());
+        std::fs::rename(from, &p).unwrap();
+        p
+    };
+    let download = elsewhere("Download", &r.files[1]);
+    let screenshot = elsewhere("DCIM/Screenshots", &r.files[2]);
+    r.source.put("cam", &r.files[0], 1);
+    r.source.put("dl", &download, 2);
+    r.source.put("shot", &screenshot, 3);
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+    let report = r.core.backup_run(true).await.unwrap();
+    assert_eq!((report.imported, report.pending), (1, 0));
+
+    let all = BackupPolicy {
+        scope: BackupScope::All,
+        ..policy(false, false)
+    };
+    r.core.backup_configure(all).await.unwrap();
+    assert_eq!(r.core.backup_run(true).await.unwrap().imported, 2);
+    assert_eq!(photos(&r.core).await, 3);
+
+    // Back to camera-only: nothing already backed up goes, and a new download is skipped.
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+    let later = elsewhere("Download", &r.files[3]);
+    r.source.put("dl2", &later, 4);
+    let report = r.core.backup_run(true).await.unwrap();
+    assert_eq!((report.imported, report.pending), (0, 0));
+    assert_eq!(photos(&r.core).await, 3);
+    r.core.shutdown().await.unwrap();
+}
+
+/// The folders are listed camera first with what each holds; a chosen list backs up exactly
+/// those folders, and un-choosing one keeps what it already backed up.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chosen_folders_are_backed_up_and_nothing_else() {
+    let r = rig().await;
+    let downloads = r._dir.path().join("Download");
+    let shots = r._dir.path().join("Pictures/Screenshots");
+    for d in [&downloads, &shots] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    let mv = |f: &PathBuf, to: &Path| {
+        let p = to.join(f.file_name().unwrap());
+        std::fs::rename(f, &p).unwrap();
+        p
+    };
+    r.source.put("cam", &r.files[0], 1);
+    r.source.put("dl1", mv(&r.files[1], &downloads), 2);
+    r.source.put("dl2", mv(&r.files[2], &downloads), 3);
+    r.source.put("shot", mv(&r.files[3], &shots), 4);
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+
+    let folders = r.core.backup_folders().await.unwrap();
+    let seen: Vec<_> = folders
+        .iter()
+        .map(|f| (f.name.as_str(), f.photos, f.camera, f.included))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            ("Camera", 1, true, true),
+            ("Download", 2, false, false),
+            ("Screenshots", 1, false, false)
+        ]
+    );
+
+    let chosen = |dirs: &[&Path]| BackupPolicy {
+        scope: BackupScope::Folders(dirs.iter().map(|d| d.display().to_string()).collect()),
+        ..policy(false, false)
+    };
+    let camera = r.files[0].parent().unwrap().to_path_buf();
+    r.core
+        .backup_configure(chosen(&[&camera, &downloads]))
+        .await
+        .unwrap();
+    assert_eq!(r.core.backup_run(true).await.unwrap().imported, 3);
+    let included: Vec<_> = r
+        .core
+        .backup_folders()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|f| f.included)
+        .collect();
+    assert_eq!(included, [true, true, false]);
+
+    // Downloads un-chosen: what it backed up stays, a new download waits for nothing.
+    r.core.backup_configure(chosen(&[&camera])).await.unwrap();
+    r.source.put("dl3", mv(&r.files[4], &downloads), 5);
+    let report = r.core.backup_run(true).await.unwrap();
+    assert_eq!((report.imported, report.pending), (0, 0));
+    assert_eq!(photos(&r.core).await, 3);
     r.core.shutdown().await.unwrap();
 }
 

@@ -117,6 +117,43 @@ async fn the_timeline_pages_newest_first_and_details_say_where_a_photo_is_stored
     core.shutdown().await.unwrap();
 }
 
+/// "Delete now" empties Recently Deleted at once; it never touches a photo still in the library.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deleted_photos_can_be_deleted_for_good_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    let ids: Vec<String> = core
+        .library_page(None, 10)
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    core.delete(&ids[..2]).await.unwrap();
+    assert_eq!(
+        core.delete_permanently(&[ids[0].clone(), ids[2].clone()])
+            .await
+            .unwrap(),
+        1,
+        "the live photo is not deleted"
+    );
+    let bin: Vec<_> = core
+        .recently_deleted()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(bin, [ids[1].clone()]);
+    assert_eq!(core.library_page(None, 10).await.unwrap().items.len(), 1);
+    assert!(core.photo_detail(&ids[0]).await.is_err());
+    // Gone for good: restoring it does nothing.
+    core.restore(&ids[..1]).await.unwrap();
+    assert_eq!(core.library_page(None, 10).await.unwrap().items.len(), 1);
+    core.shutdown().await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn favorites_deleting_restoring_pins_albums_and_settings_round_trip() {
     let dir = tempfile::tempdir().unwrap();

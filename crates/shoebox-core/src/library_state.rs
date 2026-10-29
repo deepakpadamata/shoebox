@@ -439,6 +439,23 @@ impl LibraryState {
             })
             .map(|p| p.id)
             .collect();
+        self.purge(due, clock_now_ms)
+    }
+
+    /// Purge these photos now, without waiting for the retention window: only the ones in
+    /// Recently Deleted; live and unknown ids are left alone.
+    pub fn purge_deleted(&mut self, ids: &[PhotoId], clock_now_ms: u64) -> (Vec<PhotoId>, Effect) {
+        let mut due: Vec<PhotoId> = ids
+            .iter()
+            .filter(|id| self.photos.get(id).is_some_and(|p| p.is_deleted()))
+            .copied()
+            .collect();
+        due.sort();
+        due.dedup();
+        self.purge(due, clock_now_ms)
+    }
+
+    fn purge(&mut self, due: Vec<PhotoId>, clock_now_ms: u64) -> (Vec<PhotoId>, Effect) {
         let mut fx = Effect::default();
         if due.is_empty() {
             return (due, fx);

@@ -140,6 +140,7 @@ export const api = {
   delete: (ids: string[]) => call<{}>('delete', { ids }),
   restore: (ids: string[]) => call<{}>('restore', { ids }),
   recentlyDeleted: () => call<PhotoSummary[]>('recently_deleted'),
+  deletePermanently: (ids: string[]) => call<number>('delete_permanently', { ids }),
   importPaths: (paths: string[]) => call<ImportSummary>('import_paths', { paths }),
   /** Phone: the person chooses photos (`files`: from anywhere, else the gallery) and they are imported. */
   importPicked: (files: boolean) => call<ImportSummary>('import_picked', { files }),

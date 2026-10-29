@@ -43,6 +43,7 @@ pub const COMMANDS: &[&str] = &[
     "delete",
     "restore",
     "recently_deleted",
+    "delete_permanently",
     "import_paths",
     "import_picked",
     "answer_gallery_deletions",
@@ -164,6 +165,9 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             Ok(json!({}))
         }
         "recently_deleted" => out(core.recently_deleted().await?),
+        "delete_permanently" => out(core
+            .delete_permanently(&arg::<Vec<String>>(&args, "ids")?)
+            .await?),
         "import_paths" => out(core
             .import_paths(&arg::<Vec<String>>(&args, "paths")?)
             .await?),

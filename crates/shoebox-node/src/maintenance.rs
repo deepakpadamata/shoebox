@@ -55,6 +55,17 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(purged)
     }
 
+    /// "Delete now" in Recently Deleted: permanently remove these deleted photos on every device
+    /// without waiting 30 days, then release the blobs nothing references any more. Photos not in
+    /// Recently Deleted are left alone. Returns the purged photo ids.
+    pub async fn purge_deleted(&self, ids: &[PhotoId]) -> Result<Vec<PhotoId>> {
+        let purged = self.store().purge_deleted(ids).await?;
+        if !purged.is_empty() {
+            self.reconcile_blobs().await?;
+        }
+        Ok(purged)
+    }
+
     /// Release this device's library protection (and pins) on blobs that no photo record
     /// references, and retract their holdings. Soft-deleted photos still count as references.
     /// Returns the released blobs; the blob store's GC reclaims them shortly after.

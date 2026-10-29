@@ -1180,6 +1180,14 @@ impl AppCore {
         ln.restore_photos(&ids).await
     }
 
+    /// "Delete now" in Recently Deleted: gone from every device at once instead of after 30 days.
+    /// Returns how many were deleted (photos no longer in Recently Deleted are skipped).
+    pub async fn delete_permanently(&self, ids: &[String]) -> Result<u32> {
+        let ln = self.ln().await?;
+        let ids: Vec<_> = ids.iter().map(|i| parse_hash(i)).collect::<Result<_>>()?;
+        Ok(ln.purge_deleted(&ids).await?.len() as u32)
+    }
+
     /// Recently Deleted, most recently deleted first.
     pub async fn recently_deleted(&self) -> Result<Vec<PhotoSummary>> {
         let ln = self.ln().await?;

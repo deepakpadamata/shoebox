@@ -307,6 +307,11 @@ pub trait LibraryStore: Send + Sync + 'static {
     /// the purge (later HLC) is a new record and survives. Idempotent: a second call returns `[]`.
     async fn purge_expired(&self, now: Timestamp) -> Result<Vec<PhotoId>>;
 
+    /// Permanently drop these photos now, without waiting for [`RETENTION_MS`] ("Delete now" in
+    /// Recently Deleted). Only soft-deleted photos are purged; live and unknown ids are ignored.
+    /// Replicates like [`LibraryStore::purge_expired`]. Returns the purged ids.
+    async fn purge_deleted(&self, ids: &[PhotoId]) -> Result<Vec<PhotoId>>;
+
     // ----- personal albums -----
 
     /// Create or merge album metadata ([`AlbumMeta::merge`]); idempotent by `album.id`.

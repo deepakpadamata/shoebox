@@ -48,6 +48,13 @@ The 300 MB at 100k photos target for phones is not met (about 500–700 MB).
   `jpeg-encoder` (13% smaller, 2.6× faster to encode than the `image` crate's 4:2:2). Not with optimized Huffman
   tables: zune-jpeg 0.5 decodes those 4:2:0 files to the wrong colours (macOS decodes them correctly), and Rust decodes
   whatever is imported. Only new imports get the new renditions. Reverse: `render::encode_jpeg`.
+- **A-103 · delete now from Recently Deleted (owner's request, 2026-10-28)** · *Recently Deleted* has *Delete N now*
+  (the selection) and *Delete all now*, after a confirmation. `LibraryStore::purge_deleted(ids)` purges only photos that
+  are soft-deleted (live and unknown ids are ignored) with the same purge marker as the 30-day purge, so it replicates
+  to every device and keeper with no format or protocol change, and a stale copy cannot bring the photo back; a restore
+  on another device that is HLC-later than the marker wins, as for the 30-day purge. `LibraryNode::purge_deleted` then
+  releases the blobs nothing references. Gallery files and watched-folder files are never touched (A-092): only the
+  library's record and its own copies go. Any device that can write the library can do it, like deleting.
 - **A-032 · M1-05** · The docs backend keeps the *replicated records* as iroh-docs entries (layout in
   `shoebox-store-docs::codec`, values `[v1] ++ postcard`) and answers queries from a merged in-memory `LibraryState`
   rebuilt at open and refreshed by (debounced) rescans. This deviates from the issue's "secondary key by taken_at":

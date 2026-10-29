@@ -135,6 +135,12 @@ impl LibraryStore for MemLibrary {
         self.with_state(|s| Ok(s.purge_expired(now, clock_now)))
     }
 
+    async fn purge_deleted(&self, ids: &[PhotoId]) -> Result<Vec<PhotoId>> {
+        self.writable()?;
+        let clock_now = self.now();
+        self.with_state(|s| Ok(s.purge_deleted(ids, clock_now)))
+    }
+
     async fn upsert_album(&self, album: AlbumMeta) -> Result<()> {
         self.writable()?;
         self.with_state(|s| Ok(((), s.upsert_album(&album))))

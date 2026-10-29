@@ -64,6 +64,7 @@ scenario_table!(
     paging_by_time,
     favorite_is_last_writer_wins,
     delete_restore_purge,
+    delete_now_purges_at_once_everywhere,
     album_add_wins,
     holdings_single_writer_and_at_risk,
     change_stream_events,
@@ -344,6 +345,39 @@ async fn delete_restore_purge<H: Harness>(h: &H) {
     reimport.deleted_at = Lww::new(None, hlc(after, 1));
     s.upsert_photo(reimport).await.unwrap();
     assert!(!s.photo(&hash(1)).await.unwrap().unwrap().is_deleted());
+}
+
+async fn delete_now_purges_at_once_everywhere<H: Harness>(h: &H) {
+    let (a, b) = pair(h).await;
+    for id in [1, 2, 3] {
+        a.store.upsert_photo(photo(id, id as i64, 1)).await.unwrap();
+    }
+    a.clock.set(2_000);
+    a.store.mark_deleted(&hash(1)).await.unwrap();
+    a.store.mark_deleted(&hash(2)).await.unwrap();
+    sync_both(h, &a, &b).await;
+
+    // Only deleted photos go, at once; a live photo and an unknown id are left alone.
+    a.clock.advance(10);
+    let purged = a
+        .store
+        .purge_deleted(&[hash(1), hash(3), hash(9), hash(1)])
+        .await
+        .unwrap();
+    assert_eq!(purged, vec![hash(1)]);
+    assert_eq!(a.store.photo(&hash(1)).await.unwrap(), None);
+    assert!(a.store.photo(&hash(2)).await.unwrap().unwrap().is_deleted());
+    assert!(!a.store.photo(&hash(3)).await.unwrap().unwrap().is_deleted());
+    assert_eq!(a.store.purge_deleted(&[hash(1)]).await.unwrap(), vec![]);
+
+    // It replicates, and a stale copy of the record cannot bring it back.
+    sync_both(h, &a, &b).await;
+    assert_eq!(b.store.photo(&hash(1)).await.unwrap(), None);
+    assert!(b.store.photo(&hash(2)).await.unwrap().unwrap().is_deleted());
+    let mut stale = photo(1, 1, 1);
+    stale.deleted_at = Lww::new(Some(Timestamp(2_000)), hlc(2_000, 1));
+    b.store.upsert_photo(stale).await.unwrap();
+    assert_eq!(b.store.photo(&hash(1)).await.unwrap(), None);
 }
 
 async fn album_add_wins<H: Harness>(h: &H) {

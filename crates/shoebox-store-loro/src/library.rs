@@ -894,6 +894,10 @@ impl LibraryStore for LoroLibrary {
         let clock_now = self.now();
         self.write(|s| Ok(s.purge_expired(now, clock_now)))
     }
+    async fn purge_deleted(&self, ids: &[PhotoId]) -> Result<Vec<PhotoId>> {
+        let clock_now = self.now();
+        self.write(|s| Ok(s.purge_deleted(ids, clock_now)))
+    }
     async fn upsert_album(&self, album: AlbumMeta) -> Result<()> {
         self.write(|s| Ok(((), s.upsert_album(&album))))
     }

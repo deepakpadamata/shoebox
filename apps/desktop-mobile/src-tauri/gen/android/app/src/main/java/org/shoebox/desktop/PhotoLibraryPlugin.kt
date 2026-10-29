@@ -2,7 +2,12 @@ package org.shoebox.desktop
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.webkit.MimeTypeMap
+import androidx.core.content.FileProvider
 import androidx.activity.result.ActivityResult
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
@@ -14,6 +19,7 @@ import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import org.json.JSONObject
+import java.io.File
 
 /**
  * The Tauri face of [PhotoBackend] while the app is open (M4-04): the system permission prompt
@@ -96,6 +102,34 @@ class PhotoLibraryPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun readPicked(invoke: Invoke) = guarded(invoke, "cannot read the chosen file") {
         JSObject().put("path", backend.readPicked(invoke.getArgs().getString("uri") ?: throw IllegalArgumentException("missing uri")))
+    }
+
+    /** The system share sheet for files the app core wrote to its cache (`share.rs`). */
+    @Command
+    fun shareFiles(invoke: Invoke) = guarded(invoke, "cannot share") {
+        val paths = invoke.getArgs().getJSONArray("paths")
+        val uris = ArrayList<Uri>()
+        for (i in 0 until paths.length()) {
+            uris.add(FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", File(paths.getString(i))))
+        }
+        require(uris.isNotEmpty()) { "nothing to share" }
+        val types = uris.map { MimeTypeMap.getSingleton().getMimeTypeFromExtension(MimeTypeMap.getFileExtensionFromUrl(it.toString())) ?: "*/*" }.toSet()
+        val type = when {
+            types.size == 1 -> types.first()
+            types.all { it.startsWith("image/") } -> "image/*"
+            types.all { it.startsWith("video/") } -> "video/*"
+            else -> "*/*"
+        }
+        val send = if (uris.size == 1) {
+            Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0])
+        } else {
+            Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+        }
+        send.setType(type).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // The chooser passes the read grant on only for URIs in the clip data.
+        send.clipData = ClipData.newRawUri(null, uris[0]).apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
+        activity.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        JSObject()
     }
 
     @Command

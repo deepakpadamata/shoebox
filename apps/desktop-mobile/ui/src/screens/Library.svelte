@@ -15,6 +15,7 @@
   import DateRail from '../components/DateRail.svelte';
   import Button from '../components/Button.svelte';
   import Sheet from '../components/Sheet.svelte';
+  import ShareSheet from '../components/ShareSheet.svelte';
   import Viewer from './Viewer.svelte';
 
   interface Props { source: 'all' | 'favorites' | 'album'; album?: string; }
@@ -61,6 +62,8 @@
   let viewing = $state<number | null>(null);
   let albums = $state<{ id: string; name: string }[]>([]);
   let albumSheet = $state(false);
+  let shareSheet = $state(false);
+  let shareButton = $state<HTMLButtonElement>();
   let newAlbum = $state('');
   const selecting = $derived(selected.length > 0);
   const selectedSet = $derived(new Set(selected));
@@ -293,6 +296,7 @@
 {#snippet glyph(name: 'close' | 'share' | 'heart' | 'album' | 'keep' | 'unalbum' | 'trash')}
   <svg viewBox="0 0 24 24" aria-hidden="true">
     {#if name === 'close'}<path d="M6 6l12 12M18 6L6 18" />
+    {:else if name === 'share'}<path d="M12 3.5v11M8 7.5l4-4 4 4M7 10.5H5.5v9h13v-9H17" />
     {:else if name === 'heart'}<path class="fill" d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20z" />
     {:else if name === 'album'}<rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="M12 8v8M8 12h8" />
     {:else if name === 'keep'}<path d="M12 4v10M7.5 9.5L12 14l4.5-4.5M5 19.5h14" />
@@ -381,6 +385,7 @@
       <button class="ic" title="Clear selection" aria-label="Clear selection" onclick={() => (selected = [])}>{@render glyph('close')}</button>
       <b class="count">{selected.length.toLocaleString('en')}</b>
       <span class="sep"></span>
+      <button class="ic" bind:this={shareButton} title="Share" aria-label="Share" onclick={() => (shareSheet = true)}>{@render glyph('share')}</button>
       <button class="ic" class:on={allFavorite} title={allFavorite ? 'Unfavorite' : 'Favorite'} aria-label={allFavorite ? 'Unfavorite' : 'Favorite'}
         onclick={() => act(() => api.setFavorite(selected, !allFavorite))}>{@render glyph('heart')}</button>
       <button class="ic" title="Add to album" aria-label="Add to album" onclick={openAlbumSheet}>{@render glyph('album')}</button>
@@ -410,6 +415,9 @@
     <Button block disabled={sharing} onclick={() => share('keep')}>Keep the location</Button>
   </div>
 </Sheet>
+
+<ShareSheet open={shareSheet} ids={selected} anchor={() => shareButton?.getBoundingClientRect()} onclose={() => (shareSheet = false)}
+  ondone={() => { shareSheet = false; selected = []; }} />
 
 <Sheet open={albumSheet} title="Add to album" onclose={() => (albumSheet = false)} width={380}>
   <div class="stack">

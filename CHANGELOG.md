@@ -47,6 +47,8 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
 - Selecting: a circle on each photo and by each date (on hover with a mouse), the date selects its day while
   selecting, and a small floating bar of glyphs that no longer pushes the grid down (on a phone a long-press then
   selected the photo above). A long-press drag selects the whole run and scrolls at the top and bottom edges.
+- Share: selected photos go into one of your shared albums (or a new one), or to other apps through the system share
+  sheet on Android and the share picker on macOS; originals not on the device are fetched first.
 - Settings → Leave this library: the device stops syncing and starts over at first run, to create a new library or
   join another. Its data folder is set aside next to itself (`….left-<library>-<time>`), not deleted.
 - The six-digit pairing code shows wherever you are in the app: with the "Add a device" sheet closed (the code

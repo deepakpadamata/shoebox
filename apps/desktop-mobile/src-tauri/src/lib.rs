@@ -22,6 +22,8 @@ pub mod http;
 
 #[cfg(feature = "tauri-app")]
 pub mod shell;
+#[cfg(feature = "tauri-app")]
+mod share;
 
 #[cfg(all(feature = "tauri-app", target_os = "android"))]
 pub mod android_bridge;

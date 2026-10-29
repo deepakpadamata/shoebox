@@ -38,6 +38,9 @@ tauri-app = [
     "dep:tauri-plugin-dialog",
     "dep:tauri-plugin-notification",
     "dep:tauri-plugin-barcode-scanner",
+    "dep:objc2",
+    "dep:objc2-app-kit",
+    "dep:objc2-foundation",
 ]
 # Platform keystore (macOS Keychain, Windows Credential Manager, Secret Service).
 keyring = ["dep:keyring"]
@@ -71,6 +74,10 @@ clap = { version = "4", features = ["derive"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"], optional = true }
+# The share picker (`share.rs`); the same versions Tauri already builds.
+objc2 = { version = "0.6", optional = true }
+objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "NSResponder", "NSSharingService", "NSView"] }
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "NSArray", "NSGeometry", "NSURL"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"], optional = true }
@@ -99,7 +106,7 @@ http-body-util = "0.1"
 tauri-build = { version = "2", optional = true , features = [] }
 
 # Like the workspace (no unsafe code), except that the JNI entry point of the Android background
-# bridge needs `#[no_mangle]`; that one module opts in.
+# bridge needs `#[no_mangle]` and the macOS share picker calls AppKit; those two modules opt in.
 [lints.rust]
 unsafe_code = "deny"
 

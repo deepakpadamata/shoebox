@@ -76,6 +76,7 @@ pub const COMMANDS: &[&str] = &[
     "rename_device",
     "watch_folder",
     "export_library",
+    "share_files",
     "leave_library",
     "transfers",
     "rename_album",
@@ -399,6 +400,17 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
         "device_link" => out(core.device_link()),
         "diagnostics" => out(core.diagnostics().await?),
         "export_library" => out(core.export_library(&arg::<String>(&args, "dest")?).await?),
+        // The app shell handles this itself, to hand the files to the platform's share sheet;
+        // here (the HTTP bridge) the files are only written out.
+        "share_files" => {
+            let paths = core
+                .share_files(
+                    &arg::<Vec<String>>(&args, "ids")?,
+                    &core.data_dir().join("share"),
+                )
+                .await?;
+            out(json!({ "paths": paths }))
+        }
         "leave_library" => out(json!({ "kept": core.leave_library().await? })),
         "transfers" => out(core.transfers().await?),
         other => bail!("unknown command `{other}`"),

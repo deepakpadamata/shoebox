@@ -203,6 +203,8 @@ export const api = {
   deviceLink: () => call<string>('device_link'),
   diagnostics: () => call<DiagnosticsBundle>('diagnostics'),
   exportLibrary: (dest: string) => call<ExportReport>('export_library', { dest }),
+  /** Hand the originals to other apps (the system share sheet); `anchor` places the macOS picker. */
+  shareFiles: (ids: string[], anchor?: { x: number; y: number; w: number; h: number }) => call<{}>('share_files', { ids, anchor }),
   /** Set this device's data aside and restart at first run (to create or join another library). */
   leaveLibrary: () => call<{ kept: string }>('leave_library'),
   watchFolder: (dir: string) => call<{}>('watch_folder', { dir }),

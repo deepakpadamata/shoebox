@@ -34,6 +34,9 @@ async fn core_when_ready(app: &tauri::AppHandle) -> Result<Arc<AppCore>, String>
 #[tauri::command]
 async fn command(app: tauri::AppHandle, cmd: String, args: Option<Value>) -> Result<Value, String> {
     let core = core_when_ready(&app).await?;
+    if cmd == "share_files" {
+        return crate::share::share_files(&app, &core, args.unwrap_or(Value::Null)).await;
+    }
     let reply = dispatch(&core, &cmd, args.unwrap_or(Value::Null))
         .await
         .map_err(|e| user_message(&e))?;

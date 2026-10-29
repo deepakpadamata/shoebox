@@ -1804,6 +1804,50 @@ impl AppCore {
         })
     }
 
+    /// Write the originals of `ids` into `dest` (emptied first) as `<date>_<time>_<id>.<ext>`, for
+    /// handing to another app. An original that is not on this device is fetched first; each file
+    /// is checked against its content hash. Returns the paths, in the order of `ids`.
+    pub async fn share_files(&self, ids: &[String], dest: &Path) -> Result<Vec<PathBuf>> {
+        let ln = self.ln().await?;
+        ensure!(!ids.is_empty(), "choose photos to share");
+        let _ = std::fs::remove_dir_all(dest);
+        std::fs::create_dir_all(dest).with_context(|| format!("creating {}", dest.display()))?;
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            let hash = parse_hash(id)?;
+            let rec = ln
+                .store()
+                .photo(&hash)
+                .await?
+                .ok_or_else(|| anyhow!("that photo is no longer in the library"))?;
+            if self.node.blobs().size(&rec.original.hash).await?.is_none() {
+                ln.fetch_now(&hash, kind_of("original")?).await.context(
+                    "a photo is not on this device and no device that has it is reachable",
+                )?;
+            }
+            let data = self.node.blobs().get(&rec.original.hash).await?;
+            ensure!(
+                Blake3Hash::of_bytes(&data) == rec.original.hash,
+                "a photo does not match its content hash; not shared"
+            );
+            let when = crate::export::civil(rec.taken_at.0);
+            let path = dest.join(format!(
+                "{:04}-{:02}-{:02}_{:02}{:02}{:02}_{}.{}",
+                when.0,
+                when.1,
+                when.2,
+                when.3,
+                when.4,
+                when.5,
+                &rec.id.to_string()[..8],
+                crate::export::extension(&rec.original.mime)
+            ));
+            std::fs::write(&path, &data)?;
+            out.push(path);
+        }
+        Ok(out)
+    }
+
     // ---------- settings ----------
 
     pub async fn settings(&self) -> Result<Settings> {

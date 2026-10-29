@@ -1,20 +1,60 @@
-name: Release keeper
+name: Release
 
-# Tagging `keeper-vX.Y.Z` builds static Linux (x86_64, aarch64) and a macOS universal binary,
-# writes SHA256SUMS, signs it with minisign and publishes everything on the GitHub release.
-# One-time setup: generate a key with `minisign -G`, put the public key in scripts/install-keeper.sh
-# (MINISIGN_PUBKEY) and store the secret key + password as the repository secrets
-# MINISIGN_SECRET_KEY and MINISIGN_PASSWORD.
+# Tagging `vX.Y.Z` (or `vX.Y.Z-rc.N`, published as a pre-release) builds every download into one draft GitHub
+# release: the app for macOS (universal, signed and notarised), Windows and Linux, the Android APK (signed), and the
+# keeper for Linux x86_64/aarch64 (static) and macOS. One SHA256SUMS lists every file and is signed with minisign;
+# `scripts/install-keeper.sh` checks both. Look the draft over, then publish it by hand.
+#
+# Repository secrets (see docs/notes/release-signing.md for making each one):
+#   MINISIGN_SECRET_KEY, MINISIGN_PASSWORD                     the key whose public half is in install-keeper.sh
+#   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD               Developer ID Application certificate (.p12, base64)
+#   APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID   signing identity and notarisation
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+# Windows builds are not code-signed yet: SmartScreen warns on first run.
 
 on:
   push:
-    tags: ["keeper-v*"]
+    tags: ["v*"]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag matches the workspace version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          [ "${tag%%-*}" = "$version" ] || { echo "::error::tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
+      - name: Every signing secret is set
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=""
+          for name in MINISIGN_SECRET_KEY MINISIGN_PASSWORD APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
+              APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID ANDROID_KEYSTORE_BASE64 \
+              ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            [ -n "$(printenv "$name")" ] || missing="$missing $name"
+          done
+          [ -z "$missing" ] || { echo "::error::repository secrets not set:$missing"; exit 1; }
+          grep -q 'RWQ_REPLACE' scripts/install-keeper.sh && { echo "::error::install-keeper.sh still has the placeholder public key"; exit 1; } || true
+
+  keeper:
+    needs: check
     strategy:
       matrix:
         include:
@@ -56,9 +96,115 @@ jobs:
         with:
           name: keeper-${{ matrix.name }}
           path: dist/*.tar.gz
+          if-no-files-found: error
+
+  desktop:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos, os: macos-latest, args: "--target universal-apple-darwin", bundle: "target/universal-apple-darwin/release/bundle/dmg/*.dmg" }
+          - { name: windows, os: windows-latest, args: "", bundle: "target/release/bundle/msi/*.msi\ntarget/release/bundle/nsis/*.exe" }
+          - { name: linux, os: ubuntu-22.04, args: "", bundle: "target/release/bundle/appimage/*.AppImage\ntarget/release/bundle/deb/*.deb\ntarget/release/bundle/rpm/*.rpm" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@2
+      - name: Linux build dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+        working-directory: apps/desktop-mobile/ui
+      - name: Build (macOS signs and notarises with the APPLE_* variables)
+        working-directory: apps/desktop-mobile/src-tauri
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ matrix.name == 'macos' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ matrix.name == 'macos' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ matrix.name == 'macos' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ matrix.name == 'macos' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ matrix.name == 'macos' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.name == 'macos' && secrets.APPLE_TEAM_ID || '' }}
+        run: |
+          # An empty APPLE_* variable is not "unset" to the bundler: drop them off macOS.
+          if [ "${{ matrix.name }}" != macos ]; then
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+          fi
+          cargo tauri build ${{ matrix.args }} --features tauri-app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.name }}
+          path: ${{ matrix.bundle }}
+          if-no-files-found: error
+
+  android:
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: 29.0.14206865
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@2
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: android-actions/setup-android@v3
+      - name: Android NDK
+        run: |
+          sdkmanager --install "ndk;$NDK_VERSION"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+        working-directory: apps/desktop-mobile/ui
+      - name: Release key
+        working-directory: apps/desktop-mobile/src-tauri/gen/android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > release.jks
+          {
+            echo "storeFile=release.jks"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+          } > keystore.properties
+      - name: Build
+        working-directory: apps/desktop-mobile/src-tauri
+        run: cargo tauri android build --apk --target aarch64 --features tauri-app
+      - name: Check the signature and name the file
+        run: |
+          apk=apps/desktop-mobile/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$apk"
+          mkdir dist && cp "$apk" "dist/Shoebox_${GITHUB_REF_NAME#v}_android-arm64.apk"
+          rm apps/desktop-mobile/src-tauri/gen/android/release.jks apps/desktop-mobile/src-tauri/gen/android/keystore.properties
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/*.apk
+          if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [keeper, desktop, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -69,21 +215,22 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Checksums
-        run: cd dist && sha256sum *.tar.gz > SHA256SUMS
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
       - name: Sign
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: |
           sudo apt-get update && sudo apt-get install -y minisign
-          printf '%s' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
-          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s /tmp/minisign.key -m dist/SHA256SUMS
-          rm /tmp/minisign.key
-      - name: Publish
+          printf '%s' "$MINISIGN_SECRET_KEY" > "$RUNNER_TEMP/minisign.key"
+          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$RUNNER_TEMP/minisign.key" -m dist/SHA256SUMS
+          rm "$RUNNER_TEMP/minisign.key"
+      - name: Publish (draft)
         uses: softprops/action-gh-release@v2
         with:
+          name: Shoebox ${{ github.ref_name }}
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
-            dist/*.tar.gz
-            dist/SHA256SUMS
-            dist/SHA256SUMS.minisig
+            dist/*
             scripts/install-keeper.sh

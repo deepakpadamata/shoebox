@@ -71,6 +71,13 @@ incremental = false
 debug = false
 opt-level = 2
 
+# Smaller downloads: the keeper went from 47.6 MB to 27.7 MB (macOS arm64). Fat LTO failed to link and took longer.
+# Panics still unwind: media import and the Android JNI bridge catch them.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

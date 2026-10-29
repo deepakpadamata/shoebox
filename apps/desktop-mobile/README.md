@@ -58,7 +58,8 @@ A release `.app` (`cargo tauri build --bundles app --features tauri-app`, unsign
 (R1-08): the key in the Keychain, the device kept across restarts, a second launch refused, sync with a keeper and a
 phone. The window itself (rendering, tray, video, file pickers) has been used by the owner but not checked against
 the R1-08 list. Installers for other systems, signing, notarisation and auto-update
-(`.github/workflows/desktop-release.yml`) have never run: they need signing keys and certificates (R1-14).
+(`.github/workflows/release.yml`, see `docs/notes/release-signing.md`) have never run: they need signing keys and
+certificates (R1-14). Windows installers are not code-signed yet.
 
 ## Android (verified on an emulator)
 

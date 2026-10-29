@@ -3,7 +3,7 @@
 # and the minisign signature of the checksum file, and installs the binary.
 #
 #   curl -fsSL <release url>/install-keeper.sh | sh
-#   SHOEBOX_VERSION=keeper-v0.1.0 sh install-keeper.sh      # a specific release
+#   SHOEBOX_VERSION=v0.1.0 sh install-keeper.sh      # a specific release
 #   SHOEBOX_PREFIX=$HOME/.local/bin sh install-keeper.sh    # where to put it
 #
 # Environment (mainly for testing): SHOEBOX_BASE_URL overrides the download location

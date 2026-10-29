@@ -126,7 +126,7 @@ No remote exists, so CI and the release workflows have never run.
   Note: cargo-deny skips *path* crates as "private", so only registry deps are covered by the allow-list; edges
   from libraries to `apps/*` are covered by `scripts/check-no-app-deps.py` (verified by giving `keeper` a temporary
   lib target). Bin-only apps can't be depended on anyway.
-- **A-065 · M2-09** · Release automation is written but never ran: `release.yml` (tag `keeper-v*`; musl x86_64 natively, aarch64 through `cross`, macOS universal via `lipo`; SHA256SUMS signed
+- **A-065 · M2-09** · Release automation is written but never ran: `release.yml` (tag `keeper-v*`, since R1-14 one `v*` tag for every download, see `docs/notes/release-signing.md`; musl x86_64 natively, aarch64 through `cross`, macOS universal via `lipo`; SHA256SUMS signed
   with minisign from repo secrets) and `scripts/install-keeper.sh` (verifies the *signature of SHA256SUMS* then the tarball checksum; refuses to install without `minisign`). The
   project public key is a placeholder (`MINISIGN_PUBKEY`) and the repo/owner is `deepakpadamata/shoebox` (set in R1-13). Not verified: musl/cross builds of the iroh stack, the macOS lipo
   step, real minisign verification, the Debian/Raspberry Pi OS install runs. `scripts/test-install-keeper.sh` covers the script's control flow with a fake minisign (CI runs it).

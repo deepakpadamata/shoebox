@@ -6,6 +6,9 @@
 //!   favourites), or when it is this device's own capture that does not yet have enough copies.
 //!   Everything else lives on keepers.
 //! - **Viewer**: thumbnails and previews only.
+//! - A device other than a keeper that holds an original the app shows as it is (JPEG, PNG) does
+//!   not fetch its preview: the viewer shows the original. Keepers keep every preview, as the
+//!   source the other devices get them from.
 //! - **Shared albums**: previews only, plus originals when the album's "keep originals" is on.
 //!
 //! The caller turns these plans into a queue ordered thumbnails → previews → originals, newest
@@ -25,6 +28,8 @@ pub struct PlanContext {
     pub recent: bool,
     /// The photo is a favourite and this device keeps favourites.
     pub kept_favorite: bool,
+    /// This device holds the original already.
+    pub holds_original: bool,
 }
 
 impl PlanContext {
@@ -32,6 +37,12 @@ impl PlanContext {
     pub fn keeps_original(&self) -> bool {
         self.pinned || self.own_capture_below_target || self.recent || self.kept_favorite
     }
+}
+
+/// An original the app shows as it is, so a device holding it needs no preview. Other formats
+/// (HEIC, camera raw) are not shown by every web view, and videos have no separate preview.
+pub fn shows_directly(mime: &str) -> bool {
+    matches!(mime, "image/jpeg" | "image/png")
 }
 
 /// One blob to fetch.
@@ -68,7 +79,9 @@ pub fn fetch_plan(role: Role, rec: &PhotoRecord, ctx: &PlanContext) -> Vec<Fetch
     if !is_placeholder(&rec.original, &rec.thumb) {
         push_unique(&mut plan, BlobKind::Thumb, &rec.thumb);
     }
-    if !is_placeholder(&rec.original, &rec.preview) {
+    let preview_redundant =
+        role != Role::Keeper && ctx.holds_original && shows_directly(&rec.original.mime);
+    if !is_placeholder(&rec.original, &rec.preview) && !preview_redundant {
         push_unique(&mut plan, BlobKind::Preview, &rec.preview);
     }
     if want_original {
@@ -215,6 +228,7 @@ mod tests {
                     own_capture_below_target: own,
                     recent: true,
                     kept_favorite: true,
+                    holds_original: false,
                 };
                 let plan = fetch_plan(Role::Viewer, &photo(1, 0), &ctx);
                 assert_eq!(kinds(&plan), vec![BlobKind::Thumb, BlobKind::Preview]);
@@ -249,6 +263,39 @@ mod tests {
         ] {
             assert!(kinds(&plan(ctx)).contains(&BlobKind::Original), "{ctx:?}");
         }
+    }
+
+    #[test]
+    fn a_device_holding_an_original_it_can_show_skips_the_preview_but_a_keeper_does_not() {
+        let held = PlanContext {
+            recent: true,
+            holds_original: true,
+            ..PlanContext::default()
+        };
+        assert_eq!(
+            kinds(&fetch_plan(Role::Companion, &photo(1, 0), &held)),
+            vec![BlobKind::Thumb, BlobKind::Original]
+        );
+        assert_eq!(
+            kinds(&fetch_plan(Role::Keeper, &photo(1, 0), &held)),
+            vec![BlobKind::Thumb, BlobKind::Preview, BlobKind::Original],
+            "keepers are where the other devices get previews from"
+        );
+        let mut heic = photo(1, 0);
+        heic.original.mime = "image/heic".into();
+        assert!(
+            kinds(&fetch_plan(Role::Companion, &heic, &held)).contains(&BlobKind::Preview),
+            "not every web view shows HEIC: the preview stays"
+        );
+        let fetching = PlanContext {
+            holds_original: false,
+            ..held
+        };
+        assert!(
+            kinds(&fetch_plan(Role::Companion, &photo(1, 0), &fetching))
+                .contains(&BlobKind::Preview),
+            "until the original is here the preview is what shows"
+        );
     }
 
     #[test]

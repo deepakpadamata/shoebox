@@ -8,6 +8,10 @@
 //! a probe within 7 days. The second is the same rule as "backed up" (a keeper is the backstop),
 //! so a photo the app shows as backed up can also be freed (R1-03). Pinned originals and blobs
 //! that a shared album still references are never freed. Keepers never free space.
+//!
+//! Previews go the same way without being asked for ([`LibraryNode::release_previews`]): a device
+//! that holds an original the app shows as it is needs no preview of it, once a keeper confirmed
+//! it holds that preview (keepers keep every preview, so it is never lost).
 
 use crate::addr::to_iroh_id;
 use crate::blobs::{BlobStore, Protection};
@@ -18,6 +22,7 @@ use iroh::endpoint::Connection;
 use iroh::protocol::{AcceptError, ProtocolHandler};
 use shoebox_core::ids::{Blake3Hash, EndpointId};
 use shoebox_core::model::{BlobKind, PhotoId, Role};
+use shoebox_core::policy::shows_directly;
 use shoebox_core::store::{LibraryStore, Page, TimeRange};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -194,6 +199,113 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(answers)
     }
 
+    /// Non-revoked devices with the Keeper role.
+    async fn keepers(&self) -> Result<HashSet<EndpointId>> {
+        Ok(self
+            .store()
+            .device_list()
+            .await?
+            .devices
+            .iter()
+            .filter(|d| d.role == Role::Keeper && !d.revoked)
+            .map(|d| d.device)
+            .collect())
+    }
+
+    /// Release the previews this device keeps next to an original it shows as it is (JPEG, PNG):
+    /// the viewer shows the original, so the preview only takes room. A preview goes only once a
+    /// keeper confirmed (within seven days) that it holds it, so it is never the last copy; a
+    /// preview a shared album uses stays. Keepers keep theirs. Returns the released previews; the
+    /// blob store collects them shortly after.
+    pub async fn release_previews(&self) -> Result<Vec<Blake3Hash>> {
+        if self.node().config().role == Role::Keeper {
+            return Ok(vec![]);
+        }
+        let me = self.device();
+        let keepers = self.keepers().await?;
+        if keepers.is_empty() {
+            return Ok(vec![]);
+        }
+        let photos = self
+            .store()
+            .photos_by_time(TimeRange::ALL, Page::all())
+            .await?;
+        // (preview, keepers that say they hold it)
+        let mut candidates: Vec<(Blake3Hash, Vec<EndpointId>)> = vec![];
+        for rec in &photos {
+            let preview = rec.preview.hash;
+            if preview == rec.original.hash || !shows_directly(&rec.original.mime) {
+                continue;
+            }
+            let blobs = self.node().blobs();
+            if !blobs.kept(&rec.original.hash).await? || !blobs.kept(&preview).await? {
+                continue;
+            }
+            if blobs
+                .protections(&preview)
+                .await?
+                .iter()
+                .any(|p| matches!(p, Protection::Album(_)))
+            {
+                continue;
+            }
+            let held_by: Vec<EndpointId> = self
+                .store()
+                .holders(&preview)
+                .await?
+                .into_iter()
+                .filter(|h| h.kind == BlobKind::Preview && h.device != me)
+                .map(|h| h.device)
+                .filter(|d| keepers.contains(d))
+                .collect();
+            if !held_by.is_empty() {
+                candidates.push((preview, held_by));
+            }
+        }
+
+        // Ask only about what no keeper confirmed recently.
+        let now = self.now_ms();
+        let mut by_holder: HashMap<EndpointId, Vec<Blake3Hash>> = HashMap::new();
+        {
+            let confirmations = self.inner.confirmations.lock().unwrap();
+            for (preview, held_by) in &candidates {
+                if !held_by.iter().any(|d| confirmations.fresh(d, preview, now)) {
+                    for d in held_by {
+                        by_holder.entry(*d).or_default().push(*preview);
+                    }
+                }
+            }
+        }
+        for (device, hashes) in by_holder {
+            let _ = self.probe_holder(&device, &hashes).await;
+        }
+
+        let now = self.now_ms();
+        let released: Vec<Blake3Hash> = {
+            let confirmations = self.inner.confirmations.lock().unwrap();
+            candidates
+                .into_iter()
+                .filter(|(preview, held_by)| {
+                    held_by.iter().any(|d| confirmations.fresh(d, preview, now))
+                })
+                .map(|(preview, _)| preview)
+                .collect()
+        };
+        if !released.is_empty() {
+            let _exclusive = self.inner.ingest.write().await;
+            for hash in &released {
+                self.node()
+                    .blobs()
+                    .unprotect(hash, Protection::Library)
+                    .await?;
+                self.node().blobs().unprotect(hash, Protection::Pin).await?;
+            }
+            drop(_exclusive);
+            self.retract_holdings(released.clone()).await?;
+        }
+        Ok(released)
+    }
+
     /// The originals this device could drop right now. Probes the other holders first (failures
     /// are ignored: an unreachable holder simply stops being confirmed).
     async fn freeable(&self) -> Result<Vec<(PhotoId, u64)>> {
@@ -209,15 +321,7 @@ impl<L: LibraryStore> LibraryNode<L> {
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?;
 
-        let keepers: HashSet<EndpointId> = self
-            .store()
-            .device_list()
-            .await?
-            .devices
-            .iter()
-            .filter(|d| d.role == Role::Keeper && !d.revoked)
-            .map(|d| d.device)
-            .collect();
+        let keepers = self.keepers().await?;
 
         // (photo, size, other holders, enough of them for the target)
         let mut candidates: Vec<(PhotoId, u64, Vec<EndpointId>, bool)> = vec![];
@@ -284,10 +388,28 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 
     /// Free the originals that are safe to drop. With `dry_run` nothing changes; the report is
-    /// exactly what a real run would free. A real run releases this device's protection (the blob
-    /// store collects the bytes shortly after) and retracts the holdings.
+    /// what a real run would free. A real run first fetches the preview of each photo whose
+    /// preview this device let go (it shows the photo from now on; a photo whose preview cannot
+    /// be fetched keeps its original), then releases this device's protection (the blob store
+    /// collects the bytes shortly after) and retracts the holdings.
     pub async fn free_up_space(&self, dry_run: bool) -> Result<FreeReport> {
-        let freeable = self.freeable().await?;
+        let mut freeable = self.freeable().await?;
+        if !dry_run {
+            let mut kept = Vec::with_capacity(freeable.len());
+            for (id, size) in freeable {
+                let Some(rec) = self.store().photo(&id).await? else {
+                    continue;
+                };
+                let preview = rec.preview.hash;
+                let needed =
+                    preview != rec.original.hash && !self.node().blobs().kept(&preview).await?;
+                if needed && self.fetch_now(&id, BlobKind::Preview).await.is_err() {
+                    continue;
+                }
+                kept.push((id, size));
+            }
+            freeable = kept;
+        }
         let report = FreeReport {
             bytes: freeable.iter().map(|(_, s)| s).sum(),
             photos: freeable.iter().map(|(id, _)| *id).collect(),

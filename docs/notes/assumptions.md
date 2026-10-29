@@ -35,6 +35,15 @@ Android is built and checked on an emulator; iOS is not built. iPhones shoot HEI
 
 The 300 MB at 100k photos target for phones is not met (about 500–700 MB).
 
+- **A-100 · previews next to originals (owner's request, 2026-10-28)** · A device other than a keeper that holds an
+  original the app shows as it is (JPEG, PNG) does not fetch its preview, and lets one it has go once a *keeper*
+  confirmed (`shoebox/has/0`, within 7 days) that it holds it (`LibraryNode::release_previews`, hourly maintenance).
+  The viewer shows the original; a request for the preview is answered with the original (`blob.rs`). Previews are
+  about a quarter of the photo originals' size, so a phone saves that much for every original it holds. Only a keeper
+  counts as the other copy: two phones holding the original could each rely on the other and both drop it, and a
+  preview is not reproduced byte for byte by another build. HEIC and raw keep their previews (not every web view
+  shows them); a preview a shared album uses stays. Freeing an original fetches its preview back first, and keeps the
+  original when that fails. Reverse: drop `holds_original` from `PlanContext` and the maintenance call.
 - **A-101 · rendition encoder (2026-10-28)** · Thumbnails and previews are baseline JPEG with 4:2:0 chroma from
   `jpeg-encoder` (13% smaller, 2.6× faster to encode than the `image` crate's 4:2:2). Not with optimized Huffman
   tables: zune-jpeg 0.5 decodes those 4:2:0 files to the wrong colours (macOS decodes them correctly), and Rust decodes

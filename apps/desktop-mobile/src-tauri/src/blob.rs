@@ -6,6 +6,7 @@ use crate::core::AppCore;
 use anyhow::{anyhow, Result};
 use shoebox_core::ids::Blake3Hash;
 use shoebox_core::model::BlobKind;
+use shoebox_core::policy::shows_directly;
 use std::sync::Arc;
 
 /// Without a `Range` header at most this much is returned (as a partial response); videos and
@@ -65,12 +66,21 @@ pub async fn serve(
                 range: None,
             }));
     }
-    let (blob, bk) = match kind {
+    let (mut blob, mut bk) = match kind {
         "thumb" => (&rec.thumb, BlobKind::Thumb),
         "preview" => (&rec.preview, BlobKind::Preview),
         "original" => (&rec.original, BlobKind::Original),
         other => return Err(anyhow!("unknown kind `{other}`")),
     };
+    if bk == BlobKind::Preview
+        && shows_directly(&rec.original.mime)
+        && core.blobs().size(&blob.hash).await?.is_none()
+        && core.blobs().kept(&rec.original.hash).await?
+    {
+        // A device holding an original it shows as it is lets the preview go
+        // (`LibraryNode::release_previews`): show the original, do not fetch the preview back.
+        (blob, bk) = (&rec.original, BlobKind::Original);
+    }
     if core.blobs().size(&blob.hash).await?.is_none() && bk != BlobKind::Original {
         // Thumbnails and previews are small: get them for the retry.
         core.fetch_in_background(photo, bk);

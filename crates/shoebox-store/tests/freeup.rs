@@ -5,6 +5,7 @@ mod common;
 use common::*;
 use shoebox_core::ids::Blake3Hash;
 use shoebox_core::model::Role;
+use shoebox_core::store::LibraryStore;
 use shoebox_node::{FetcherConfig, ImportOptions, LibraryNode, Protection};
 use shoebox_store::Library;
 use shoebox_testkit::{wait_until, Cluster};
@@ -232,5 +233,110 @@ async fn an_unconfirmed_holder_stops_counting_after_seven_days() {
 async fn keepers_never_free_space() {
     let (c, nodes, _, _) = rig(1).await;
     assert!(nodes[1].free_up_space(true).await.is_err());
+    c.shutdown().await;
+}
+
+/// A phone that holds the originals lets their previews go once the keeper confirmed it holds
+/// them (the viewer shows the original), and fetches a preview back before it frees an original.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn previews_next_to_originals_go_once_a_keeper_holds_them_and_come_back_before_a_free_up() {
+    let (c, nodes, ids, _) = rig(1).await;
+    let (phone, keeper) = (&nodes[0], &nodes[1]);
+    let keeper_id = core_id(&c, 1);
+    let mut previews = vec![];
+    for id in &ids {
+        previews.push(phone.store().photo(id).await.unwrap().unwrap().preview.hash);
+    }
+    wait_until(Duration::from_secs(30), || async {
+        for p in &previews {
+            let held = phone.holders(p).await.unwrap();
+            if !held.iter().any(|h| h.device == keeper_id) {
+                return false;
+            }
+        }
+        true
+    })
+    .await
+    .expect("the phone hears that the keeper holds the previews");
+
+    assert!(
+        keeper.release_previews().await.unwrap().is_empty(),
+        "a keeper keeps every preview"
+    );
+    let mut released = phone.release_previews().await.unwrap();
+    released.sort();
+    let mut expected = previews.clone();
+    expected.sort();
+    assert_eq!(
+        released, expected,
+        "JPEG and PNG originals are shown as they are"
+    );
+    for p in &previews {
+        assert!(phone
+            .node()
+            .blobs()
+            .protections(p)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(
+            keeper.node().blobs().has(p).await.unwrap(),
+            "the keeper's copy stays"
+        );
+    }
+    wait_until(Duration::from_secs(20), || async {
+        for p in &previews {
+            if keeper
+                .holders(p)
+                .await
+                .unwrap()
+                .iter()
+                .any(|h| h.device == phone.device())
+            {
+                return false;
+            }
+        }
+        true
+    })
+    .await
+    .expect("the phone's preview holdings are retracted");
+    assert!(
+        phone.release_previews().await.unwrap().is_empty(),
+        "nothing left"
+    );
+
+    // Freeing the originals brings the previews back first: the phone shows those from now on.
+    let freed = phone.free_up_space(false).await.unwrap();
+    assert_eq!(freed.photos.len(), 3);
+    for p in &previews {
+        assert!(
+            phone.node().blobs().kept(p).await.unwrap(),
+            "preview fetched back"
+        );
+    }
+    c.shutdown().await;
+}
+
+/// Without a keeper nobody is sure to keep a preview, so a phone keeps its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn without_a_keeper_previews_are_kept() {
+    let (c, nodes, _, _) = rig(1).await;
+    nodes[0]
+        .set_device_role(&core_id(&c, 1), Role::Companion)
+        .await
+        .unwrap();
+    wait_until(Duration::from_secs(20), || async {
+        nodes[0]
+            .store()
+            .device_list()
+            .await
+            .unwrap()
+            .devices
+            .iter()
+            .all(|d| d.role != Role::Keeper)
+    })
+    .await
+    .expect("role change applied");
+    assert!(nodes[0].release_previews().await.unwrap().is_empty());
     c.shutdown().await;
 }

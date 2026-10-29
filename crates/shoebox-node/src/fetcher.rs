@@ -201,6 +201,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 own_capture_below_target: own_below,
                 recent: self.is_recent(&rec, &config),
                 kept_favorite: config.keep_favorites && rec.favorite.value,
+                holds_original: self.node().blobs().kept(&rec.original.hash).await?,
             };
             for item in fetch_plan(role, &rec, &ctx) {
                 if !self.node().blobs().has(&item.blob.hash).await? {

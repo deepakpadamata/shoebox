@@ -94,7 +94,8 @@ impl<L: LibraryStore> LibraryNode<L> {
 
     /// Keep this device tidy: every `cfg.interval`, and shortly after the library reports a delete
     /// or purge (including ones that arrive from other devices), run
-    /// [`LibraryNode::purge_expired`] and [`LibraryNode::reconcile_blobs`]. Every device does this
+    /// [`LibraryNode::purge_expired`], [`LibraryNode::reconcile_blobs`] and
+    /// [`LibraryNode::release_previews`]. Every device does this
     /// for itself; purges replicate.
     pub fn start_maintenance(&self, cfg: MaintenanceConfig) {
         let wake = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -154,6 +155,9 @@ async fn maintenance_loop<L: LibraryStore>(
         }
         if let Err(e) = ln.reconcile_blobs().await {
             warn!("blob reconcile failed: {e:#}");
+        }
+        if let Err(e) = ln.release_previews().await {
+            warn!("releasing previews failed: {e:#}");
         }
     }
 }

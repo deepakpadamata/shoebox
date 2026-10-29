@@ -37,6 +37,8 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
   viewer shows the original. A preview goes once a keeper holds it, and comes back before the original is freed. On
   the test library previews were about a quarter of the photos' size (A-100).
 - Thumbnails and previews are 13% smaller and encoded 2.6 times as fast (4:2:0 JPEG from `jpeg-encoder`, A-101).
+- The app's icon (the two linked prints) replaces the 📦 emoji everywhere: the loading screen, the sidebar, first run
+  and the website, which also uses it as its tab icon.
 - Settings → Leave this library: the device stops syncing and starts over at first run, to create a new library or
   join another. Its data folder is set aside next to itself (`….left-<library>-<time>`), not deleted.
 - The six-digit pairing code shows wherever you are in the app: with the "Add a device" sheet closed (the code

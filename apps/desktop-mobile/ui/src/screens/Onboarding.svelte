@@ -1,5 +1,6 @@
 <script lang="ts">
   // First run (mockups 1a–1d): create a library, join one with a pairing ticket, or recover.
+  import Logo from '../components/Logo.svelte';
   import { api, type CreatedLibrary } from '../lib/api';
   import { app, fail, refreshState } from '../lib/store.svelte';
   import Button from '../components/Button.svelte';
@@ -91,7 +92,7 @@
 <div class="onboarding">
   <div class="card panel">
     {#if step === 'welcome'}
-      <div class="logo">📦</div>
+      <div class="logo"><Logo size={64} /></div>
       <h1>Shoebox</h1>
       <p class="muted">Your photos, on your own devices. No account, no cloud you do not control.</p>
       <div class="stack">
@@ -153,7 +154,7 @@
 <style>
   .onboarding { height: 100%; display: grid; place-items: center; background: var(--bg); padding: 20px; overflow: auto; }
   .panel { width: min(460px, 100%); padding: 28px 28px 24px; }
-  .logo { font-size: 44px; text-align: center; }
+  .logo { display: flex; justify-content: center; }
   h1, h2 { margin: 6px 0 8px; letter-spacing: -0.02em; }
   h1 { text-align: center; font-size: 28px; }
   h2 { font-size: 21px; }

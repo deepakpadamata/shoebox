@@ -96,10 +96,11 @@ PAGE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title} · Shoebox</title>
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../style.css">
 </head>
 <body>
-<header class="top"><a class="brand" href="../index.html">📦 Shoebox</a><nav><a href="../index.html#downloads">Download</a><a href="user-guide.html">Guides</a></nav></header>
+<header class="top"><a class="brand" href="../index.html"><img src="../icon.svg" alt="" width="26" height="26">Shoebox</a><nav><a href="../index.html#downloads">Download</a><a href="user-guide.html">Guides</a></nav></header>
 <main class="doc">
 {body}
 </main>

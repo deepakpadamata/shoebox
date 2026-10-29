@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Logo from '../components/Logo.svelte';
   import { api } from '../lib/api';
   import { go, param, section } from '../lib/route.svelte';
   import { app, fail, toast } from '../lib/store.svelte';
@@ -98,7 +99,7 @@
 
 <div class="shell">
   <nav class="sidebar" aria-label="Sections">
-    <div class="brand">📦 Shoebox</div>
+    <div class="brand"><Logo size={22} />Shoebox</div>
     <div class="grp">Library</div>
     {#each nav as n}
       <a class="it" class:on={sec === n.id || (n.id === 'albums' && sec === 'album')} href="#/{n.id}">
@@ -197,7 +198,7 @@
 <style>
   .shell { display: flex; height: 100%; background: var(--surface); }
   .sidebar { width: 220px; flex: none; background: var(--surface-2); border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; overflow: auto; }
-  .brand { font-weight: 700; font-size: 15px; padding: 4px 8px 8px; }
+  .brand { font-weight: 700; font-size: 15px; padding: 4px 8px 8px; display: flex; align-items: center; gap: 8px; }
   .grp { font-size: 11px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; margin: 16px 8px 6px; }
   .it { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; font-size: 13.5px; text-decoration: none; }
   .it:hover { background: var(--surface-3); }

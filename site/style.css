@@ -7,7 +7,7 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.55 -app
 a { color: var(--accent); }
 .top { display: flex; justify-content: space-between; align-items: center; max-width: 1000px; margin: 0 auto; padding: 18px 20px; }
 .top nav a { margin-left: 20px; text-decoration: none; }
-.brand { font-weight: 700; text-decoration: none; color: var(--ink); font-size: 18px; }
+.brand { font-weight: 700; text-decoration: none; color: var(--ink); font-size: 18px; display: inline-flex; align-items: center; gap: 10px; }
 .hero { max-width: 1000px; margin: 0 auto; padding: 36px 20px 20px; }
 .hero h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1.08; letter-spacing: -0.02em; margin: 0 0 16px; max-width: 16em; }
 .hero p { font-size: 20px; color: var(--ink2); max-width: 34em; }

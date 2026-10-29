@@ -94,6 +94,40 @@ body,
   height: 100%;
 }
 
+/* An app, not a page: no text selection, I-beam, dragged images, tap flash, long-press callout or
+   rubber-banding of the whole window. Text you may want to copy opts back in below. */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+img,
+a {
+  -webkit-user-drag: none;
+}
+
+input,
+textarea,
+[contenteditable],
+.mono,
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+input:not([type='checkbox'], [type='radio'], [type='range'], [type='button'], [type='submit']),
+textarea {
+  cursor: text;
+}
+
 body {
   margin: 0;
   background: var(--bg);

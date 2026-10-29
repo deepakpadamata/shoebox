@@ -19,4 +19,13 @@ setTimeout(applyInsets, 300);
 
 applyTextSize(savedTextSize());
 
+// No webview menu (Reload, Inspect…) on right-click, except where there is text to copy or edit.
+// Development builds keep it for the inspector.
+if (import.meta.env.PROD) {
+  addEventListener('contextmenu', (e) => {
+    if ((e.target as Element | null)?.closest?.('input, textarea, [contenteditable], .mono, .selectable')) return;
+    e.preventDefault();
+  });
+}
+
 export default mount(App, { target: document.getElementById('app')! });

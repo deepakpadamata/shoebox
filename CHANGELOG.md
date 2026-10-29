@@ -41,6 +41,9 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
   and the website, which also uses it as its tab icon.
 - The timeline has a date scroller on the right: a pill handle that shows while you scroll or hover, year labels where
   each year starts and a bubble with the month while you drag.
+- The app feels less like a web page: no text selection by dragging, no I-beam cursor, no dragging images out, no tap
+  flash or page bounce, and no webview right-click menu in release builds. Text fields and copyable values still
+  select.
 - Settings → Leave this library: the device stops syncing and starts over at first run, to create a new library or
   join another. Its data folder is set aside next to itself (`….left-<library>-<time>`), not deleted.
 - The six-digit pairing code shows wherever you are in the app: with the "Add a device" sheet closed (the code

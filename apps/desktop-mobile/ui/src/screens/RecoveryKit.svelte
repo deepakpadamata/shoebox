@@ -38,7 +38,7 @@
 <div class="stack">
   {#if phrase}
     <p class="small muted">These 24 words are the only way to get back into this library if every device is lost. Anyone with them can take it over. Print them or store them in a password manager, not next to your photos.</p>
-    <ol class="words">
+    <ol class="words selectable">
       {#each words as w, i}<li><span class="n">{i + 1}</span>{w}</li>{/each}
     </ol>
     <div class="row-flex">

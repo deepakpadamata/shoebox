@@ -44,6 +44,9 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
 - The app feels less like a web page: no text selection by dragging, no I-beam cursor, no dragging images out, no tap
   flash or page bounce, and no webview right-click menu in release builds. Text fields and copyable values still
   select.
+- Selecting: a circle on each photo and by each date (on hover with a mouse), the date selects its day while
+  selecting, and a small floating bar of glyphs that no longer pushes the grid down (on a phone a long-press then
+  selected the photo above). A long-press drag selects the whole run and scrolls at the top and bottom edges.
 - Settings → Leave this library: the device stops syncing and starts over at first run, to create a new library or
   join another. Its data folder is set aside next to itself (`….left-<library>-<time>`), not deleted.
 - The six-digit pairing code shows wherever you are in the app: with the "Add a device" sheet closed (the code

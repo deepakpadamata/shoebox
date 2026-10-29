@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifySwipe, stepDensity } from './gestures';
+import { classifySwipe, edgeSpeed, stepDensity } from './gestures';
 
 describe('gestures', () => {
   it('classifies swipes and ignores short or diagonal drags', () => {
@@ -19,5 +19,18 @@ describe('gestures', () => {
     expect(stepDensity(180, 2, steps)).toBe(180);
     expect(stepDensity(72, 0.4, steps)).toBe(72);
     expect(stepDensity(100, 1.5, steps)).toBe(130);
+  });
+});
+
+describe('edgeSpeed', () => {
+  it('scrolls only near the edges, faster closer to them', () => {
+    expect(edgeSpeed(400, 0, 800)).toBe(0);
+    expect(edgeSpeed(72, 0, 800)).toBe(0);
+    expect(edgeSpeed(60, 0, 800)).toBeLessThan(0);
+    expect(edgeSpeed(10, 0, 800)).toBeLessThan(edgeSpeed(60, 0, 800));
+    expect(edgeSpeed(0, 0, 800)).toBe(-22);
+    expect(edgeSpeed(-50, 0, 800)).toBe(-22);
+    expect(edgeSpeed(790, 0, 800)).toBeGreaterThan(edgeSpeed(740, 0, 800));
+    expect(edgeSpeed(900, 0, 800)).toBe(22);
   });
 });

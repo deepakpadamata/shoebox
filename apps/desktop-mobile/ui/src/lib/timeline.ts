@@ -10,6 +10,8 @@ export interface HeadRow {
   height: number;
   day: string;
   count: number;
+  /** Index of the day's first item. */
+  from: number;
 }
 export interface TileRow {
   type: 'tiles';
@@ -47,7 +49,7 @@ export function buildLayout(items: PhotoSummary[], o: LayoutOptions): Layout {
     const day = dayKey(items[i].taken_at);
     let j = i;
     while (j < items.length && dayKey(items[j].taken_at) === day) j++;
-    rows.push({ type: 'head', top, height: o.headHeight, day, count: j - i });
+    rows.push({ type: 'head', top, height: o.headHeight, day, count: j - i, from: i });
     top += o.headHeight;
     for (let k = i; k < j; k += cols) {
       const to = Math.min(k + cols, j);

@@ -112,42 +112,84 @@ export function pinch(node: HTMLElement, opts: PinchOptions) {
 export interface LongPressDragOptions {
   /** A long press started on the element under the finger. */
   onStart(el: Element | null): void;
-  /** The finger moved (after a long press) over this element. */
+  /** The finger moved (after a long press) over this element, or the view scrolled under it. */
   onOver(el: Element | null): void;
   onEnd(): void;
   delayMs?: number;
 }
 
-/** Long-press to start, then drag across items (multi-select by drag, mockup 2b). */
+/**
+ * Auto-scroll speed (px per frame) for a finger at `y` in a view from `top` to `bottom`: zero
+ * outside the edge bands, rising to `max` at the edge and beyond; negative scrolls up.
+ */
+export function edgeSpeed(y: number, top: number, bottom: number, band = 72, max = 22): number {
+  const ramp = (d: number) => Math.round(max * Math.min(1, Math.max(0, (band - d) / band)) ** 2);
+  if (y - top < band) return -ramp(y - top);
+  if (bottom - y < band) return ramp(bottom - y);
+  return 0;
+}
+
+/**
+ * Long-press to start, then drag across items (multi-select by drag, mockup 2b). Near the top or
+ * bottom edge the view scrolls by itself, and the items passing under the finger keep counting.
+ */
 export function longPressDrag(node: HTMLElement, opts: LongPressDragOptions) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let active = false;
   let origin: { x: number; y: number } | null = null;
-  const at = (e: PointerEvent) => document.elementFromPoint(e.clientX, e.clientY);
+  let finger: { x: number; y: number } | null = null;
+  let frame = 0;
+  const at = (x: number, y: number) => {
+    // Probe inside the view, even with the finger past its edge.
+    const r = node.getBoundingClientRect();
+    return document.elementFromPoint(x, Math.min(r.bottom - 2, Math.max(r.top + 2, y)));
+  };
+  const scroll = () => {
+    frame = 0;
+    if (!active || !finger) return;
+    const r = node.getBoundingClientRect();
+    const v = edgeSpeed(finger.y, r.top, r.bottom);
+    if (v === 0) return;
+    const before = node.scrollTop;
+    node.scrollTop += v;
+    if (node.scrollTop !== before) opts.onOver(at(finger.x, finger.y));
+    frame = requestAnimationFrame(scroll);
+  };
   const down = (e: PointerEvent) => {
     if (e.pointerType === 'mouse') return;
-    origin = { x: e.clientX, y: e.clientY };
+    origin = finger = { x: e.clientX, y: e.clientY };
     timer = setTimeout(() => {
       active = true;
-      opts.onStart(at(e));
+      node.dataset.dragSelecting = '';
+      opts.onStart(at(e.clientX, e.clientY));
     }, opts.delayMs ?? 450);
   };
   const move = (e: PointerEvent) => {
+    finger = { x: e.clientX, y: e.clientY };
     if (active) {
       e.preventDefault();
-      opts.onOver(at(e));
+      opts.onOver(at(e.clientX, e.clientY));
+      if (!frame) frame = requestAnimationFrame(scroll);
     } else if (origin && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > 10) {
       clearTimeout(timer); // it is a scroll, not a long press
     }
   };
+  // Once selecting, the finger must not also scroll the page: only the edge auto-scroll does.
+  const touchmove = (e: TouchEvent) => {
+    if (active && e.cancelable) e.preventDefault();
+  };
   const end = () => {
     clearTimeout(timer);
+    cancelAnimationFrame(frame);
+    frame = 0;
     if (active) opts.onEnd();
     active = false;
-    origin = null;
+    delete node.dataset.dragSelecting;
+    origin = finger = null;
   };
   node.addEventListener('pointerdown', down);
   node.addEventListener('pointermove', move, { passive: false });
+  node.addEventListener('touchmove', touchmove, { passive: false });
   node.addEventListener('pointerup', end);
   node.addEventListener('pointercancel', end);
   return {
@@ -155,6 +197,7 @@ export function longPressDrag(node: HTMLElement, opts: LongPressDragOptions) {
       end();
       node.removeEventListener('pointerdown', down);
       node.removeEventListener('pointermove', move);
+      node.removeEventListener('touchmove', touchmove);
       node.removeEventListener('pointerup', end);
       node.removeEventListener('pointercancel', end);
     },
@@ -206,6 +249,12 @@ export function pullRefresh(node: HTMLElement, opts: PullRefreshOptions) {
   };
   const move = (e: TouchEvent) => {
     if (!pulling) return;
+    // A long-press drag-select (`longPressDrag`) owns this touch.
+    if ('dragSelecting' in node.dataset) {
+      pulling = false;
+      wrap.style.opacity = '0';
+      return;
+    }
     const dy = e.touches[0].clientY - startY;
     if (dy <= 0 || node.scrollTop > 0) {
       wrap.style.opacity = '0';

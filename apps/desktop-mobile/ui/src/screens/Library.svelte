@@ -79,11 +79,23 @@
     const t = el?.closest('[data-index]');
     return t ? Number(t.getAttribute('data-index')) : -1;
   }
-  function selectAt(el: Element | null) {
+  // The drag selects the run from the pressed photo to the one under the finger, on top of what
+  // was selected before: nothing is skipped when the view scrolls fast, and going back unselects.
+  let dragFrom = -1;
+  let dragTo = -1;
+  let dragBase: string[] = [];
+  function dragStart(el: Element | null) {
+    dragFrom = dragTo = -1;
+    dragBase = selected;
+    dragOver(el);
+  }
+  function dragOver(el: Element | null) {
     const i = indexOf(el);
-    if (i < 0) return;
-    const id = items[i]?.id;
-    if (id && !selectedSet.has(id)) selected = [...selected, id];
+    if (i < 0 || !items[i] || i === dragTo) return;
+    if (dragFrom < 0) dragFrom = i;
+    dragTo = i;
+    const run = items.slice(Math.min(dragFrom, i), Math.max(dragFrom, i) + 1).map((p) => p.id);
+    selected = [...new Set([...dragBase, ...run])];
     lastClicked = i;
   }
   // First sync: a new device has the list of photos long before it has their previews.
@@ -192,15 +204,32 @@
 
   function click(i: number, e: MouseEvent) {
     const id = items[i].id;
+    // The circle on a tile selects it, also to start selecting.
+    const onCircle = (e.target as Element | null)?.closest('.sel') !== null;
     if (e.shiftKey && lastClicked >= 0) {
       const [a, b] = [Math.min(lastClicked, i), Math.max(lastClicked, i)];
       selected = [...new Set([...selected, ...items.slice(a, b + 1).map((p) => p.id)])];
-    } else if (selecting || e.metaKey || e.ctrlKey) {
+    } else if (selecting || onCircle || e.metaKey || e.ctrlKey) {
       selected = selectedSet.has(id) ? selected.filter((x) => x !== id) : [...selected, id];
       lastClicked = i;
     } else {
       viewing = i;
     }
+  }
+
+  // The circle by a date selects the whole day, or clears it when all of it is selected.
+  function dayIds(from: number, count: number) {
+    return items.slice(from, from + count).map((p) => p.id);
+  }
+  function toggleDay(from: number, count: number) {
+    const ids = dayIds(from, count);
+    if (ids.every((id) => selectedSet.has(id))) {
+      const drop = new Set(ids);
+      selected = selected.filter((id) => !drop.has(id));
+    } else {
+      selected = [...new Set([...selected, ...ids])];
+    }
+    lastClicked = from + count - 1;
   }
 
   async function act<T>(f: () => Promise<T>, done?: string) {
@@ -261,15 +290,26 @@
 
 <svelte:window onkeydown={keydown} />
 
+{#snippet glyph(name: 'close' | 'share' | 'heart' | 'album' | 'keep' | 'unalbum' | 'trash')}
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    {#if name === 'close'}<path d="M6 6l12 12M18 6L6 18" />
+    {:else if name === 'heart'}<path class="fill" d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20z" />
+    {:else if name === 'album'}<rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="M12 8v8M8 12h8" />
+    {:else if name === 'keep'}<path d="M12 4v10M7.5 9.5L12 14l4.5-4.5M5 19.5h14" />
+    {:else if name === 'unalbum'}<rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="M8 12h8" />
+    {:else}<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 11v5M14 11v5" />{/if}
+  </svg>
+{/snippet}
+
 <div class="wrap">
-  {#if firstSync && !selecting}
+  {#if firstSync}
     <div class="getting" role="status">
       <b>Getting your photos</b>
       <span class="muted small">{(wantThumbs.length - missingThumbs).toLocaleString('en')} of {wantThumbs.length.toLocaleString('en')} previews are on this device.{gettingEta}</span>
       <ProgressBar total={wantThumbs.length} segments={[{ value: wantThumbs.length - missingThumbs, tone: 'info' }]} label="Previews downloaded" />
     </div>
   {/if}
-  {#if source === 'album' && album && !selecting}
+  {#if source === 'album' && album}
     <div class="sharebar">
       {#if sharedAs}
         <span class="grow small">Shared with others. Photos you add here are shared too.</span>
@@ -280,27 +320,13 @@
       {/if}
     </div>
   {/if}
-  {#if selecting}
-    <div class="selbar">
-      <b>{selected.length} selected</b>
-      <span class="grow"></span>
-      <Button size="sm" onclick={() => act(() => api.setFavorite(selected, !allFavorite))}>{allFavorite ? '♡ Unfavorite' : '♥ Favorite'}</Button>
-      <Button size="sm" onclick={openAlbumSheet}>＋ Add to album</Button>
-      <Button size="sm" onclick={() => act(() => Promise.all(selected.map((id) => api.pinOriginal(id, true))), 'Originals will be kept on this device')}>📌 Keep on this device</Button>
-      {#if source === 'album' && album}
-        <Button size="sm" onclick={() => act(() => api.albumRemove(album, selected), 'Removed from the album').then(() => (selected = []))}>Remove from album</Button>
-      {/if}
-      <Button size="sm" kind="danger" onclick={removeSelected}>Delete from all devices</Button>
-      <Button size="sm" kind="ghost" onclick={() => (selected = [])}>Cancel</Button>
-    </div>
-  {/if}
 
   <div class="body">
   <div class="scroller" id="timeline" class:railed={showRail} bind:this={scroller} bind:clientWidth={width} bind:clientHeight={viewport}
     onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}
     use:pinch={{ onEnd: setDensity }}
     use:pullRefresh={{ onRefresh: refreshEverything }}
-    use:longPressDrag={{ onStart: selectAt, onOver: selectAt, onEnd: () => {} }}>
+    use:longPressDrag={{ onStart: dragStart, onOver: dragOver, onEnd: () => (dragFrom = dragTo = -1) }}>
     {#if !loaded || (items.length === 0 && !complete)}
       <div class="empty">Loading…</div>
     {:else if items.length === 0}
@@ -324,8 +350,16 @@
       <div class="canvas" style="height:{layout.height}px">
         {#each shown as row (row.top)}
           {#if row.type === 'head'}
-            <div class="head" style="top:{row.top}px;height:{row.height}px">
-              <b>{dayLabel(row.day)}</b><span>{row.count.toLocaleString('en')}</span>
+            {@const all = dayIds(row.from, row.count).every((id) => selectedSet.has(id))}
+            <div class="head" class:selecting style="top:{row.top}px;height:{row.height}px">
+              <!-- Circle and date are one target while selecting; otherwise only the circle is. -->
+              <button class="day" class:all aria-pressed={all} aria-label="Select {dayLabel(row.day)}" title={all ? 'Clear this day' : 'Select this day'}
+                onclick={() => toggleDay(row.from, row.count)}>
+                <span class="circle"><svg viewBox="0 0 24 24"><path d="M7 12.5l3.2 3.2L17 9" /></svg></span>
+                <b>{dayLabel(row.day)}</b>
+              </button>
+              <span class="grow"></span>
+              <span class="n">{row.count.toLocaleString('en')}</span>
             </div>
           {:else}
             <div class="tiles" style="top:{row.top}px;height:{row.height}px;gap:{GAP}px">
@@ -338,8 +372,27 @@
         {/each}
       </div>
       {#if !complete}<div class="more muted small" role="status">Loading older photos…</div>{/if}
+      {#if selecting}<div class="barroom" aria-hidden="true"></div>{/if}
     {/if}
   </div>
+  {#if selecting}
+    <!-- Floats over the grid, so starting a selection moves nothing under the finger. -->
+    <div class="selbar" role="toolbar" aria-label="{selected.length} selected">
+      <button class="ic" title="Clear selection" aria-label="Clear selection" onclick={() => (selected = [])}>{@render glyph('close')}</button>
+      <b class="count">{selected.length.toLocaleString('en')}</b>
+      <span class="sep"></span>
+      <button class="ic" class:on={allFavorite} title={allFavorite ? 'Unfavorite' : 'Favorite'} aria-label={allFavorite ? 'Unfavorite' : 'Favorite'}
+        onclick={() => act(() => api.setFavorite(selected, !allFavorite))}>{@render glyph('heart')}</button>
+      <button class="ic" title="Add to album" aria-label="Add to album" onclick={openAlbumSheet}>{@render glyph('album')}</button>
+      <button class="ic" title="Keep on this device" aria-label="Keep on this device"
+        onclick={() => act(() => Promise.all(selected.map((id) => api.pinOriginal(id, true))), 'Originals will be kept on this device')}>{@render glyph('keep')}</button>
+      {#if source === 'album' && album}
+        <button class="ic" title="Remove from album" aria-label="Remove from album"
+          onclick={() => act(() => api.albumRemove(album, selected), 'Removed from the album').then(() => (selected = []))}>{@render glyph('unalbum')}</button>
+      {/if}
+      <button class="ic danger" title="Delete from all devices" aria-label="Delete from all devices" onclick={removeSelected}>{@render glyph('trash')}</button>
+    </div>
+  {/if}
   {#if showRail}
     <DateRail {layout} {scrollTop} {viewport} onseek={(top) => { if (scroller) scroller.scrollTop = top; }} />
   {/if}
@@ -373,17 +426,42 @@
 <style>
   .wrap { height: 100%; display: flex; flex-direction: column; min-height: 0; }
   .sharebar { display: flex; gap: 8px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line); }
-  .selbar { display: flex; gap: 8px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--accent-soft); flex-wrap: wrap; }
+  .selbar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 2px;
+    padding: 4px 6px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .selbar .count { min-width: 22px; padding: 0 6px 0 2px; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .selbar .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+  .ic { width: 40px; height: 40px; border: 0; border-radius: 12px; background: transparent; color: var(--ink); display: grid; place-items: center; cursor: pointer; padding: 0; }
+  .ic:hover { background: var(--surface-2); }
+  .ic svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .ic.on { color: var(--accent); }
+  .ic.on .fill { fill: currentColor; }
+  .ic.danger { color: var(--risk); }
   .body { flex: 1; position: relative; min-height: 0; display: flex; flex-direction: column; }
   .scroller { flex: 1; overflow-y: auto; position: relative; min-height: 0; touch-action: pan-y; }
   .scroller.railed { scrollbar-width: none; }
   .scroller.railed::-webkit-scrollbar { display: none; }
   .scroller.railed .head { padding-right: 30px; }
   .canvas { position: relative; }
+  .barroom { height: 72px; }
   .more { padding: 14px 18px 24px; text-align: center; }
   .head { position: absolute; left: 0; right: 0; display: flex; justify-content: space-between; align-items: baseline; padding: 20px 18px 6px; }
+  .head { gap: 6px; align-items: center; }
   .head b { font-size: 15px; }
-  .head span { font-size: 12px; color: var(--ink-3); }
+  .head .n { font-size: 12px; color: var(--ink-3); }
+  /* The day's select circle, left of the date: it slides in on hover (mouse) and while selecting. */
+  .day { display: flex; align-items: center; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+  .circle { width: 0; height: 24px; margin-right: 0; flex: none; display: grid; place-items: center; position: relative; opacity: 0;
+    transition: width 0.15s, margin-right 0.15s, opacity 0.15s; }
+  .circle::before { content: ''; position: absolute; left: 1px; top: 3px; width: 18px; height: 18px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--ink-2); }
+  .circle svg { position: relative; width: 12px; height: 12px; fill: none; stroke: var(--accent-ink); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
+  .head.selecting .circle, .day:focus-visible .circle { width: 20px; margin-right: 6px; opacity: 1; }
+  .day.all .circle::before { background: var(--accent); border-color: var(--accent); }
+  .day.all .circle svg { opacity: 1; }
+  .head:not(.selecting) .day { pointer-events: none; cursor: default; }
+  @media (hover: hover) {
+    .head:hover .circle { width: 20px; margin-right: 6px; opacity: 1; }
+    .head:not(.selecting) .circle { pointer-events: auto; cursor: pointer; }
+  }
   .tiles { position: absolute; left: 0; right: 0; display: flex; }
   .getting { padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; background: var(--info-soft); }
   .empty { height: 100%; display: grid; place-content: center; text-align: center; gap: 6px; color: var(--ink-2); padding: 20px; }

@@ -32,7 +32,7 @@
   {#if video}<span class="vid" aria-label="Video">▶</span>{/if}
   {#if transferring}<span class="b sync" title="Transferring">↻</span>
   {:else if risk}<span class="b risk" title="Only {copies} {copies === 1 ? 'copy' : 'copies'}">{copies} {copies === 1 ? 'copy' : 'copies'}</span>{/if}
-  {#if selecting}<span class="sel" aria-hidden="true">{selected ? '✓' : ''}</span>{/if}
+  <span class="sel" class:on={selecting} aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 12.5l3.2 3.2L17 9" /></svg></span>
 </button>
 
 <style>
@@ -45,7 +45,20 @@
   .b.sync { background: var(--info); color: #fff; }
   .vid { position: absolute; left: 5px; bottom: 4px; font-size: 10px; color: #fff; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
   .fav { position: absolute; left: 5px; top: 3px; font-size: 11px; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
-  .sel { position: absolute; right: 5px; top: 5px; width: 18px; height: 18px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.15); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
-  .selected .sel { background: var(--accent); }
+  /* The select circle: on every tile while selecting, and on the one under the mouse. */
+  .sel { position: absolute; right: 4px; top: 4px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+    opacity: 0; transition: opacity 0.12s; cursor: pointer; }
+  .sel::before { content: ''; position: absolute; inset: 4px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.2); box-shadow: 0 1px 3px rgba(0,0,0,.35); }
+  .sel svg { position: relative; width: 14px; height: 14px; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
+  .sel.on, .selected .sel { opacity: 1; }
+  .selected .sel::before { background: var(--accent); border-color: var(--accent); }
+  .selected .sel svg { opacity: 1; }
+  @media (hover: hover) {
+    .tile:hover .sel { opacity: 1; }
+    .tile:hover .sel:not(.on) svg { opacity: 0.7; }
+    .tile:not(.selected) .sel:hover::before { background: rgba(0,0,0,.4); }
+  }
+  /* Without a mouse a hidden circle takes no taps: the tap opens the photo. */
+  @media (hover: none) { .sel:not(.on) { pointer-events: none; } }
   .selected::after { content: ''; position: absolute; inset: 0; background: rgba(255,255,255,.25); pointer-events: none; }
 </style>

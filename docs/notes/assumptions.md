@@ -68,6 +68,14 @@ The 300 MB at 100k photos target for phones is not met (about 500–700 MB).
   on another device that is HLC-later than the marker wins, as for the 30-day purge. `LibraryNode::purge_deleted` then
   releases the blobs nothing references. Gallery files and watched-folder files are never touched (A-092): only the
   library's record and its own copies go. Any device that can write the library can do it, like deleting.
+- **A-104 · video posters in the library (owner's request, 2026-10-29)** · A video's `thumb` was its original (a
+  placeholder) and each device made and kept its own poster frame. Now a poster becomes the video's `thumb`
+  (`LibraryNode::set_video_poster`, a JPEG of at most 480 px, about 15 KB) and replicates, is fetched and is kept like
+  a photo's thumbnail. `PhotoRecord::merge` ranks a real thumb above the placeholder (then the lowest, as before), so
+  the first poster any device adds wins everywhere; no format change, and a build without this rule still converges
+  on the placeholder it prefers among its own replicas. Android makes posters during backup with the system
+  thumbnailer (`PhotoSource::video_frame`, at most 60 a run); elsewhere the app grabs a frame when it shows a video no
+  device has a poster for. Posters in an earlier build's `posters/` folder move into the library at start, once.
 - **A-032 · M1-05** · The docs backend keeps the *replicated records* as iroh-docs entries (layout in
   `shoebox-store-docs::codec`, values `[v1] ++ postcard`) and answers queries from a merged in-memory `LibraryState`
   rebuilt at open and refreshed by (debounced) rescans. This deviates from the issue's "secondary key by taken_at":

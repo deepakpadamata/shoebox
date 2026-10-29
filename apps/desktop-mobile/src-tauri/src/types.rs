@@ -118,8 +118,10 @@ ts_type! {
         /// Enough devices hold the original, or a keeper does.
         pub backed_up: bool,
         pub has_thumb: bool,
-        /// A poster frame exists on this device (videos only; see `set_poster`).
+        /// The video's poster frame is on this device (videos only; see `set_poster`).
         pub has_poster: bool,
+        /// No device has made this video's poster frame yet: one that can play it should.
+        pub needs_poster: bool,
         pub has_original: bool,
         pub width: u32,
         pub height: u32,

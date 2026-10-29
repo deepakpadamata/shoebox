@@ -128,7 +128,8 @@ impl PhotoRecord {
     ///
     /// - immutable fields (blobs, EXIF, importer) come from the content-addressed original; if
     ///   two importers produced different previews/thumbs, the lowest `(original, preview, thumb,
-    ///   taken_at, exif, imported_by)` wins on every replica;
+    ///   taken_at, exif, imported_by)` wins on every replica, except that a real thumb always
+    ///   beats a placeholder (a video's thumb is its original until a device adds a poster frame);
     /// - `favorite` and `deleted_at` are independent [`Lww`] registers.
     pub fn merge(&self, other: &Self) -> Result<Self, IdMismatch> {
         if self.id != other.id {
@@ -138,6 +139,7 @@ impl PhotoRecord {
             (
                 p.original.clone(),
                 p.preview.clone(),
+                p.thumb.hash == p.original.hash,
                 p.thumb.clone(),
                 p.taken_at,
                 p.exif.clone(),
@@ -324,6 +326,31 @@ mod tests {
         let merged = p.merge(&restored).unwrap();
         assert!(!merged.is_deleted());
         assert_eq!(merged, restored.merge(&p).unwrap());
+    }
+
+    #[test]
+    fn a_video_poster_beats_the_placeholder_whatever_the_hashes() {
+        use crate::ids::Blake3Hash;
+        use crate::model::BlobRef;
+        let mut video = photo();
+        video.preview = video.original.clone();
+        video.thumb = video.original.clone();
+        // One poster sorts below the original's hash, one above: both must win.
+        for b in [0u8, 9] {
+            let mut with_poster = video.clone();
+            with_poster.thumb = BlobRef {
+                hash: Blake3Hash([b; 32]),
+                size: 9,
+                mime: "image/jpeg".into(),
+            };
+            assert_eq!(video.merge(&with_poster).unwrap().thumb, with_poster.thumb);
+            assert_eq!(with_poster.merge(&video).unwrap().thumb, with_poster.thumb);
+        }
+        // Two different posters: the same one wins on every replica.
+        let (mut a, mut b) = (video.clone(), video.clone());
+        a.thumb.hash = Blake3Hash([7; 32]);
+        b.thumb.hash = Blake3Hash([8; 32]);
+        assert_eq!(a.merge(&b).unwrap(), b.merge(&a).unwrap());
     }
 
     #[test]

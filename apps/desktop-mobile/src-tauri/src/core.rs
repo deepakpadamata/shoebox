@@ -653,6 +653,7 @@ impl AppCore {
         }
         *self.shared.write().await = Some(shared);
         *self.library.write().await = Some(ln);
+        self.adopt_local_posters();
         Ok(())
     }
 
@@ -983,13 +984,6 @@ impl AppCore {
             .collect();
         let blobs = self.node.blobs().clone();
         let protected = Arc::new(blobs.protected().await?);
-        let posters: HashSet<String> = std::fs::read_dir(self.dir.join("posters"))
-            .map(|dir| {
-                dir.flatten()
-                    .filter_map(|e| e.file_name().into_string().ok())
-                    .collect()
-            })
-            .unwrap_or_default();
         // (thumbnail stored, original kept), many requests in flight. Owned values only: a
         // borrowing closure here would make every command's future not `Send`.
         let wanted: Vec<(Blake3Hash, Blake3Hash)> = recs
@@ -1013,16 +1007,19 @@ impl AppCore {
             let holders = ln.store().holders(&rec.original.hash).await?;
             let originals = || holders.iter().filter(|h| h.kind == BlobKind::Original);
             let copies = originals().count();
+            let is_video = rec.original.mime.starts_with("video/");
+            let placeholder = rec.thumb.hash == rec.original.hash;
             out.push(PhotoSummary {
                 id: rec.id.to_string(),
                 taken_at: rec.taken_at.0 as f64,
                 favorite: rec.favorite.value,
-                is_video: rec.original.mime.starts_with("video/"),
+                is_video,
                 copies: copies as u32,
                 // Safe once enough devices hold it, or once any keeper does.
                 backed_up: copies >= target || originals().any(|h| keepers.contains(&h.device)),
                 has_thumb,
-                has_poster: posters.contains(&format!("{}.jpg", rec.id)),
+                has_poster: is_video && !placeholder && has_thumb,
+                needs_poster: is_video && placeholder,
                 has_original,
                 width: rec.exif.width,
                 height: rec.exif.height,
@@ -1662,11 +1659,47 @@ impl AppCore {
 
     // ---------- poster frames ----------
 
-    /// Videos have no poster in the library (the record's thumbnail is the video itself), so
-    /// each device keeps its own: the UI grabs a frame from the video it can play and hands it
-    /// back. Device-local on purpose; it is a cache and never replicates.
+    /// A video's poster frame becomes its thumb in the library (`LibraryNode::set_video_poster`),
+    /// made once by a device that can play it and then synced like any thumbnail. Earlier builds
+    /// kept a poster per device in this folder; [`AppCore::adopt_local_posters`] moves them over.
     pub(crate) fn poster_path(&self, id: &Blake3Hash) -> PathBuf {
         self.dir.join("posters").join(format!("{id}.jpg"))
+    }
+
+    /// Hand the posters an earlier build kept in `posters/` to the library, once.
+    fn adopt_local_posters(self: &Arc<Self>) {
+        let dir = self.dir.join("posters");
+        if !dir.is_dir() {
+            return;
+        }
+        let weak = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                return;
+            };
+            let mut adopted = 0u32;
+            for path in entries.flatten().map(|e| e.path()) {
+                let Some(core) = weak.upgrade() else { return };
+                let Ok(ln) = core.ln().await else { return };
+                let id = path.file_stem().and_then(|s| s.to_str()).map(parse_hash);
+                if let (Some(Ok(id)), Ok(jpeg)) = (id, std::fs::read(&path)) {
+                    match ln.set_video_poster(&id, jpeg).await {
+                        Ok(true) => adopted += 1,
+                        Ok(false) => {}
+                        // A photo no longer in the library, or not a poster: nothing to keep.
+                        Err(e) => tracing::debug!("poster {}: {e:#}", path.display()),
+                    }
+                }
+                let _ = std::fs::remove_file(&path);
+            }
+            let _ = std::fs::remove_dir(&dir);
+            if let Some(core) = weak.upgrade() {
+                tracing::info!(adopted, "posters moved into the library");
+                if adopted > 0 {
+                    core.emit(AppEvent::LibraryChanged);
+                }
+            }
+        });
     }
 
     pub async fn set_poster(&self, id: &str, base64_jpeg: &str) -> Result<()> {
@@ -1683,17 +1716,9 @@ impl AppCore {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(base64_jpeg.trim())
             .map_err(|_| anyhow!("the poster is not valid base64"))?;
-        ensure!(
-            bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
-            "the poster must be a JPEG"
-        );
-        ensure!(bytes.len() <= 2 * 1024 * 1024, "the poster is too large");
-        let path = self.poster_path(&id);
-        std::fs::create_dir_all(path.parent().expect("has parent"))?;
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, &bytes)?;
-        std::fs::rename(tmp, path)?;
-        self.emit(AppEvent::LibraryChanged);
+        if self.ln().await?.set_video_poster(&id, bytes).await? {
+            self.emit(AppEvent::LibraryChanged);
+        }
         Ok(())
     }
 

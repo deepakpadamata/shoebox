@@ -133,6 +133,11 @@ class PhotoLibraryPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun videoFrame(invoke: Invoke) = guarded(invoke, "cannot make a poster frame") {
+        JSObject().put("jpeg", backend.videoFrame(invoke.getArgs().getString("path") ?: throw IllegalArgumentException("missing path")))
+    }
+
+    @Command
     fun conditions(invoke: Invoke) = guarded(invoke, "conditions") { json(backend.conditionsJson()) }
 
     @Command

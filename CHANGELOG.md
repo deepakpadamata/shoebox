@@ -49,6 +49,8 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
   selected the photo above). A long-press drag selects the whole run and scrolls at the top and bottom edges.
 - Share: selected photos go into one of your shared albums (or a new one), or to other apps through the system share
   sheet on Android and the share picker on macOS; originals not on the device are fetched first.
+- Video poster frames are made once and kept in the library like thumbnails, so every device shows them at once; a
+  phone makes them natively during backup. Posters each device kept for itself move into the library (A-104).
 - Settings → Leave this library: the device stops syncing and starts over at first run, to create a new library or
   join another. Its data folder is set aside next to itself (`….left-<library>-<time>`), not deleted.
 - The six-digit pairing code shows wherever you are in the app: with the "Add a device" sheet closed (the code

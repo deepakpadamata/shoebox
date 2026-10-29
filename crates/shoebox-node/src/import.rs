@@ -25,6 +25,8 @@ const WATCH_DEBOUNCE: Duration = Duration::from_millis(400);
 const PROGRESS_EVERY: usize = 10;
 /// Publish holdings after this many newly stored blobs, so a crash loses little.
 const HOLDINGS_BATCH: usize = 300;
+/// A poster frame is a small JPEG (480 px long edge, tens of KB); anything near this is not one.
+const MAX_POSTER_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct ImportOptions {
@@ -206,6 +208,43 @@ impl<L: LibraryStore> LibraryNode<L> {
             let _ = self.announce_new_items(report.imported.len() as u32).await;
         }
         Ok(report)
+    }
+
+    /// Give a video its poster frame (a JPEG): it becomes the video's thumb in the library, so every
+    /// device shows it and fetches it like a photo's thumbnail. A video that already has one keeps
+    /// it; returns whether this one was taken.
+    pub async fn set_video_poster(&self, id: &PhotoId, jpeg: Vec<u8>) -> Result<bool> {
+        anyhow::ensure!(
+            jpeg.starts_with(&[0xFF, 0xD8, 0xFF]),
+            "a poster frame must be a JPEG"
+        );
+        anyhow::ensure!(jpeg.len() <= MAX_POSTER_BYTES, "the poster frame is too large");
+        let _ingesting = self.inner.ingest.read().await;
+        let store = self.store();
+        let Some(rec) = store.photo(id).await? else {
+            anyhow::bail!("unknown photo {id}");
+        };
+        if !rec.original.mime.starts_with("video/") || rec.thumb.hash != rec.original.hash {
+            return Ok(false);
+        }
+        let size = jpeg.len() as u64;
+        let hash = self
+            .node()
+            .blobs()
+            .add_bytes(jpeg, Protection::Library)
+            .await?;
+        store
+            .upsert_photo(PhotoRecord {
+                thumb: BlobRef {
+                    hash,
+                    size,
+                    mime: "image/jpeg".into(),
+                },
+                ..rec
+            })
+            .await?;
+        self.publish_holdings(vec![(hash, BlobKind::Thumb)]).await?;
+        Ok(true)
     }
 
     async fn ingest(

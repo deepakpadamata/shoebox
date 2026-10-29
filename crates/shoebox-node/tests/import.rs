@@ -185,9 +185,32 @@ async fn videos_are_imported_with_placeholder_renditions() {
     assert_eq!(p.original.mime, "video/mp4");
     assert_eq!(
         p.thumb, p.original,
-        "poster frames arrive in M3-10; until then the original stands in"
+        "until a device adds a poster frame, the original stands in"
     );
     assert_eq!(p.exif.width, 320);
+    r.ln.node().shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_video_poster_becomes_its_thumb_once() {
+    let r = rig().await;
+    let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/samples");
+    let report =
+        r.ln.import_paths(&[samples.join("clip.mp4")], ImportOptions::default())
+            .await
+            .unwrap();
+    let id = report.imported[0];
+    let poster = |b: u8| [vec![0xFF, 0xD8, 0xFF, 0xE0], vec![b; 64]].concat();
+    assert!(r.ln.set_video_poster(&id, b"not a jpeg".to_vec()).await.is_err());
+    assert!(r.ln.set_video_poster(&id, poster(1)).await.unwrap());
+    let p = r.ln.store().photo(&id).await.unwrap().unwrap();
+    assert_ne!(p.thumb.hash, p.original.hash);
+    assert_eq!(p.thumb.mime, "image/jpeg");
+    assert_eq!(p.preview, p.original, "the viewer still plays the video");
+    assert!(r.ln.node().blobs().has(&p.thumb.hash).await.unwrap());
+    // A second poster does not replace the first.
+    assert!(!r.ln.set_video_poster(&id, poster(2)).await.unwrap());
+    assert_eq!(r.ln.store().photo(&id).await.unwrap().unwrap().thumb, p.thumb);
     r.ln.node().shutdown().await.unwrap();
 }
 

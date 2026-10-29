@@ -54,8 +54,13 @@ pub async fn serve(
         .record(&photo)
         .await?
         .ok_or_else(|| anyhow!("no such photo"))?;
+    // A video's poster frame is its thumb in the library once a device made one; before that,
+    // a poster this device made earlier may still wait in its old folder (`adopt_local_posters`).
+    let kind = match kind {
+        "poster" if rec.thumb.hash != rec.original.hash => "thumb",
+        other => other,
+    };
     if kind == "poster" {
-        // The device-local poster frame of a video (see `AppCore::set_poster`).
         return Ok(std::fs::read(core.poster_path(&photo))
             .ok()
             .map(|bytes| BlobBytes {

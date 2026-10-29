@@ -83,6 +83,23 @@ pub trait PhotoSource: Send + Sync {
     fn read_picked(&self, _handle: &str) -> BoxFuture<'_, Result<PathBuf>> {
         Box::pin(async { Err(anyhow!("choosing photos is not available on this device")) })
     }
+    /// A poster frame (JPEG) for the video at `path`, made by the system's own thumbnailer;
+    /// `None` where there is none.
+    fn video_frame(&self, _path: &str) -> BoxFuture<'_, Result<Option<Vec<u8>>>> {
+        Box::pin(async { Ok(None) })
+    }
+}
+
+/// The JPEG in a base64 reply from the platform side; empty means none.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub(crate) fn decode_frame(base64_jpeg: &str) -> Result<Option<Vec<u8>>> {
+    use base64::Engine;
+    if base64_jpeg.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(
+        base64::engine::general_purpose::STANDARD.decode(base64_jpeg)?,
+    ))
 }
 
 /// An in-memory camera roll for tests and demos: assets are files the test creates.

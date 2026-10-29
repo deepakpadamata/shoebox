@@ -13,6 +13,10 @@ copies: number,
  */
 backed_up: boolean, has_thumb: boolean, 
 /**
- * A poster frame exists on this device (videos only; see `set_poster`).
+ * The video's poster frame is on this device (videos only; see `set_poster`).
  */
-has_poster: boolean, has_original: boolean, width: number, height: number, };
+has_poster: boolean, 
+/**
+ * No device has made this video's poster frame yet: one that can play it should.
+ */
+needs_poster: boolean, has_original: boolean, width: number, height: number, };

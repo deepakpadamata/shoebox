@@ -369,7 +369,7 @@
             <div class="tiles" style="top:{row.top}px;height:{row.height}px;gap:{GAP}px">
               {#each items.slice(row.from, row.to) as p, k (p.id)}
                 <Tile index={row.from + k} id={p.id} size={layout.tile} favorite={p.favorite} video={p.is_video} copies={p.copies} {target}
-                  takenAt={p.taken_at} hasThumb={p.has_thumb} hasPoster={p.has_poster} hasOriginal={p.has_original} backedUp={p.backed_up} selected={selectedSet.has(p.id)} {selecting} onclick={(e) => click(row.from + k, e)} />
+                  takenAt={p.taken_at} hasThumb={p.has_thumb} hasPoster={p.has_poster} needsPoster={p.needs_poster} hasOriginal={p.has_original} backedUp={p.backed_up} selected={selectedSet.has(p.id)} {selecting} onclick={(e) => click(row.from + k, e)} />
               {/each}
             </div>
           {/if}

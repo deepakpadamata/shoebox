@@ -5,14 +5,18 @@
   interface Props {
     id: string; size: number; favorite?: boolean; video?: boolean; copies?: number; target?: number;
     transferring?: boolean; selected?: boolean; selecting?: boolean; hasThumb?: boolean;
-    hasPoster?: boolean; hasOriginal?: boolean; backedUp?: boolean; index?: number; takenAt?: number;
+    hasPoster?: boolean; needsPoster?: boolean; hasOriginal?: boolean; backedUp?: boolean; index?: number; takenAt?: number;
     onclick?: (e: MouseEvent) => void;
   }
-  let { id, size, favorite = false, video = false, copies, target = 2, transferring = false, selected = false, selecting = false, hasThumb = true, hasPoster = false, hasOriginal = false, backedUp = true, index, takenAt, onclick }: Props = $props();
-  // A video's poster is made on this device once the original is here; until then a neutral tile.
+  let { id, size, favorite = false, video = false, copies, target = 2, transferring = false, selected = false, selecting = false, hasThumb = true, hasPoster = false, needsPoster = false, hasOriginal = false, backedUp = true, index, takenAt, onclick }: Props = $props();
+  // A video nobody has made a poster for yet gets one here if this device has the original;
+  // until then a neutral tile. (One made elsewhere arrives like any thumbnail.)
   let madePoster = $state(false);
   $effect(() => {
-    if (video && !hasPoster && hasOriginal) ensurePoster(id).then((ok) => (madePoster = ok));
+    if (!(video && needsPoster && hasOriginal)) return;
+    const { result, release } = ensurePoster(id);
+    result.then((ok) => (madePoster = ok));
+    return release;
   });
   const poster = $derived(video && (hasPoster || madePoster));
   // Badges only where it matters (design README): red = not backed up enough, blue = in transit.

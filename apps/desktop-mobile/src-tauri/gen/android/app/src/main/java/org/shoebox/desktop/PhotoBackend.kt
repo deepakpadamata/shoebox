@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.database.Cursor
+import android.graphics.Bitmap
+import android.media.ThumbnailUtils
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -16,11 +18,14 @@ import android.os.BatteryManager
 import android.os.Build
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.util.Base64
+import android.util.Size
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -195,6 +200,35 @@ class PhotoBackend(private val context: Context) {
     }
 
     /** Wi-Fi (an unmetered connection), charging and the battery level. */
+    /**
+     * A poster frame of the video at [path] as a base64 JPEG, from the system's own thumbnailer
+     * (no decoding in the app); "" when it cannot make one.
+     */
+    fun videoFrame(path: String): String {
+        val bitmap = try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                ThumbnailUtils.createVideoThumbnail(File(path), Size(480, 480), null)
+            } else {
+                @Suppress("DEPRECATION")
+                ThumbnailUtils.createVideoThumbnail(path, MediaStore.Images.Thumbnails.MINI_KIND)
+            }
+        } catch (e: Exception) {
+            null
+        } ?: return ""
+        // The thumbnailer may hand back more than was asked for.
+        val scale = minOf(1f, 480f / maxOf(bitmap.width, bitmap.height))
+        val small = if (scale < 1f) {
+            Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt().coerceAtLeast(1), (bitmap.height * scale).toInt().coerceAtLeast(1), true)
+        } else {
+            bitmap
+        }
+        val out = ByteArrayOutputStream()
+        small.compress(Bitmap.CompressFormat.JPEG, 80, out)
+        if (small !== bitmap) small.recycle()
+        bitmap.recycle()
+        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+    }
+
     fun conditionsJson(): String {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val caps = cm.getNetworkCapabilities(cm.activeNetwork)

@@ -45,6 +45,11 @@ struct PathReply {
 }
 
 #[derive(Deserialize)]
+struct FrameReply {
+    jpeg: String,
+}
+
+#[derive(Deserialize)]
 struct PickReply {
     items: Vec<Picked>,
 }
@@ -165,6 +170,13 @@ impl PhotoSource for AndroidPhotoSource {
         Box::pin(async move {
             let r: PathReply = self.call("readPicked", json!({ "uri": uri })).await?;
             Ok(PathBuf::from(r.path))
+        })
+    }
+    fn video_frame(&self, path: &str) -> BoxFuture<'_, Result<Option<Vec<u8>>>> {
+        let path = path.to_string();
+        Box::pin(async move {
+            let r: FrameReply = self.call("videoFrame", json!({ "path": path })).await?;
+            crate::photos_source::decode_frame(&r.jpeg)
         })
     }
     fn conditions(&self) -> BoxFuture<'_, Result<Conditions>> {

@@ -20,6 +20,7 @@ use crate::types::{
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use shoebox_core::ids::Blake3Hash;
+use shoebox_core::store::LibraryStore;
 use shoebox_node::{ImportMode, ImportOptions, LibraryNode};
 use shoebox_store::Library;
 use std::collections::BTreeMap;
@@ -28,6 +29,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const BATCH: usize = 24;
+/// Poster frames tried per backup run (each one a system thumbnail, a fraction of a second).
+const POSTERS_PER_RUN: usize = 60;
 const TICK: Duration = Duration::from_secs(30);
 /// More gallery deletions than this at once, and more than a quarter of the photos, wait for
 /// the person to confirm: a card swapped out or a storage glitch must not empty the library.
@@ -266,6 +269,7 @@ impl AppCore {
         // no conditions apply.
         self.check_gallery(&*source, &ln).await?;
         self.continue_moves(&ln).await?;
+        self.make_posters(&*source, &ln).await;
 
         let mut report = BackupReport::default();
         if let Some(reason) = self.viewer_pause() {
@@ -283,6 +287,7 @@ impl AppCore {
         // 3. Import what is waiting, in place.
         let todo: Vec<Asset> = self.backup.lock().await.pending.values().cloned().collect();
         self.import_in_place(&ln, todo, &mut report, true).await?;
+        self.make_posters(&*source, &ln).await;
         report.pending = self.backup.lock().await.pending.len() as u32;
         Ok(report)
     }
@@ -393,6 +398,47 @@ impl AppCore {
             }
         }
         Ok(())
+    }
+
+    /// Give gallery videos that have no poster frame in the library one from the system's
+    /// thumbnailer, so no device has to decode them to show a tile. At most [`POSTERS_PER_RUN`]
+    /// tries a run; the rest follow on later runs. Never fails the backup.
+    async fn make_posters(&self, source: &dyn PhotoSource, ln: &LibraryNode<Library>) {
+        let tracked: Vec<(String, String)> = {
+            let st = self.backup.lock().await;
+            st.tracked
+                .values()
+                .map(|t| (t.hash.clone(), t.path.clone()))
+                .collect()
+        };
+        let (mut tried, mut made) = (0usize, 0usize);
+        for (hash, path) in tracked {
+            if tried >= POSTERS_PER_RUN {
+                break;
+            }
+            let Ok(id) = crate::core::parse_hash(&hash) else {
+                continue;
+            };
+            let Ok(Some(rec)) = ln.store().photo(&id).await else {
+                continue;
+            };
+            if !rec.original.mime.starts_with("video/") || rec.thumb.hash != rec.original.hash {
+                continue;
+            }
+            tried += 1;
+            match source.video_frame(&path).await {
+                Ok(Some(jpeg)) => match ln.set_video_poster(&id, jpeg).await {
+                    Ok(_) => made += 1,
+                    Err(e) => tracing::debug!("poster for {path}: {e:#}"),
+                },
+                Ok(None) => {}
+                Err(e) => tracing::debug!("poster frame of {path}: {e:#}"),
+            }
+        }
+        if made > 0 {
+            tracing::info!(made, "poster frames made from the gallery");
+            self.emit(AppEvent::LibraryChanged);
+        }
     }
 
     /// Reference the gallery file for copies whose collection has happened.

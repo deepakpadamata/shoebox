@@ -17,6 +17,7 @@ shoebox-core.workspace = true
 blake3.workspace = true
 thiserror.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+jpeg-encoder = { version = "0.7", features = ["simd"] }
 kamadak-exif = "0.6"
 libheif-rs = { version = "3", optional = true }
 

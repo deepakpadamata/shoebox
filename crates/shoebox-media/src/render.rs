@@ -99,17 +99,30 @@ pub fn orient(mut image: DynamicImage, exif_orientation: u16) -> DynamicImage {
     image
 }
 
+/// Baseline JPEG with 4:2:0 chroma (what cameras write): 13% smaller than the `image` crate's
+/// 4:2:2 at the same quality and 2.6 times as fast (2048 px previews of 20 camera photos: 529 →
+/// 459 KB, 68 → 27 ms on x86). Not with optimized Huffman tables: zune-jpeg 0.5 (the `image`
+/// crate's decoder, so the import of such a file) decodes those 4:2:0 files to the wrong colours.
 fn encode_jpeg(image: &DynamicImage, quality: u8) -> Result<Rendition, AnalyzeError> {
     let rgb = image.to_rgb8();
+    let (width, height) = (rgb.width(), rgb.height());
+    let too_big = || AnalyzeError::Decode(format!("{width}x{height} is too big to encode"));
     let mut bytes = Vec::new();
-    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, quality)
-        .encode_image(&rgb)
+    let mut encoder = jpeg_encoder::Encoder::new(&mut bytes, quality);
+    encoder.set_sampling_factor(jpeg_encoder::SamplingFactor::R_4_2_0);
+    encoder
+        .encode(
+            rgb.as_raw(),
+            u16::try_from(width).map_err(|_| too_big())?,
+            u16::try_from(height).map_err(|_| too_big())?,
+            jpeg_encoder::ColorType::Rgb,
+        )
         .map_err(|e| AnalyzeError::Decode(e.to_string()))?;
     Ok(Rendition {
         bytes,
         mime: "image/jpeg".into(),
-        width: rgb.width(),
-        height: rgb.height(),
+        width,
+        height,
     })
 }
 

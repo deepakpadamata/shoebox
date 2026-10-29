@@ -24,9 +24,9 @@ allow = [
 ]
 unused-allowed-license = "allow"
 
-# IJG is permissive but requires attribution in shipped binaries. jpeg-encoder is used only by the
-# developer-only `xtask` (synthetic fixtures), so allow it for that crate alone; if it ever enters a
-# shipped crate, add the attribution to the third-party notices first.
+# IJG is permissive but requires attribution in shipped binaries. jpeg-encoder encodes the thumbnails
+# and previews (shoebox-media) and the xtask fixtures; its LICENSE-IJG is in each app's
+# THIRD-PARTY-LICENSES.txt (scripts/licences.py collects it). Allowed for that crate alone.
 [[licenses.exceptions]]
 crate = "jpeg-encoder"
 allow = ["IJG"]

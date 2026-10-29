@@ -6658,6 +6658,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "image",
+ "jpeg-encoder",
  "kamadak-exif",
  "libheif-rs",
  "serde_json",

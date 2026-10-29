@@ -35,6 +35,10 @@ Android is built and checked on an emulator; iOS is not built. iPhones shoot HEI
 
 The 300 MB at 100k photos target for phones is not met (about 500–700 MB).
 
+- **A-101 · rendition encoder (2026-10-28)** · Thumbnails and previews are baseline JPEG with 4:2:0 chroma from
+  `jpeg-encoder` (13% smaller, 2.6× faster to encode than the `image` crate's 4:2:2). Not with optimized Huffman
+  tables: zune-jpeg 0.5 decodes those 4:2:0 files to the wrong colours (macOS decodes them correctly), and Rust decodes
+  whatever is imported. Only new imports get the new renditions. Reverse: `render::encode_jpeg`.
 - **A-032 · M1-05** · The docs backend keeps the *replicated records* as iroh-docs entries (layout in
   `shoebox-store-docs::codec`, values `[v1] ++ postcard`) and answers queries from a merged in-memory `LibraryState`
   rebuilt at open and refreshed by (debounced) rescans. This deviates from the issue's "secondary key by taken_at":

@@ -25,6 +25,7 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
 - Large originals (8 MB and up) come from all the devices that hold them at once, in pieces, each verified as it
   arrives; a device that cannot help is skipped (A-099). On home Wi-Fi a phone got 128 MB from a Mac and a Linux keeper
   together in about 5 s, against 6.5 s from the Mac alone and 12 s from the keeper alone.
+- Thumbnails and previews are 13% smaller and encoded 2.6 times as fast (4:2:0 JPEG from `jpeg-encoder`, A-101).
 - Settings → Leave this library: the device stops syncing and starts over at first run, to create a new library or
   join another. Its data folder is set aside next to itself (`….left-<library>-<time>`), not deleted.
 - The six-digit pairing code shows wherever you are in the app: with the "Add a device" sheet closed (the code

@@ -218,7 +218,10 @@ impl<L: LibraryStore> LibraryNode<L> {
             jpeg.starts_with(&[0xFF, 0xD8, 0xFF]),
             "a poster frame must be a JPEG"
         );
-        anyhow::ensure!(jpeg.len() <= MAX_POSTER_BYTES, "the poster frame is too large");
+        anyhow::ensure!(
+            jpeg.len() <= MAX_POSTER_BYTES,
+            "the poster frame is too large"
+        );
         let _ingesting = self.inner.ingest.read().await;
         let store = self.store();
         let Some(rec) = store.photo(id).await? else {

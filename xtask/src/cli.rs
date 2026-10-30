@@ -14,6 +14,14 @@ pub enum Command {
     Samples {
         out: PathBuf,
     },
+    Gazetteer {
+        input: PathBuf,
+        out: PathBuf,
+    },
+    Models {
+        dir: PathBuf,
+        check: bool,
+    },
     Help,
 }
 
@@ -24,7 +32,14 @@ usage:
       Generate a synthetic photo corpus (default: medium into fixtures-out/<preset>).
       `large` is metadata-only by default (manifest only, for benchmarks).
   cargo xtask samples [--out DIR]
-      Regenerate the checked-in sample files (default: fixtures/samples).";
+      Regenerate the checked-in sample files (default: fixtures/samples).
+  cargo xtask gazetteer [--in DIR] [--out FILE]
+      Build the place list from GeoNames dumps downloaded by hand into DIR
+      (default: fixtures-out/geonames) into FILE (default: crates/shoebox-search/data/places.bin).
+  cargo xtask models [--dir DIR] [--check]
+      Fetch the search models from pinned URLs into DIR (default: models), build the files Shoebox
+      ships and write their hashes to crates/shoebox-search/src/models.rs. With --check, fail
+      unless the built files match that file (release builds). Needs curl and uv.";
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
     let mut it = args.iter().map(String::as_str);
@@ -67,6 +82,29 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                 }
             }
             Ok(Command::Samples { out })
+        }
+        Some("gazetteer") => {
+            let mut input = PathBuf::from("fixtures-out/geonames");
+            let mut out = PathBuf::from("crates/shoebox-search/data/places.bin");
+            while let Some(flag) = it.next() {
+                match flag {
+                    "--in" => input = PathBuf::from(it.next().ok_or("--in needs a value")?),
+                    "--out" => out = PathBuf::from(it.next().ok_or("--out needs a value")?),
+                    other => return Err(format!("unknown flag `{other}`")),
+                }
+            }
+            Ok(Command::Gazetteer { input, out })
+        }
+        Some("models") => {
+            let (mut dir, mut check) = (PathBuf::from("models"), false);
+            while let Some(flag) = it.next() {
+                match flag {
+                    "--dir" => dir = PathBuf::from(it.next().ok_or("--dir needs a value")?),
+                    "--check" => check = true,
+                    other => return Err(format!("unknown flag `{other}`")),
+                }
+            }
+            Ok(Command::Models { dir, check })
         }
         Some(other) => Err(format!("unknown task `{other}`")),
     }

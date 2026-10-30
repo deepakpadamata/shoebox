@@ -2,7 +2,8 @@
   // Full-size viewer (M3-08/09): the preview shows at once, the original replaces it when it is
   // here or once fetched on demand; the info panel says where every copy is stored.
   import { onMount } from 'svelte';
-  import { api, blobUrl, videoUrl, type PhotoDetail, type PhotoSummary } from '../lib/api';
+  import { api, blobUrl, videoUrl, type FaceOut, type PhotoDetail, type PhotoSummary } from '../lib/api';
+  import FaceCrop from '../components/FaceCrop.svelte';
   import { bytes, dateTime, plural } from '../lib/format';
   import { fail, toast } from '../lib/store.svelte';
   import Button from '../components/Button.svelte';
@@ -10,8 +11,8 @@
   import Row from '../components/Row.svelte';
   import List from '../components/List.svelte';
 
-  interface Props { items: PhotoSummary[]; index: number; onclose: () => void; onmove: (delta: number) => void; }
-  let { items, index, onclose, onmove }: Props = $props();
+  interface Props { items: PhotoSummary[]; index: number; onclose: () => void; onmove: (delta: number) => void; onsimilar?: (id: string) => void; }
+  let { items, index, onclose, onmove, onsimilar }: Props = $props();
 
   // The viewer takes one history entry, so the system back gesture (Android) closes it and
   // returns to the library instead of leaving the app. Closing it any other way gives the
@@ -53,7 +54,30 @@
         originalReady = d.has_original;
       }
     }).catch(fail);
+    faces = [];
+    api.photoFaces(id).then((f) => { if (photo.id === id) faces = f; }).catch(() => {});
   });
+
+  const focusNow = (el: HTMLElement) => el.focus();
+  // People in this photo (S1-19): name a face, or say who it is not.
+  let faces = $state<FaceOut[]>([]);
+  let naming = $state<number | null>(null);
+  let faceName = $state('');
+  async function nameFace(f: FaceOut) {
+    try {
+      await api.labelFace(f.photo, f.rect, { name: faceName });
+      naming = null;
+      faceName = '';
+      faces = await api.photoFaces(f.photo);
+    } catch (e) { fail(e); }
+  }
+  async function notThem(f: FaceOut) {
+    try {
+      await api.labelFace(f.photo, f.rect, { not: f.person! });
+      faces = await api.photoFaces(f.photo);
+      toast(`Not ${f.name}`);
+    } catch (e) { fail(e); }
+  }
 
   // A video's preview and thumbnail are the video itself (no poster frames in the record yet):
   // an image of one only fails, slowly. Show this device's poster frame, or nothing.
@@ -132,6 +156,7 @@
       <span class="grow"></span>
       <button class="icon" aria-label="Favorite" aria-pressed={photo.favorite} onclick={toggleFavorite}>{photo.favorite ? '♥' : '♡'}</button>
       <button class="icon" aria-label="Info" aria-pressed={info} onclick={() => (info = !info)}>ⓘ</button>
+      {#if onsimilar}<button class="icon" aria-label="Similar photos" title="Similar photos" onclick={() => onsimilar(photo.id)}>≈</button>{/if}
       <button class="icon" aria-label="Delete" onclick={remove}>🗑</button>
     </div>
     <button class="nav left" aria-label="Previous" disabled={index === 0} onclick={() => onmove(-1)}>‹</button>
@@ -159,6 +184,26 @@
 
   {#if info}
     <aside class="info">
+      {#if faces.length}
+        <div class="people">
+          <span class="small muted">People in this photo</span>
+          {#each faces as f, i}
+            <div class="face-row">
+              <FaceCrop face={f} size={36} />
+              {#if naming === i}
+                <input class="input grow" placeholder="Name" bind:value={faceName} use:focusNow onkeydown={(e) => e.key === 'Enter' && nameFace(f)} />
+                <Button size="sm" disabled={!faceName.trim()} onclick={() => nameFace(f)}>Save</Button>
+              {:else if f.person}
+                <span class="grow small">{f.name || 'Unnamed'}</span>
+                <button class="link small" onclick={() => notThem(f)}>Not {f.name || 'them'}</button>
+              {:else}
+                <span class="grow small muted">Someone</span>
+                <button class="link small" onclick={() => { naming = i; faceName = ''; }}>Name</button>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
       {#if detail}
         <div class="stack">
           <div>
@@ -217,4 +262,8 @@
   .section { font-size: 12px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; margin-top: 14px !important; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-3); display: inline-block; }
   .dot.on { background: var(--ok); }
+  .people { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .face-row { display: flex; align-items: center; gap: 8px; }
+  .face-row .grow { flex: 1; min-width: 0; }
+  .link { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; }
 </style>

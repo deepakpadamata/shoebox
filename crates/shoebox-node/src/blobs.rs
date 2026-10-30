@@ -10,6 +10,7 @@
 //! | `pin/<hash>` | the user pinned this original on this device |
 //! | `album/<album>/<hash>` | a shared album references it (M5 hooks in here) |
 //! | `place/<hash>` | the original is a file outside the store, read where it is (a phone's gallery photo): never freed, and released when that file goes |
+//! | `idx/<hash>` | search data: an index shard (S1-07), the people snapshot or a model file. Never freed up; released when no longer live |
 //!
 //! A blob is collected only once all its tags are gone, so a shared-album reference blocks the
 //! GC of a blob even after the library purges the photo.
@@ -35,6 +36,8 @@ pub enum Protection {
     /// The original is a file outside the store, referenced where it is (a phone's gallery).
     InPlace,
     Album(AlbumId),
+    /// Search data (index shards, the people snapshot, model files): `idx/<hash>`.
+    Index,
 }
 
 /// How [`BlobStore::add_path`] brings a file in.
@@ -57,6 +60,7 @@ impl Protection {
             Protection::Pin => format!("pin/{}", hex(h)),
             Protection::InPlace => format!("place/{}", hex(h)),
             Protection::Album(a) => format!("album/{}/{}", ::hex::encode(a.0), hex(h)),
+            Protection::Index => format!("idx/{}", hex(h)),
         }
     }
 }
@@ -159,7 +163,7 @@ impl BlobStore {
         while let Some(tag) = tags.next().await {
             let tag = tag?;
             let name = tag.name.as_ref();
-            if [&b"lib/"[..], b"pin/", b"place/", b"album/"]
+            if [&b"lib/"[..], b"pin/", b"place/", b"album/", b"idx/"]
                 .iter()
                 .any(|p| name.starts_with(p))
             {
@@ -233,12 +237,21 @@ impl BlobStore {
 
     /// Every blob this device holds on behalf of the library (those with a `lib/` protection).
     pub async fn library_protected(&self) -> Result<Vec<Blake3Hash>> {
+        self.protected_as("lib/").await
+    }
+
+    /// Every blob held as search data (an `idx/` protection).
+    pub async fn index_protected(&self) -> Result<Vec<Blake3Hash>> {
+        self.protected_as("idx/").await
+    }
+
+    async fn protected_as(&self, prefix: &str) -> Result<Vec<Blake3Hash>> {
         let mut out = vec![];
-        let mut tags = self.store.tags().list_prefix("lib/").await?;
+        let mut tags = self.store.tags().list_prefix(prefix).await?;
         while let Some(tag) = tags.next().await {
             let tag = tag?;
             let name = String::from_utf8_lossy(tag.name.as_ref()).to_string();
-            if let Some(hex) = name.strip_prefix("lib/") {
+            if let Some(hex) = name.strip_prefix(prefix) {
                 if let Ok(bytes) = ::hex::decode(hex) {
                     if let Ok(arr) = <[u8; 32]>::try_from(bytes.as_slice()) {
                         out.push(Blake3Hash(arr));
@@ -249,10 +262,15 @@ impl BlobStore {
         Ok(out)
     }
 
-    /// Every protection currently holding `hash`, sorted (Library, Pin, InPlace, then albums).
+    /// Every protection currently holding `hash`, sorted (Library, Pin, InPlace, albums, Index).
     pub async fn protections(&self, hash: &Blake3Hash) -> Result<Vec<Protection>> {
         let mut out = vec![];
-        for p in [Protection::Library, Protection::Pin, Protection::InPlace] {
+        for p in [
+            Protection::Library,
+            Protection::Pin,
+            Protection::InPlace,
+            Protection::Index,
+        ] {
             if self.store.tags().get(p.tag_name(hash)).await?.is_some() {
                 out.push(p);
             }

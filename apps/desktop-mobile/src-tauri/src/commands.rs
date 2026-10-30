@@ -37,6 +37,21 @@ pub const COMMANDS: &[&str] = &[
     "pair_start",
     "mark_recovery_kit_saved",
     "library_page",
+    "search",
+    "search_suggestions",
+    "similar",
+    "people",
+    "person_photos",
+    "name_person",
+    "merge_people",
+    "hide_person",
+    "set_me",
+    "photo_faces",
+    "label_face",
+    "set_people",
+    "search_status",
+    "set_search_indexing",
+    "rebuild_search_index",
     "counts",
     "photo_detail",
     "set_favorite",
@@ -150,6 +165,56 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             .library_page(
                 opt::<PageCursor>(&args, "cursor")?,
                 opt::<u32>(&args, "limit")?.unwrap_or(200),
+            )
+            .await?),
+        "search" => out(core
+            .search(
+                &arg::<String>(&args, "text")?,
+                opt::<u32>(&args, "cursor")?,
+                opt::<u32>(&args, "limit")?.unwrap_or(200),
+                opt::<i32>(&args, "tz_offset_min")?.unwrap_or(0),
+            )
+            .await?),
+        "search_status" => out(core.search_status().await?),
+        "people" => out(core.people().await?),
+        "person_photos" => out(core.person_photos(&arg::<String>(&args, "id")?).await?),
+        "name_person" => out(core
+            .name_person(&arg::<String>(&args, "id")?, &arg::<String>(&args, "name")?)
+            .await?),
+        "merge_people" => out(core
+            .merge_people(
+                &arg::<String>(&args, "from")?,
+                &arg::<String>(&args, "into")?,
+            )
+            .await?),
+        "hide_person" => out(core
+            .hide_person(&arg::<String>(&args, "id")?, arg::<bool>(&args, "hidden")?)
+            .await?),
+        "set_me" => out(core.set_me(&arg::<String>(&args, "id")?).await?),
+        "photo_faces" => out(core.photo_faces(&arg::<String>(&args, "photo")?).await?),
+        "label_face" => out(core
+            .label_face(
+                &arg::<String>(&args, "photo")?,
+                &arg::<Vec<f32>>(&args, "rect")?,
+                opt::<String>(&args, "person")?.as_deref(),
+                opt::<String>(&args, "name")?.as_deref(),
+                opt::<String>(&args, "not")?.as_deref(),
+            )
+            .await?),
+        "set_people" => out(core.set_people(arg::<bool>(&args, "on")?).await?),
+        "set_search_indexing" => out(core.set_search_indexing(arg::<bool>(&args, "on")?).await?),
+        "rebuild_search_index" => out(core.rebuild_search_index().await?),
+        "similar" => out(core
+            .similar(
+                &arg::<String>(&args, "photo")?,
+                opt::<u32>(&args, "cursor")?,
+                opt::<u32>(&args, "limit")?.unwrap_or(200),
+            )
+            .await?),
+        "search_suggestions" => out(core
+            .search_suggestions(
+                &arg::<String>(&args, "prefix")?,
+                opt::<u32>(&args, "limit")?.unwrap_or(12),
             )
             .await?),
         "counts" => out(core.counts().await?),

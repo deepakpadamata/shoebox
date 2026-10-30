@@ -42,6 +42,12 @@ enum Cmd {
         /// this: a disk that is not mounted yet must not get a new, empty keeper).
         #[arg(long)]
         no_create: bool,
+        /// Threads for indexing photos for search (default: half the cores).
+        #[arg(long)]
+        max_threads: Option<usize>,
+        /// Do not index photos for search by meaning (searching still works).
+        #[arg(long)]
+        no_index: bool,
     },
     /// Pair this keeper with a library using a ticket from “Add a device”.
     Pair {
@@ -87,6 +93,25 @@ enum Cmd {
     Service {
         #[command(subcommand)]
         action: ServiceCmd,
+    },
+    /// Search the library on this keeper ("2019", "Lisbon", "videos last summer").
+    Search {
+        query: String,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        /// Local time zone, minutes east of UTC ("today" is then the local today).
+        #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
+        tz_offset: i32,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Indexing for search by meaning: `status` (default), `pause`, `resume`, or `compact` the
+    /// index shards now.
+    Index {
+        #[arg(default_value = "status")]
+        action: String,
+        #[arg(long)]
+        json: bool,
     },
     /// Stop the running daemon.
     Stop,
@@ -247,6 +272,8 @@ async fn main() -> Result<()> {
             no_mdns,
             no_update_check,
             no_create,
+            max_threads,
+            no_index,
         } => {
             tracing_subscriber::fmt()
                 .with_env_filter(
@@ -260,6 +287,8 @@ async fn main() -> Result<()> {
             opts.relay = relay(&r)?;
             opts.mdns = !no_mdns;
             opts.create_storage = !no_create;
+            opts.index = !no_index;
+            opts.max_threads = max_threads;
             if no_update_check {
                 opts.update_feed = shoebox_node::update::PLACEHOLDER_FEED.to_string();
             }
@@ -343,6 +372,31 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+        }
+        Cmd::Search {
+            query,
+            limit,
+            tz_offset,
+            json,
+        } => {
+            let data = client(&storage)
+                .await?
+                .call_raw(
+                    json!({"cmd":"search","text":query,"limit":limit,"tz_offset_min":tz_offset}),
+                )
+                .await?;
+            print(json, &data, render::search);
+        }
+        Cmd::Index { action, json } => {
+            anyhow::ensure!(
+                ["status", "pause", "resume", "compact"].contains(&action.as_str()),
+                "unknown action `{action}`: status, pause, resume or compact"
+            );
+            let data = client(&storage)
+                .await?
+                .call_raw(json!({"cmd":"index","action":action}))
+                .await?;
+            print(json, &data, render::index);
         }
         Cmd::Status { json } => {
             let data = client(&storage).await?.status().await?;

@@ -52,6 +52,14 @@ jobs:
           done
           [ -z "$missing" ] || { echo "::error::repository secrets not set:$missing"; exit 1; }
           grep -q 'RWQ_REPLACE' scripts/install-keeper.sh && { echo "::error::install-keeper.sh still has the placeholder public key"; exit 1; } || true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py') }}
+      - name: Search models match the hashes compiled in (S1-08)
+        run: cargo xtask models --check
 
   keeper:
     needs: check
@@ -67,6 +75,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target == 'universal-apple-darwin' && 'x86_64-apple-darwin,aarch64-apple-darwin' || matrix.target }}
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py') }}
+      - name: Search models match the hashes compiled in (S1-08)
+        run: cargo xtask models --check
       - name: Install musl tools
         if: matrix.os == 'ubuntu-latest' && !matrix.cross
         run: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -91,7 +106,12 @@ jobs:
       - name: Package
         run: |
           mkdir dist
-          tar -C target/${{ matrix.target }}/release -czf dist/shoebox-keeper-${{ matrix.name }}.tar.gz shoebox-keeper
+          # The binary and the search models it finds next to it (models/, S1-08).
+          mkdir -p stage/models
+          cp target/${{ matrix.target }}/release/shoebox-keeper stage/
+          cp models/build/clip-text-int8.onnx models/build/clip-image-int8.onnx \
+            models/build/face-detect-yunet.onnx models/build/face-embed-sface.onnx stage/models/
+          tar -C stage -czf dist/shoebox-keeper-${{ matrix.name }}.tar.gz shoebox-keeper models
       - uses: actions/upload-artifact@v4
         with:
           name: keeper-${{ matrix.name }}
@@ -114,6 +134,13 @@ jobs:
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py') }}
+      - name: Search models match the hashes compiled in (S1-08)
+        run: cargo xtask models --check
       - uses: taiki-e/install-action@v2
         with:
           tool: tauri-cli@2
@@ -141,7 +168,7 @@ jobs:
           if [ "${{ matrix.name }}" != macos ]; then
             unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
           fi
-          cargo tauri build ${{ matrix.args }} --features tauri-app
+          cargo tauri build ${{ matrix.args }} --features tauri-app --config tauri.models.conf.json
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.name }}
@@ -165,6 +192,13 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
       - uses: android-actions/setup-android@v3
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py') }}
+      - name: Search models match the hashes compiled in (S1-08)
+        run: cargo xtask models --check
       - name: Android NDK
         run: |
           sdkmanager --install "ndk;$NDK_VERSION"
@@ -188,6 +222,10 @@ jobs:
             echo "keyAlias=$ANDROID_KEY_ALIAS"
             echo "keyPassword=$ANDROID_KEY_PASSWORD"
           } > keystore.properties
+      - name: The text model goes in the APK (the image model comes from a desktop or keeper)
+        run: |
+          mkdir -p apps/desktop-mobile/src-tauri/gen/android/app/src/main/assets/models
+          cp models/build/clip-text-int8.onnx apps/desktop-mobile/src-tauri/gen/android/app/src/main/assets/models/
       - name: Build
         working-directory: apps/desktop-mobile/src-tauri
         run: cargo tauri android build --apk --target aarch64 --features tauri-app

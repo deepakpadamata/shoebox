@@ -72,6 +72,8 @@ scenario_table!(
     delete_races_favorite,
     device_list_is_signed_and_order_independent,
     library_settings_are_last_writer_wins,
+    index_records_replicate,
+    people_records_merge,
     read_only_capability,
     shared_album_flow,
 );
@@ -889,6 +891,201 @@ async fn library_settings_are_last_writer_wins<H: Harness>(h: &H) {
     }
 }
 
+fn shard(n: u8, replaces: Vec<Blake3Hash>) -> IndexShard {
+    IndexShard {
+        blob: BlobRef {
+            hash: hash(n),
+            size: 1_000,
+            mime: "application/x-shoebox-index".into(),
+        },
+        model: ModelId([9; 32]),
+        kind: ShardKind::Vec8,
+        count: 3,
+        replaces,
+        // Set by the store.
+        made_by: dev(99),
+        hlc: hlc(0, 99),
+    }
+}
+
+fn indexer(d: u8, per_min: u32) -> IndexerStatus {
+    IndexerStatus {
+        device: dev(d),
+        models: vec![ModelId([9; 32])],
+        kinds: vec![ShardKind::Vec8, ShardKind::Vec1],
+        photos_per_min: per_min,
+        always_on: true,
+        hlc: hlc(0, d),
+    }
+}
+
+/// S1-06: shard records are immutable and replicate; indexer statuses are single-writer.
+async fn index_records_replicate<H: Harness>(h: &H) {
+    let (a, b) = pair(h).await;
+    let mut stream = a.store.subscribe();
+    a.store.put_index_shard(shard(1, vec![])).await.unwrap();
+    assert_eq!(next(&mut stream).await, Change::IndexChanged);
+    b.store
+        .put_index_shard(shard(2, vec![hash(1)]))
+        .await
+        .unwrap();
+    // The same blob published twice (both devices indexed it): one record, the same everywhere.
+    a.store.put_index_shard(shard(3, vec![])).await.unwrap();
+    b.store.put_index_shard(shard(3, vec![])).await.unwrap();
+    let mine = a.store.index_shards().await.unwrap();
+    assert_eq!(mine.len(), 2);
+    assert!(
+        mine.iter().all(|s| s.made_by == dev(1)),
+        "the store sets the author"
+    );
+    // Republishing is a no-op.
+    a.store.put_index_shard(shard(1, vec![])).await.unwrap();
+    assert_eq!(a.store.index_shards().await.unwrap(), mine);
+
+    a.store.put_indexer_status(indexer(1, 60)).await.unwrap();
+    b.store.put_indexer_status(indexer(2, 600)).await.unwrap();
+    assert!(matches!(
+        a.store.put_indexer_status(indexer(2, 1)).await,
+        Err(StoreError::Invalid(_))
+    ));
+
+    sync_both(h, &a, &b).await;
+    sync_both(h, &a, &b).await;
+    let (sa, sb) = (
+        a.store.index_shards().await.unwrap(),
+        b.store.index_shards().await.unwrap(),
+    );
+    assert_eq!(sa, sb);
+    assert_eq!(
+        sa.iter().map(|s| s.blob.hash).collect::<Vec<_>>(),
+        vec![hash(1), hash(2), hash(3)]
+    );
+    assert_eq!(sa[1].replaces, vec![hash(1)]);
+    let (ia, ib) = (
+        a.store.indexer_statuses().await.unwrap(),
+        b.store.indexer_statuses().await.unwrap(),
+    );
+    assert_eq!(ia, ib);
+    assert_eq!(
+        ia.iter()
+            .map(|s| (s.device, s.photos_per_min))
+            .collect::<Vec<_>>(),
+        vec![(dev(1), 60), (dev(2), 600)]
+    );
+
+    // A newer status from its device replaces the old one everywhere.
+    a.clock.set(5_000);
+    a.store.put_indexer_status(indexer(1, 0)).await.unwrap();
+    sync_both(h, &a, &b).await;
+    assert_eq!(
+        b.store.indexer_statuses().await.unwrap()[0].photos_per_min,
+        0
+    );
+}
+
+/// S1-18: people and face labels merge field by field; "not" is add-wins.
+async fn people_records_merge<H: Harness>(h: &H) {
+    let (a, b) = pair(h).await;
+    let ana = PersonId([1; 16]);
+    let ben = PersonId([2; 16]);
+    a.store
+        .edit_person(
+            ana,
+            PersonEdit {
+                name: Some("Ana".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    sync_both(h, &a, &b).await;
+    // Offline: A hides Ana, B renames her later. Both writes survive (different fields).
+    a.clock.set(1_000);
+    a.store
+        .edit_person(
+            ana,
+            PersonEdit {
+                hidden: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    b.clock.set(2_000);
+    b.store
+        .edit_person(
+            ana,
+            PersonEdit {
+                name: Some("Anna".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    b.store
+        .edit_person(
+            ben,
+            PersonEdit {
+                merged_into: Some(Some(ana)),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        a.store
+            .edit_person(
+                ana,
+                PersonEdit {
+                    merged_into: Some(Some(ana)),
+                    ..Default::default()
+                }
+            )
+            .await,
+        Err(StoreError::Invalid(_))
+    ));
+    // A says a face is Ana; B says the same face is not Ben.
+    let face = [10, 10, 20, 24];
+    a.store
+        .label_face(
+            hash(7),
+            face,
+            FaceEdit {
+                is: Some(Some(ana)),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    b.store
+        .label_face(
+            hash(7),
+            face,
+            FaceEdit {
+                is_not: Some(ben),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    sync_both(h, &a, &b).await;
+    sync_both(h, &a, &b).await;
+    for n in [&a, &b] {
+        let people = n.store.persons().await.unwrap();
+        let p = people.iter().find(|p| p.id == ana).unwrap();
+        assert_eq!((p.name.value.as_str(), p.hidden.value), ("Anna", true));
+        let q = people.iter().find(|p| p.id == ben).unwrap();
+        assert_eq!(q.merged_into.value, Some(ana));
+        let labels = n.store.face_labels().await.unwrap();
+        assert_eq!(labels.len(), 1);
+        assert!(labels[0].is_not.contains(&ben));
+    }
+    assert_eq!(
+        a.store.face_labels().await.unwrap(),
+        b.store.face_labels().await.unwrap()
+    );
+}
+
 async fn read_only_capability<H: Harness>(h: &H) {
     let (a, cap) = solo(h, 1, 100).await;
     assert_eq!(a.store.capability(), Capability::Write);
@@ -928,6 +1125,14 @@ async fn read_only_capability<H: Harness>(h: &H) {
             }
         )
         .await,
+        Err(StoreError::ReadOnly)
+    );
+    assert_eq!(
+        ro.put_index_shard(shard(1, vec![])).await,
+        Err(StoreError::ReadOnly)
+    );
+    assert_eq!(
+        ro.put_indexer_status(indexer(5, 1)).await,
         Err(StoreError::ReadOnly)
     );
     // It can still read what syncs in.

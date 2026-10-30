@@ -4,6 +4,14 @@
 
 The first build for other people's devices (macOS, Android, the keeper on Linux). Written up for testers in R1-12.
 
+- **Search** (epic S1), on every device and with no other device needed: dates, places, cameras, albums, videos,
+  screenshots and favourites as chips; words matched against what is in the photos (OpenCLIP, 8 bits), labels, text
+  read from photos (macOS) and people's names; *Similar photos* in the viewer. Indexing is shared out between the
+  devices that can do it (a keeper always, a computer on power when idle, a phone while charging) and published as
+  index shards every device holds. *Settings → Search* and `shoebox-keeper index` say how much is covered.
+- **People**: faces found and grouped on your own devices; name, merge, hide, *this is me*, "not Ana". On or off for
+  the whole library.
+
 - From this version on, wire protocols, signing domains and on-disk files are kept compatible: see
   [docs/notes/formats.md](docs/notes/formats.md) and "Changing a format" in [CONTRIBUTING.md](CONTRIBUTING.md).
 - On-disk layout 2: data from earlier development builds is upgraded on first start (a copy of the small files is kept

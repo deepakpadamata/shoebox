@@ -7,6 +7,8 @@ members = [
     "crates/shoebox-store-loro",
     "crates/shoebox-store",
     "crates/shoebox-media",
+    "crates/shoebox-search",
+    "crates/shoebox-ml",
     "crates/shoebox-node",
     "crates/shoebox-testkit",
     "apps/keeper",
@@ -54,6 +56,8 @@ shoebox-store-docs = { path = "crates/shoebox-store-docs" }
 shoebox-store-loro = { path = "crates/shoebox-store-loro" }
 shoebox-store = { path = "crates/shoebox-store" }
 shoebox-media = { path = "crates/shoebox-media" }
+shoebox-search = { path = "crates/shoebox-search" }
+shoebox-ml = { path = "crates/shoebox-ml" }
 shoebox-node = { path = "crates/shoebox-node" }
 shoebox-testkit = { path = "crates/shoebox-testkit" }
 

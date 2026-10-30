@@ -6,6 +6,7 @@
 //! any more (and retracts the matching holdings), and the blob store's GC deletes whatever has no
 //! protection left. A shared-album reference is a protection of its own, so it keeps a blob alive.
 
+use crate::blobs::Protection;
 use crate::library_node::LibraryNode;
 use anyhow::Result;
 use shoebox_core::ids::{Blake3Hash, Timestamp};
@@ -93,6 +94,24 @@ impl<L: LibraryStore> LibraryNode<L> {
         for hash in &released {
             self.node().blobs().remove(hash).await?;
         }
+        // Search data: shards that no longer count (replaced by a valid shard) and bad ones.
+        let wanted = self.index_referenced().await?;
+        let mut stale: Vec<Blake3Hash> = self
+            .node()
+            .blobs()
+            .index_protected()
+            .await?
+            .into_iter()
+            .filter(|h| !wanted.contains(h))
+            .collect();
+        stale.sort();
+        for hash in &stale {
+            self.node()
+                .blobs()
+                .unprotect(hash, Protection::Index)
+                .await?;
+        }
+        released.extend(stale);
         if !released.is_empty() {
             self.retract_holdings(released.clone()).await?;
             let hexes: HashSet<String> = released.iter().map(|h| h.to_string()).collect();

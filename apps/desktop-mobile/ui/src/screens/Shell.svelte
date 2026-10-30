@@ -16,12 +16,17 @@
   import Health from './Health.svelte';
   import Settings from './Settings.svelte';
   import RecoveryKit from './RecoveryKit.svelte';
+  import Search from './Search.svelte';
+  import People from './People.svelte';
+  import SearchField from '../components/SearchField.svelte';
+  import { queryFromParam, searchPath } from '../lib/search';
 
   const nav = [
     { id: 'library', label: 'Library', icon: '▦' },
     { id: 'favorites', label: 'Favorites', icon: '♥' },
     { id: 'albums', label: 'Albums', icon: '▤' },
     { id: 'shared', label: 'Shared', icon: '👥' },
+    { id: 'people', label: 'People', icon: '☺' },
     { id: 'deleted', label: 'Recently Deleted', icon: '🗑' },
   ];
   const more = [
@@ -73,6 +78,15 @@
     }
   }
   const sec = $derived(section());
+  // The toolbar's search field follows the query on the search screen.
+  let searchText = $state('');
+  $effect(() => {
+    if (sec === 'search') searchText = queryFromParam(param());
+  });
+  function search(q: string) {
+    if (q) go(searchPath(q));
+    else if (sec === 'search') go('library');
+  }
   const counts = $derived(app.counts);
   const atRisk = $derived(counts?.at_risk ?? 0);
 
@@ -93,7 +107,7 @@
   }
 
   const title = $derived(
-    sec === 'album' && albumName ? albumName : { library: 'Library', favorites: 'Favorites', albums: 'Albums', album: 'Album', shared: 'Shared albums', deleted: 'Recently Deleted', devices: 'Devices', health: 'Storage', settings: 'Settings' }[sec] ?? 'Library',
+    sec === 'album' && albumName ? albumName : { library: 'Library', favorites: 'Favorites', albums: 'Albums', album: 'Album', shared: 'Shared albums', deleted: 'Recently Deleted', devices: 'Devices', health: 'Storage', settings: 'Settings', search: 'Search', similar: 'Similar photos', people: 'People', person: 'Person' }[sec] ?? 'Library',
   );
 </script>
 
@@ -123,6 +137,7 @@
       <h3>{title}</h3>
       <span class="grow"></span>
       {#if sec === 'album'}<Button size="sm" kind="ghost" onclick={() => { renameTo = albumName; renameOpen = true; }}>Rename</Button>{/if}
+      <div class="searchbox"><SearchField bind:value={searchText} onsubmit={search} oncancel={() => sec === 'search' && go('library')} shortcut /></div>
       <span class="status small muted" title={app.syncError}>
         <span class="sd" class:busy={app.syncing.length > 0} class:bad={!!app.syncError && app.syncing.length === 0}></span>
         {app.syncing.length > 0 ? 'Syncing…' : app.syncError ? 'Some devices are not reachable' : 'Up to date'}
@@ -155,6 +170,10 @@
       {:else if sec === 'devices'}<Devices />
       {:else if sec === 'health'}<Health />
       {:else if sec === 'settings'}<Settings />
+      {:else if sec === 'search'}<Search />
+      {:else if sec === 'similar'}{#key param()}<Search similar={param()} />{/key}
+      {:else if sec === 'people'}<People />
+      {:else if sec === 'person'}{#key param()}<Library source="person" photo={param()} />{/key}
       {:else}<Library source="all" />{/if}
     </div>
   </main>
@@ -209,6 +228,7 @@
   .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .toolbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); }
   .toolbar h3 { margin: 0; font-size: 17px; }
+  .searchbox { width: min(320px, 34vw); }
   .banners { padding: 10px 18px 0; }
   .status { display: inline-flex; align-items: center; gap: 6px; }
   .sd { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }

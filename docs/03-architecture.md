@@ -70,6 +70,29 @@ Shared album (one namespace per album) ── written by members with "can add"
 Ask holders (from `holdings/`) in order: LAN peers → direct-connected peers → relayed peers. Stream with
 verification; show source device in UI.
 
+## Search (epic S1)
+
+Search runs entirely on the device that searches; only the one-time indexing is shared.
+
+- **Facts and places** (`shoebox-search`, `facts.idx`) are derived on each device from the photo records it already
+  has: dates, cameras, albums, and place names from the bundled gazetteer. Nothing is synced for them.
+- **Index shards** are immutable blobs (`SBIX`, up to 1,024 photos, one model and kind: `vec8`, `vec1`, `text`,
+  `faces`), recorded in the library as small `IndexShard` records (`index/<blob>`). Every device holds every live
+  shard. A shard replaces older ones by listing them inside its blob; per photo, the shard with the lowest hash wins,
+  so two devices indexing the same photo is harmless.
+- **Indexing** is shared without claims: each device does its own imports; the backlog goes to always-on indexers by
+  weighted rendezvous hashing over their `IndexerStatus` (`indexers/<device>`); anyone takes over a photo still
+  unindexed after 48 hours. A keeper indexes always, a desktop on power when idle, a phone while charging.
+- **Models**: OpenCLIP ViT-B/32 at 8 bits (the text side in every build, the image side on indexing devices; phones
+  fetch it as a blob by its compiled-in hash), YuNet and SFace for faces, the system's OCR (Apple Vision on macOS),
+  all run with `tract` (`shoebox-ml`). See `docs/notes/search-models.md`.
+- **On each device**: the query is parsed into filters and words; filters select photos from `facts.idx`; words rank
+  by keywords (labels, text, places, albums, names) and by meaning (the text model's vector against the 8-bit
+  picture vectors, streamed from `search/vec-*.bin`), fused by reciprocal rank.
+- **People**: `Person` and `FaceLabel` records (`persons/…`, `facelabels/…`) hold what people said; one device groups
+  faces into a snapshot blob (`settings/people.snapshot`); every device works out who each face is from labels, the
+  snapshot and the face shards, the same way.
+
 ## Platforms
 
 - **Core** in Rust (iroh is Rust-native): library model, sync engine, blob store, import pipeline.

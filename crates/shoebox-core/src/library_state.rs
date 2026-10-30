@@ -12,7 +12,7 @@
 use crate::hlc::{Hlc, HlcClock};
 use crate::identity::{IdentityError, TrustChain};
 use crate::ids::{Blake3Hash, EndpointId, Timestamp};
-use crate::merge::Lww;
+use crate::merge::{Lww, OrSet};
 use crate::model::*;
 use crate::store::*;
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,15 @@ pub enum StateEntry {
         value: Vec<u8>,
         hlc: Hlc,
     },
+    /// An index shard (S1-06): immutable, keyed by its blob. Appended: postcard encodes
+    /// variants by index, so older builds reject it as undecodable and carry on.
+    IndexShard(IndexShard),
+    /// What a device can index (written only by that device).
+    IndexerStatus(IndexerStatus),
+    /// A named person (S1-18). Appended, like the two before.
+    Person(Person),
+    /// What people said about one face (S1-18).
+    FaceLabel(FaceLabel),
 }
 
 /// Which stored record a write changed (and so must be persisted/announced).
@@ -59,6 +68,10 @@ pub enum Touched {
     Holding(EndpointId, Blake3Hash),
     Purged(PhotoId),
     Setting(String),
+    IndexShard(Blake3Hash),
+    Indexer(EndpointId),
+    Person(PersonId),
+    FaceLabel(PhotoId, [u8; 4]),
 }
 
 /// The result of a state mutation.
@@ -124,6 +137,10 @@ pub struct LibraryState {
     chain: Option<TrustChain>,
     holdings: BTreeMap<(EndpointId, Blake3Hash), Lww<Option<BlobKind>>>,
     settings: BTreeMap<String, Lww<Vec<u8>>>,
+    index_shards: BTreeMap<Blake3Hash, IndexShard>,
+    indexers: BTreeMap<EndpointId, IndexerStatus>,
+    persons: BTreeMap<PersonId, Person>,
+    face_labels: BTreeMap<(PhotoId, [u8; 4]), FaceLabel>,
     /// Devices currently holding each blob (any kind).
     holders_by_blob: BTreeMap<Blake3Hash, BTreeSet<EndpointId>>,
 }
@@ -194,6 +211,10 @@ impl LibraryState {
             chain: None,
             holdings: BTreeMap::new(),
             settings: BTreeMap::new(),
+            index_shards: BTreeMap::new(),
+            indexers: BTreeMap::new(),
+            persons: BTreeMap::new(),
+            face_labels: BTreeMap::new(),
             holders_by_blob: BTreeMap::new(),
         }
     }
@@ -359,7 +380,183 @@ impl LibraryState {
         self.settings.insert(key.to_string(), merged.clone()) != Some(merged)
     }
 
+    /// Records are immutable, but two devices may publish the same blob: the record with the
+    /// later HLC (then the greater author) is kept, so every replica keeps the same one.
+    fn merge_index_shard(&mut self, shard: &IndexShard) -> bool {
+        self.observe(&shard.hlc);
+        match self.index_shards.get(&shard.blob.hash) {
+            Some(e) if (e.hlc, e.made_by) >= (shard.hlc, shard.made_by) => false,
+            _ => {
+                self.index_shards.insert(shard.blob.hash, shard.clone());
+                true
+            }
+        }
+    }
+
+    fn merge_indexer(&mut self, status: &IndexerStatus) -> bool {
+        self.observe(&status.hlc);
+        match self.indexers.get(&status.device) {
+            Some(e) if e.hlc >= status.hlc => false,
+            _ => {
+                self.indexers.insert(status.device, status.clone());
+                true
+            }
+        }
+    }
+
+    fn merge_person(&mut self, p: &Person) -> bool {
+        for h in [&p.name.hlc, &p.hidden.hlc, &p.merged_into.hlc] {
+            self.observe(h);
+        }
+        let merged = match self.persons.get(&p.id) {
+            Some(e) => e.merge(p).expect("same id"),
+            None => p.clone(),
+        };
+        self.persons.insert(p.id, merged.clone()).as_ref() != Some(&merged)
+    }
+
+    fn merge_face_label(&mut self, l: &FaceLabel) -> bool {
+        self.observe(&l.is.hlc);
+        for h in l
+            .is_not
+            .adds
+            .values()
+            .chain(l.is_not.removes.values())
+            .flatten()
+        {
+            self.observe(h);
+        }
+        let key = (l.photo, l.face);
+        let merged = match self.face_labels.get(&key) {
+            Some(e) => e.merge(l).expect("same key"),
+            None => l.clone(),
+        };
+        self.face_labels.insert(key, merged.clone()).as_ref() != Some(&merged)
+    }
+
     // ---------- local writes ----------
+
+    /// Create a person or change one: `name`, `hidden` and `merged_into` are written when given
+    /// (each a last-writer-wins field, S1-18).
+    pub fn edit_person(
+        &mut self,
+        id: PersonId,
+        name: Option<String>,
+        hidden: Option<bool>,
+        merged_into: Option<Option<PersonId>>,
+        now_ms: u64,
+    ) -> Result<Effect> {
+        if merged_into == Some(Some(id)) {
+            return Err(StoreError::Invalid(
+                "a person cannot be merged into itself".into(),
+            ));
+        }
+        let hlc = self.tick(now_ms);
+        let mut p = self.persons.get(&id).cloned().unwrap_or(Person {
+            id,
+            name: Lww::new(String::new(), Hlc::GENESIS),
+            hidden: Lww::new(false, Hlc::GENESIS),
+            merged_into: Lww::new(None, Hlc::GENESIS),
+        });
+        if let Some(n) = name {
+            p.name.set(n, hlc);
+        }
+        if let Some(h) = hidden {
+            p.hidden.set(h, hlc);
+        }
+        if let Some(m) = merged_into {
+            p.merged_into.set(m, hlc);
+        }
+        let mut fx = Effect::default();
+        if self.merge_person(&p) {
+            fx.change(Change::PeopleChanged);
+            fx.touch(Touched::Person(id));
+        }
+        Ok(fx)
+    }
+
+    /// Say who a face is (`is`), or who it is not (`is_not`), S1-18.
+    pub fn label_face(
+        &mut self,
+        photo: PhotoId,
+        face: [u8; 4],
+        is: Option<Option<PersonId>>,
+        is_not: Option<PersonId>,
+        now_ms: u64,
+    ) -> Result<Effect> {
+        let hlc = self.tick(now_ms);
+        let mut l = self
+            .face_labels
+            .get(&(photo, face))
+            .cloned()
+            .unwrap_or(FaceLabel {
+                photo,
+                face,
+                is: Lww::new(None, Hlc::GENESIS),
+                is_not: OrSet::new(),
+            });
+        if let Some(who) = is {
+            l.is.set(who, hlc);
+        }
+        if let Some(not) = is_not {
+            l.is_not.add(not, hlc);
+            if l.is.value == Some(not) {
+                l.is.set(None, hlc);
+            }
+        }
+        let mut fx = Effect::default();
+        if self.merge_face_label(&l) {
+            fx.change(Change::PeopleChanged);
+            fx.touch(Touched::FaceLabel(photo, face));
+        }
+        Ok(fx)
+    }
+
+    /// Publish an index shard made by this device (`made_by` and `hlc` are set here).
+    pub fn put_index_shard(&mut self, shard: &IndexShard, now_ms: u64) -> Result<Effect> {
+        if self.index_shards.contains_key(&shard.blob.hash) {
+            return Ok(Effect::default());
+        }
+        let mut rec = shard.clone();
+        rec.made_by = self.device;
+        rec.hlc = self.tick(now_ms);
+        let mut fx = Effect::default();
+        if self.merge_index_shard(&rec) {
+            fx.change(Change::IndexChanged);
+            fx.touch(Touched::IndexShard(rec.blob.hash));
+        }
+        Ok(fx)
+    }
+
+    /// Write this device's indexer status (single writer, like holdings). Unchanged = no write.
+    pub fn put_indexer_status(&mut self, status: &IndexerStatus, now_ms: u64) -> Result<Effect> {
+        if status.device != self.device {
+            return Err(StoreError::Invalid(format!(
+                "indexer status is single-writer: {} is not this device",
+                status.device
+            )));
+        }
+        let same = |a: &IndexerStatus| {
+            (&a.models, &a.kinds, a.photos_per_min, a.always_on)
+                == (
+                    &status.models,
+                    &status.kinds,
+                    status.photos_per_min,
+                    status.always_on,
+                )
+        };
+        if self.indexers.get(&self.device).is_some_and(same) {
+            return Ok(Effect::default());
+        }
+        let mut rec = status.clone();
+        rec.hlc = self.tick(now_ms);
+        let mut fx = Effect::default();
+        if self.merge_indexer(&rec) {
+            fx.change(Change::IndexChanged);
+            fx.touch(Touched::Indexer(self.device));
+        }
+        Ok(fx)
+    }
 
     /// Write a library setting (last writer wins per key).
     pub fn put_setting(&mut self, key: &str, value: Vec<u8>, now_ms: u64) -> Result<Effect> {
@@ -672,6 +869,30 @@ impl LibraryState {
                     fx.touch(Touched::Setting(key.clone()));
                 }
             }
+            StateEntry::IndexShard(shard) => {
+                if self.merge_index_shard(shard) {
+                    fx.change(Change::IndexChanged);
+                    fx.touch(Touched::IndexShard(shard.blob.hash));
+                }
+            }
+            StateEntry::IndexerStatus(status) => {
+                if self.merge_indexer(status) {
+                    fx.change(Change::IndexChanged);
+                    fx.touch(Touched::Indexer(status.device));
+                }
+            }
+            StateEntry::Person(p) => {
+                if self.merge_person(p) {
+                    fx.change(Change::PeopleChanged);
+                    fx.touch(Touched::Person(p.id));
+                }
+            }
+            StateEntry::FaceLabel(l) => {
+                if self.merge_face_label(l) {
+                    fx.change(Change::PeopleChanged);
+                    fx.touch(Touched::FaceLabel(l.photo, l.face));
+                }
+            }
         }
         fx
     }
@@ -703,6 +924,22 @@ impl LibraryState {
                 value: l.value.clone(),
                 hlc: l.hlc,
             }),
+            Touched::IndexShard(blob) => self
+                .index_shards
+                .get(blob)
+                .cloned()
+                .map(StateEntry::IndexShard),
+            Touched::Indexer(device) => self
+                .indexers
+                .get(device)
+                .cloned()
+                .map(StateEntry::IndexerStatus),
+            Touched::Person(id) => self.persons.get(id).cloned().map(StateEntry::Person),
+            Touched::FaceLabel(photo, face) => self
+                .face_labels
+                .get(&(*photo, *face))
+                .cloned()
+                .map(StateEntry::FaceLabel),
         }
     }
 
@@ -729,6 +966,25 @@ impl LibraryState {
             value: l.value.clone(),
             hlc: l.hlc,
         }));
+        out.extend(
+            self.index_shards
+                .values()
+                .cloned()
+                .map(StateEntry::IndexShard),
+        );
+        out.extend(
+            self.indexers
+                .values()
+                .cloned()
+                .map(StateEntry::IndexerStatus),
+        );
+        out.extend(self.persons.values().cloned().map(StateEntry::Person));
+        out.extend(
+            self.face_labels
+                .values()
+                .cloned()
+                .map(StateEntry::FaceLabel),
+        );
         out
     }
 
@@ -759,6 +1015,31 @@ impl LibraryState {
 
     pub fn setting(&self, key: &str) -> Option<Vec<u8>> {
         self.settings.get(key).map(|l| l.value.clone())
+    }
+
+    /// Every index shard record (live or replaced: liveness needs the shards' headers, see
+    /// `shoebox_search::shard`), in blob order.
+    pub fn index_shards(&self) -> Vec<IndexShard> {
+        self.index_shards.values().cloned().collect()
+    }
+
+    /// Indexer statuses, in device order. A revoked device's is left out (as for holdings).
+    pub fn indexers(&self) -> Vec<IndexerStatus> {
+        self.indexers
+            .values()
+            .filter(|s| !self.is_revoked(&s.device))
+            .cloned()
+            .collect()
+    }
+
+    /// Every person record, in id order.
+    pub fn persons(&self) -> Vec<Person> {
+        self.persons.values().cloned().collect()
+    }
+
+    /// Every face label, by photo and face.
+    pub fn face_labels(&self) -> Vec<FaceLabel> {
+        self.face_labels.values().cloned().collect()
     }
 
     pub fn photo_count(&self) -> usize {

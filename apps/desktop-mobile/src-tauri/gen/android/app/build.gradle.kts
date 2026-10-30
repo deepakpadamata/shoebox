@@ -26,6 +26,11 @@ val keystoreProperties = Properties().apply {
 android {
     compileSdk = 37
     namespace = "org.shoebox.desktop"
+    // The search model (assets/models, S1-08) is stored as is: it hardly compresses, and an
+    // uncompressed asset can be measured before it is copied out.
+    androidResources {
+        noCompress += "onnx"
+    }
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "org.shoebox.desktop"

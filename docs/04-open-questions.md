@@ -26,6 +26,14 @@ Decisions from the first review pass (2026-10-22). Each one notes where it shows
 | 11 | UI stack | **Tauri 2 everywhere** (desktop + iOS + Android) with the Rust core in-process. | architecture §Platforms |
 | 12 | Relays | **n0 public relays for prototype/MVP.** Run our own once hosted services ship in v2. Custom relay URL always available. | F8.2 |
 
+### Search (S1, 2026-10-30)
+
+| # | Question | Decision | Affects |
+|---|---|---|---|
+| S1 | Which models | OpenCLIP ViT-B/32 `laion2b_s34b_b79k` (MIT) at 8 bits; YuNet (MIT) and SFace (Apache-2.0) for faces; the system's OCR. MobileCLIP (research-only weights) and InsightFace models (non-commercial) are out; SigLIP 2's text side is too big to ship in every build. Runtime `tract` everywhere, Android included (A-106, A-107) | F9.4, F9.5 |
+| S2 | May Viewers name people? | **No.** A Viewer publishes no library records; people are named on a Companion, Keeper or desktop (A-108) | F9.5 |
+| S3 | Retiring an old model's shards | **No retire record.** Each device lets another model's shards go once its own model covers as many photos (A-108) | F9.4 |
+
 ### Design
 
 | # | Question | Decision | Affects |

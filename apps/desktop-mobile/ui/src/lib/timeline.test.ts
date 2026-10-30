@@ -33,6 +33,13 @@ describe('timeline layout', () => {
     expect(l.height).toBeCloseTo(top);
   });
 
+  it('lays out ranked results without day headers', () => {
+    const items = [photo(0, 10), photo(1, 3), photo(2, 10), photo(3, 7), photo(4, 1)];
+    const l = buildLayout(items, { ...opts, days: false });
+    expect(l.rows.map((r) => r.type)).toEqual(['tiles', 'tiles']);
+    expect(l.rows.map((r) => (r.type === 'tiles' ? [r.from, r.to] : []))).toEqual([[0, 4], [4, 5]]);
+  });
+
   it('handles empty and narrow layouts', () => {
     expect(buildLayout([], opts).height).toBe(0);
     const l = buildLayout([photo(0, 1)], { ...opts, width: 50 });

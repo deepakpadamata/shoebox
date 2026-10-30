@@ -13,4 +13,11 @@ object NativeBridge {
      */
     @JvmStatic
     external fun runBurst(dataDir: String, budgetSecs: Int, backend: PhotoBackend, lastNotifiedMs: Long): String
+
+    /**
+     * Index this phone's photos for search by meaning for at most `budgetSecs` (S1-11), fetching
+     * the image model from a desktop or keeper the first time. Returns a JSON report.
+     */
+    @JvmStatic
+    external fun runIndex(dataDir: String, budgetSecs: Int, backend: PhotoBackend): String
 }

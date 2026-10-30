@@ -25,6 +25,7 @@
 </script>
 
 <div class="page" use:pullRefresh={{ onRefresh: refreshEverything }}>
+  <button class="people-link" onclick={() => go('people')}><span aria-hidden="true">☺</span> People</button>
   <form class="row-flex" onsubmit={(e) => { e.preventDefault(); create(); }}>
     <input class="input grow" placeholder="New album name" bind:value={name} />
     <Button type="submit" kind="primary" disabled={!name.trim()}>Create album</Button>
@@ -52,4 +53,5 @@
   .cover img { width: 100%; height: 100%; object-fit: cover; }
   .pill { margin-left: 6px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); vertical-align: 2px; }
   .input { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 0 12px; color: var(--ink); font: inherit; }
+  .people-link { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: var(--surface-2); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; font: inherit; font-weight: 600; cursor: pointer; text-align: left; }
 </style>

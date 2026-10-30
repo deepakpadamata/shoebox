@@ -14,8 +14,8 @@
 use crate::hlc::Hlc;
 use crate::ids::{Blake3Hash, EndpointId, Timestamp};
 use crate::model::{
-    AdminCert, AlbumId, AlbumMeta, BlobKind, DeviceCert, Holding, Member, MemberRole, PhotoId,
-    PhotoRecord, SharedItem,
+    AdminCert, AlbumId, AlbumMeta, BlobKind, DeviceCert, FaceLabel, Holding, IndexShard,
+    IndexerStatus, Member, MemberRole, Person, PersonId, PhotoId, PhotoRecord, SharedItem,
 };
 use async_trait::async_trait;
 use futures::stream::BoxStream;
@@ -142,6 +142,10 @@ pub enum Change {
     HoldingsChanged {
         device: EndpointId,
     },
+    /// An index shard or an indexer status arrived or was written (S1-06).
+    IndexChanged,
+    /// A person or a face label arrived or was written (S1-18).
+    PeopleChanged,
     RemoteSyncProgress {
         peer: EndpointId,
         done: u64,
@@ -181,6 +185,21 @@ pub struct HoldingsDelta {
     pub hlc: Hlc,
     pub added: Vec<(Blake3Hash, BlobKind)>,
     pub removed: Vec<Blake3Hash>,
+}
+
+/// A change to a person: the fields to write.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PersonEdit {
+    pub name: Option<String>,
+    pub hidden: Option<bool>,
+    pub merged_into: Option<Option<PersonId>>,
+}
+
+/// A change to what people said about a face.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FaceEdit {
+    pub is: Option<Option<PersonId>>,
+    pub is_not: Option<PersonId>,
 }
 
 /// Identity of the library's root signing key (decision #9/#18).
@@ -363,6 +382,38 @@ pub trait LibraryStore: Send + Sync + 'static {
     /// Write a setting with a fresh HLC. **Last writer wins** per key, on every replica. An invalid
     /// key is `Invalid`; the value is opaque bytes (callers define the encoding).
     async fn put_setting(&self, key: &str, value: Vec<u8>) -> Result<()>;
+
+    // ----- search index (S1-06) -----
+
+    /// Publish an index shard this device made. `made_by` and `hlc` are set by the store. Records
+    /// are immutable: publishing a blob that already has a record changes nothing.
+    async fn put_index_shard(&self, shard: IndexShard) -> Result<()>;
+
+    /// Every index shard record, live or replaced, in blob hash order.
+    async fn index_shards(&self) -> Result<Vec<IndexShard>>;
+
+    /// Write this device's indexer status. **Single writer** like holdings: `status.device` must
+    /// be this store's device (`Invalid` otherwise). Writing the same values again is a no-op.
+    async fn put_indexer_status(&self, status: IndexerStatus) -> Result<()>;
+
+    /// Indexer statuses in device order, leaving out revoked devices.
+    async fn indexer_statuses(&self) -> Result<Vec<IndexerStatus>>;
+
+    // ----- people (S1-18) -----
+
+    /// Create or change a person; each given field is a last-writer-wins write. `Invalid` when
+    /// merging a person into itself.
+    async fn edit_person(&self, id: PersonId, edit: PersonEdit) -> Result<()>;
+
+    /// Every person, in id order (merged and hidden ones included).
+    async fn persons(&self) -> Result<Vec<Person>>;
+
+    /// Say who a face is (`is`: `Some(None)` clears it), or add someone it is not (an add-wins
+    /// set; saying "not Ana" also clears "is Ana").
+    async fn label_face(&self, photo: PhotoId, face: [u8; 4], edit: FaceEdit) -> Result<()>;
+
+    /// Every face label, by photo then face.
+    async fn face_labels(&self) -> Result<Vec<FaceLabel>>;
 
     // ----- sync plumbing -----
 

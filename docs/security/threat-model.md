@@ -78,6 +78,22 @@ Severity: nothing found that lets a stranger read photos or impersonate a device
 the two issues with real consequences and are fixed. F4 is the one a user should understand
 (a contributor can misbehave inside their shared album).
 
+## Search and people (S1, 2026-10-30)
+
+- **What is stored**: picture embeddings, labels, text read from photos and face embeddings, in shard blobs every
+  device holds, and people's names in library records. They are as private as the photos: they travel only between
+  your devices, end-to-end encrypted, like thumbnails. A face embedding can be matched against other photos of the
+  same person; it never leaves your devices.
+- **Who may write**: shards and people records come from certified non-Viewer devices only (`judge`); an indexer
+  status only from its own device. A shard's blob is checked against its record when fetched (model, kind, count,
+  what it replaces) and ignored if it does not match; it cannot replace a shard covering fewer photos than it does.
+- **Models** are verified by hash wherever they come from (resources, a peer, the data folder).
+- **Logs and diagnostics never contain read text or names** (tested in `crates/shoebox-store/tests/search_meaning.rs`).
+- **Revocation**: a revoked device's existing shards stay valid (their content does not depend on it); its holdings
+  stop counting, so other devices fetch them from someone else, and its indexer status is ignored.
+- **Turning people off** stops face finding and hides names on every device; existing face shards stay until
+  compacted.
+
 ## Not covered
 
 * No cryptographic review of the dependencies (iroh, loro, ed25519 implementations) beyond using

@@ -167,9 +167,10 @@ impl Inner {
                 .state
                 .all_entries()
                 .into_iter()
-                // Holdings are single-writer: every device republishes its own afterwards.
+                // Holdings and indexer statuses are single-writer: every device republishes its own.
                 .filter(|e| match e {
                     StateEntry::Holding { device, .. } => *device == self.device,
+                    StateEntry::IndexerStatus(s) => s.device == self.device,
                     _ => true,
                 })
                 .collect(),
@@ -756,6 +757,11 @@ fn judge(
                 rejected("holdings of another device")
             }
         }
+        // Single writer too; a viewer never indexes (it cannot publish shards).
+        StateEntry::IndexerStatus(s) if s.device != author => {
+            rejected("indexer status of another device")
+        }
+        // `made_by` is not checked against the author: a rotation re-signs every carried record.
         _ if role == Role::Viewer => rejected("a viewer cannot publish library records"),
         _ => accept(entry, None),
     };
@@ -935,6 +941,39 @@ impl LibraryStore for LoroLibrary {
     async fn put_setting(&self, key: &str, value: Vec<u8>) -> Result<()> {
         let now = self.now();
         self.write(|s| Ok(((), s.put_setting(key, value, now)?)))
+    }
+    async fn put_index_shard(&self, shard: IndexShard) -> Result<()> {
+        let now = self.now();
+        self.write(|s| Ok(((), s.put_index_shard(&shard, now)?)))
+    }
+    async fn index_shards(&self) -> Result<Vec<IndexShard>> {
+        Ok(self.read(|s| s.index_shards()))
+    }
+    async fn put_indexer_status(&self, status: IndexerStatus) -> Result<()> {
+        let now = self.now();
+        self.write(|s| Ok(((), s.put_indexer_status(&status, now)?)))
+    }
+    async fn indexer_statuses(&self) -> Result<Vec<IndexerStatus>> {
+        Ok(self.read(|s| s.indexers()))
+    }
+    async fn edit_person(&self, id: PersonId, edit: PersonEdit) -> Result<()> {
+        let now = self.now();
+        self.write(|s| {
+            Ok((
+                (),
+                s.edit_person(id, edit.name, edit.hidden, edit.merged_into, now)?,
+            ))
+        })
+    }
+    async fn persons(&self) -> Result<Vec<Person>> {
+        Ok(self.read(|s| s.persons()))
+    }
+    async fn label_face(&self, photo: PhotoId, face: [u8; 4], edit: FaceEdit) -> Result<()> {
+        let now = self.now();
+        self.write(|s| Ok(((), s.label_face(photo, face, edit.is, edit.is_not, now)?)))
+    }
+    async fn face_labels(&self) -> Result<Vec<FaceLabel>> {
+        Ok(self.read(|s| s.face_labels()))
     }
 
     fn subscribe(&self) -> BoxStream<'static, Change> {

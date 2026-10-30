@@ -15,6 +15,8 @@ MINISIGN_PUBKEY="${SHOEBOX_MINISIGN_PUBKEY:-RWQ_REPLACE_WITH_THE_PROJECT_PUBLIC_
 REPO="${SHOEBOX_REPO:-deepakpadamata/shoebox}"
 VERSION="${SHOEBOX_VERSION:-latest}"
 PREFIX="${SHOEBOX_PREFIX:-/usr/local/bin}"
+# Search models go where the keeper looks for them: <bin>/../share/shoebox/models.
+MODELS="$(dirname "$PREFIX")/share/shoebox/models"
 
 die() { echo "install-keeper: $*" >&2; exit 1; }
 
@@ -73,14 +75,18 @@ want=$(grep " $tarball\$" "$tmp/SHA256SUMS" | cut -d' ' -f1)
 got=$(sha256 "$tmp/$tarball")
 [ "$want" = "$got" ] || die "checksum mismatch for $tarball: refusing to install"
 
-tar -xzf "$tmp/$tarball" -C "$tmp" shoebox-keeper
-mkdir -p "$PREFIX" 2>/dev/null || true
-if [ -w "$PREFIX" ]; then
-  install -m 0755 "$tmp/shoebox-keeper" "$PREFIX/shoebox-keeper"
-else
-  echo "$PREFIX is not writable; using sudo"
-  sudo install -m 0755 "$tmp/shoebox-keeper" "$PREFIX/shoebox-keeper"
+tar -xzf "$tmp/$tarball" -C "$tmp"
+mkdir -p "$PREFIX" "$MODELS" 2>/dev/null || true
+sudo=""
+if [ ! -w "$PREFIX" ] || [ ! -w "$MODELS" ]; then
+  echo "$PREFIX or $MODELS is not writable; using sudo"
+  sudo=sudo
+  $sudo mkdir -p "$PREFIX" "$MODELS"
 fi
-echo "Installed $PREFIX/shoebox-keeper"
+$sudo install -m 0755 "$tmp/shoebox-keeper" "$PREFIX/shoebox-keeper"
+for f in "$tmp"/models/*.onnx; do
+  [ -e "$f" ] && $sudo install -m 0644 "$f" "$MODELS/"
+done
+echo "Installed $PREFIX/shoebox-keeper (search models in $MODELS)"
 "$PREFIX/shoebox-keeper" --version || true
 echo "Next: shoebox-keeper run   (then, from another terminal: shoebox-keeper pair <ticket>)"

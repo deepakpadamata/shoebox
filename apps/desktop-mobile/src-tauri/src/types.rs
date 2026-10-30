@@ -137,6 +137,111 @@ ts_type! {
 }
 
 ts_type! {
+    /// A recognised piece of a search, shown as a removable chip.
+    pub struct SearchChip {
+        /// `date`, `kind`, `favourite`, `person`, `album`, `place`, `camera` or `lens`.
+        pub kind: String,
+        pub label: String,
+        /// Span in the query, in characters (`start..end`).
+        pub start: u32,
+        pub end: u32,
+    }
+}
+
+ts_type! {
+    pub struct SearchPage {
+        pub items: Vec<PhotoSummary>,
+        /// Pass back as `cursor` for the next page; `None` at the end.
+        pub next: Option<u32>,
+        pub total: u32,
+        /// Best matches first (otherwise newest first, like the timeline).
+        pub ranked: bool,
+        pub filters: Vec<SearchChip>,
+        /// The words no filter took.
+        pub free_text: String,
+    }
+}
+
+ts_type! {
+    /// A device that indexes photos for search, as the search status shows it.
+    pub struct SearchIndexer {
+        pub name: String,
+        pub photos_per_min: u32,
+        pub this_device: bool,
+        pub reads_text: bool,
+    }
+}
+
+ts_type! {
+    /// How much of the library each kind of search covers on this device (S1-16).
+    pub struct SearchStatus {
+        pub total: u32,
+        /// Searchable by what is in them (a picture vector).
+        pub content: u32,
+        pub labelled: u32,
+        pub text_read: u32,
+        pub faces: u32,
+        /// This device can search by meaning (it has the text model).
+        pub meaning: bool,
+        pub indexers: Vec<SearchIndexer>,
+        pub eta_secs: Option<u32>,
+        /// Search data on this device, in bytes.
+        pub held_bytes: f64,
+        /// This device's setting: index here (desktop: on power when idle; phone: while charging).
+        pub index_here: bool,
+        /// Indexing is running on this device now.
+        pub indexing: bool,
+    }
+}
+
+ts_type! {
+    /// A face in a photo (S1-19): where it is (fractions of the photo) and who it is.
+    pub struct FaceOut {
+        pub photo: String,
+        pub rect: Vec<f32>,
+        /// The photo's size, to crop the face from its preview.
+        pub width: u32,
+        pub height: u32,
+        pub person: Option<String>,
+        pub name: Option<String>,
+        /// An unnamed group, when no person.
+        pub group: Option<u32>,
+    }
+}
+
+ts_type! {
+    /// A person, or an unnamed group of faces, on the People screen.
+    pub struct PersonCard {
+        /// A person's id (hex), or `group:<n>` for an unnamed group.
+        pub id: String,
+        pub name: String,
+        /// Photos they are in.
+        pub count: u32,
+        pub cover: FaceOut,
+        pub me: bool,
+        pub hidden: bool,
+    }
+}
+
+ts_type! {
+    pub struct PeopleList {
+        /// People is on for the library.
+        pub on: bool,
+        pub people: Vec<PersonCard>,
+        /// Unnamed groups with enough faces to show.
+        pub groups: Vec<PersonCard>,
+    }
+}
+
+ts_type! {
+    pub struct SearchSuggestion {
+        /// `person`, `album`, `place`, `camera`, `lens` or `thing`.
+        pub kind: String,
+        pub name: String,
+    }
+}
+
+ts_type! {
     pub struct LibraryCounts {
         pub photos: u32,
         pub favorites: u32,

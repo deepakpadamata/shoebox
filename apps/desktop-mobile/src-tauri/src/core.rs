@@ -42,6 +42,11 @@ pub struct AppOptions {
     /// How often the blob store collects unprotected blobs (`None`: the node's default). Tests
     /// shorten it.
     pub gc_interval: Option<Duration>,
+    /// Folders holding this build's search model files (the app's resources), besides the data
+    /// folder's `models/` (S1-08).
+    pub model_dirs: Vec<PathBuf>,
+    /// Load the search models (off in tests).
+    pub search_models: bool,
 }
 
 fn default_update_feed() -> String {
@@ -63,6 +68,8 @@ impl Default for AppOptions {
             // Released blobs (a deleted gallery photo's reference, a copy turned into a
             // reference) are collected on the next pass: keep the wait short.
             gc_interval: Some(Duration::from_secs(20)),
+            model_dirs: vec![],
+            search_models: true,
         }
     }
 }
@@ -77,6 +84,9 @@ impl AppOptions {
             background: true,
             update_feed: shoebox_node::update::PLACEHOLDER_FEED.to_string(),
             gc_interval: None,
+            model_dirs: vec![],
+            // Tests do not load half a gigabyte of models from a developer's checkout.
+            search_models: false,
         }
     }
 }
@@ -154,6 +164,7 @@ fn kind_name(k: BlobKind) -> &'static str {
         BlobKind::Thumb => "thumb",
         BlobKind::Preview => "preview",
         BlobKind::Original => "original",
+        BlobKind::Index => "index",
     }
 }
 
@@ -193,7 +204,7 @@ struct PendingRecovery {
 
 pub struct AppCore {
     dir: PathBuf,
-    opts: AppOptions,
+    pub(crate) opts: AppOptions,
     node: Node,
     library: tokio::sync::RwLock<Option<LibraryNode<Library>>>,
     pub(crate) shared: tokio::sync::RwLock<Option<shoebox_store::SharedAlbums>>,
@@ -625,6 +636,10 @@ impl AppCore {
             ln.start_fetcher(FetcherConfig::default());
             ln.start_maintenance(MaintenanceConfig::default());
             ln.start_presence(PresenceConfig::default()).await?;
+            ln.start_search();
+            if self.opts.search_models {
+                self.start_search_models(&ln).await;
+            }
         }
         self.forward_library_changes(&ln);
         let shared =
@@ -963,7 +978,7 @@ impl AppCore {
     /// The grid's view of `recs`. What every photo shares (the copies target, the keepers, which
     /// blobs are kept, the poster frames) is looked up once, and the blob store is asked about
     /// many photos at a time: one by one, a phone spent a second per 2,000 photos waiting on it.
-    async fn summaries(
+    pub(crate) async fn summaries(
         &self,
         ln: &LibraryNode<Library>,
         recs: &[PhotoRecord],
@@ -1053,6 +1068,103 @@ impl AppCore {
                 id: r.id.to_string(),
             });
         Ok(PhotoPage { items, next })
+    }
+
+    /// Search this device's index (S1-03): recognised filters as chips, then a page of results.
+    /// `tz_offset_min` is the UI's time zone (minutes east of UTC), so "today" is its today.
+    pub async fn search(
+        &self,
+        text: &str,
+        cursor: Option<u32>,
+        limit: u32,
+        tz_offset_min: i32,
+    ) -> Result<SearchPage> {
+        let ln = self.ln().await?;
+        let opts = shoebox_node::SearchOptions {
+            now: Timestamp(shoebox_core::clock::Clock::now_ms(&SystemClock) as i64),
+            tz_offset_min,
+            southern: false,
+        };
+        let limit = limit.clamp(1, 2000) as usize;
+        let res = ln
+            .search(text, &opts, cursor.unwrap_or(0) as usize, limit)
+            .await?;
+        let mut recs = Vec::with_capacity(res.hits.ids.len());
+        for id in &res.hits.ids {
+            if let Some(r) = ln.store().photo(id).await? {
+                recs.push(r);
+            }
+        }
+        let items = self.summaries(&ln, &recs).await?;
+        let filters = res
+            .query
+            .filters
+            .iter()
+            .map(|f| SearchChip {
+                kind: chip_kind(&f.what).into(),
+                label: f.label.clone(),
+                start: text[..f.span.start].chars().count() as u32,
+                end: text[..f.span.end].chars().count() as u32,
+            })
+            .collect();
+        Ok(SearchPage {
+            items,
+            next: res.hits.next.map(|n| n as u32),
+            total: res.hits.total as u32,
+            ranked: res.hits.ranked,
+            filters,
+            free_text: res.query.free_text,
+        })
+    }
+
+    /// Photos that look like `photo` (S1-12), best first, as a search page with no chips.
+    pub async fn similar(
+        &self,
+        photo: &str,
+        cursor: Option<u32>,
+        limit: u32,
+    ) -> Result<SearchPage> {
+        let ln = self.ln().await?;
+        let id = parse_hash(photo)?;
+        let hits = ln
+            .similar(
+                &id,
+                cursor.unwrap_or(0) as usize,
+                limit.clamp(1, 2000) as usize,
+            )
+            .await?;
+        let mut recs = Vec::with_capacity(hits.ids.len());
+        for id in &hits.ids {
+            if let Some(r) = ln.store().photo(id).await? {
+                recs.push(r);
+            }
+        }
+        Ok(SearchPage {
+            items: self.summaries(&ln, &recs).await?,
+            next: hits.next.map(|n| n as u32),
+            total: hits.total as u32,
+            ranked: true,
+            filters: vec![],
+            free_text: String::new(),
+        })
+    }
+
+    /// Names in the library starting with `prefix`, for suggestions while typing.
+    pub async fn search_suggestions(
+        &self,
+        prefix: &str,
+        limit: u32,
+    ) -> Result<Vec<SearchSuggestion>> {
+        let ln = self.ln().await?;
+        Ok(ln
+            .search_suggestions(prefix, limit.clamp(1, 100) as usize)
+            .await?
+            .into_iter()
+            .map(|(kind, name)| SearchSuggestion {
+                kind: name_kind(kind).into(),
+                name,
+            })
+            .collect())
     }
 
     pub async fn counts(&self) -> Result<LibraryCounts> {
@@ -1437,13 +1549,7 @@ impl AppCore {
             let known = cache.blobs.get(&t.hash);
             TransferItem {
                 photo: known.map(|(p, _)| p.to_string()),
-                kind: known
-                    .map_or("other", |(_, k)| match k {
-                        BlobKind::Thumb => "thumb",
-                        BlobKind::Preview => "preview",
-                        BlobKind::Original => "original",
-                    })
-                    .into(),
+                kind: known.map_or("other", |(_, k)| kind_name(*k)).into(),
                 peer: t.peer.map(|p| hex::encode(p.0)),
                 size: t.size.map(|s| s as f64),
                 done: t.done as f64,
@@ -1461,6 +1567,8 @@ impl AppCore {
                 BlobKind::Thumb => thumbs += 1,
                 BlobKind::Preview => previews += 1,
                 BlobKind::Original => originals += 1,
+                // Search shards are small; counted in the bytes only.
+                BlobKind::Index => {}
             }
             bytes += size;
         }
@@ -2042,4 +2150,26 @@ pub(crate) fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn name_kind(k: shoebox_search::NameKind) -> &'static str {
+    use shoebox_search::NameKind::*;
+    match k {
+        Person => "person",
+        Album => "album",
+        Place => "place",
+        Camera => "camera",
+        Lens => "lens",
+        Label => "thing",
+    }
+}
+
+fn chip_kind(f: &shoebox_search::FilterKind) -> &'static str {
+    use shoebox_search::FilterKind::*;
+    match f {
+        Date(_) => "date",
+        Media(_) => "kind",
+        Favourite => "favourite",
+        Name { kind, .. } => name_kind(*kind),
+    }
 }

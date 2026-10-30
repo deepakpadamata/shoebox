@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>09 · People — Shoebox mockups</title>
+<link rel="stylesheet" href="assets/mockup.css?v=2">
+<style>
+  .intro-l { font-size:12px; color:var(--ink-3); padding:8px 12px; }
+  .intro-l a { color:var(--accent); }
+  .sec { font-size:11px; font-weight:700; color:var(--ink-3); text-transform:uppercase; letter-spacing:.05em; padding:10px 12px 4px; }
+  .people { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; padding:6px 12px; }
+  .p { display:flex; flex-direction:column; align-items:center; gap:3px; font-size:12px; text-align:center; }
+  .face { width:72px; height:72px; border-radius:50%; background:linear-gradient(135deg, var(--surface-3), var(--accent-soft)); display:flex; align-items:center; justify-content:center; font-size:28px; }
+  .face.sm { width:36px; height:36px; font-size:16px; }
+  .p b { font-weight:600; }
+  .p .m { color:var(--ink-3); }
+  .p .a { color:var(--accent); }
+  .sheet-m { margin:12px; border-radius:14px; background:var(--surface); box-shadow:var(--shadow); padding:14px; display:flex; flex-direction:column; gap:10px; align-items:center; font-size:13px; }
+  .input-m { width:100%; height:34px; border-radius:8px; border:1px solid var(--line); padding:0 10px; display:flex; align-items:center; color:var(--ink-3); }
+  .btns { display:flex; gap:8px; }
+  .btn-m { padding:6px 12px; border-radius:8px; background:var(--accent); color:white; font-weight:600; font-size:12.5px; }
+  .btn-m.g { background:var(--surface-2); color:var(--ink); }
+  .info-m { padding:10px 12px; font-size:12.5px; display:flex; flex-direction:column; gap:8px; }
+  .row-m { display:flex; align-items:center; gap:8px; }
+  .row-m .grow { flex:1; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <a class="crumb" href="index.html">← All screens</a>
+    <h1>09 · People</h1>
+  </div>
+  <p class="page-intro">Faces are found and grouped on your own devices and never leave them. People shows named people
+    first, then unnamed groups of five faces or more. Name a group once and its photos are found by that name; fix a
+    face from the photo's info panel. People is on or off for the whole library.</p>
+
+  <div class="screens">
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span style="color:var(--accent)">‹ Albums</span><b style="flex:1;text-align:center">People</b><span></span></div>
+        <div class="body">
+          <div class="intro-l">Faces are found and grouped on your own devices and never leave them. <a>Turn off</a></div>
+          <div class="sec">People</div>
+          <div class="people">
+            <div class="p"><div class="face">☺</div><b>Ana (me)</b><span class="m">412 photos</span></div>
+            <div class="p"><div class="face">☺</div><b>Ben</b><span class="m">208 photos</span></div>
+            <div class="p"><div class="face">☺</div><b>Grandma</b><span class="m">96 photos</span></div>
+          </div>
+          <div class="sec">Unnamed people</div>
+          <div class="people">
+            <div class="p"><div class="face">☺</div><span class="m">54 photos</span><span class="a">Add a name</span></div>
+            <div class="p"><div class="face">☺</div><span class="m">17 photos</span><span class="a">Add a name</span></div>
+            <div class="p"><div class="face">☺</div><span class="m">6 photos</span><span class="a">Add a name</span></div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>9a · People (phone)</b>In Albums on the phone, in the sidebar on a computer. Tap a face for that person's photos; <i>Rename</i>, <i>Merge…</i> (pick two), <i>Hide</i>, <i>This is me</i>.
+        <div class="tags"><span class="tag">F9.5</span></div>
+      </figcaption>
+    </figure>
+
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span style="color:var(--accent)">‹ People</span><b style="flex:1;text-align:center">Who is this?</b><span></span></div>
+        <div class="body">
+          <div class="sheet-m">
+            <div class="face" style="width:110px;height:110px;font-size:44px">☺</div>
+            <div class="input-m">Name</div>
+            <div class="btns"><span class="btn-m">Save</span></div>
+            <span class="m" style="color:var(--ink-3);font-size:12px">The group's best faces are named; its other photos follow.</span>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>9b · Naming a group</b>The name reaches your other devices when they sync. A face that is not this person can be fixed later without renaming the group.
+        <div class="tags"><span class="tag">F9.5</span></div>
+      </figcaption>
+    </figure>
+
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><span>✕</span><span style="flex:1"></span><span>♡ ⓘ ≈ 🗑</span></div>
+        <div class="body">
+          <div class="info-m">
+            <span style="color:var(--ink-3)">People in this photo</span>
+            <div class="row-m"><div class="face sm">☺</div><span class="grow">Ana</span><span style="color:var(--accent)">Not Ana</span></div>
+            <div class="row-m"><div class="face sm">☺</div><span class="grow" style="color:var(--ink-3)">Someone</span><span style="color:var(--accent)">Name</span></div>
+            <div><b>Sat, 14 Sep 2019 18:02</b><div style="color:var(--ink-3)">4032 × 3024 · 3.1 MB · JPEG</div></div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>9c · Faces in a photo</b>The info panel lists who is in the photo. "Not Ana" is kept even if the grouping puts the face with her again. ≈ shows similar photos.
+        <div class="tags"><span class="tag">F9.5</span><span class="tag">F9.6</span></div>
+      </figcaption>
+    </figure>
+  </div>
+</div>
+<script src="assets/mockup.js?v=2"></script>
+</body>
+</html>

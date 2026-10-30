@@ -2,7 +2,8 @@
   // The timeline (M3-06): photos grouped by day, virtualised so 100k photos scroll smoothly,
   // with multi-select and the actions of mockup 2b.
   import { untrack } from 'svelte';
-  import { api, type PageCursor, type PhotoPage, type PhotoSummary } from '../lib/api';
+  import { api, type PageCursor, type PhotoPage, type PhotoSummary, type SearchPage } from '../lib/api';
+  import { tzOffset } from '../lib/search';
   import { dayLabel, plural } from '../lib/format';
   import { buildLayout, visibleRows } from '../lib/timeline';
   import { longPressDrag, pinch, pullRefresh, stepDensity } from '../lib/gestures';
@@ -18,8 +19,18 @@
   import ShareSheet from '../components/ShareSheet.svelte';
   import Viewer from './Viewer.svelte';
 
-  interface Props { source: 'all' | 'favorites' | 'album'; album?: string; }
-  let { source, album }: Props = $props();
+  interface Props {
+    source: 'all' | 'favorites' | 'album' | 'search' | 'similar' | 'person';
+    album?: string;
+    /** For `similar`: the photo the others should look like. For `person`: who. */
+    photo?: string;
+    /** For `search`: the query, and where to report what it was understood as. */
+    query?: string;
+    onsearch?: (page: Omit<SearchPage, 'items' | 'next'>) => void;
+  }
+  let { source, album, photo, query = '', onsearch }: Props = $props();
+  // Search results ranked by relevance have no day headers.
+  let ranked = $state(false);
 
   // An album of your own can be shared: a shared album with its photos, kept linked (A-097).
   let sharedAs = $state<string | null>(null);
@@ -60,6 +71,18 @@
   let selected = $state<string[]>([]);
   let lastClicked = $state(-1);
   let viewing = $state<number | null>(null);
+  // Close the viewer, wait for it to give back its history entry, then show the similar photos.
+  function showSimilar(id: string) {
+    viewing = null;
+    let done = false;
+    const next = () => {
+      if (done) return;
+      done = true;
+      go(`similar/${id}`);
+    };
+    addEventListener('popstate', next, { once: true });
+    setTimeout(next, 300);
+  }
   let albums = $state<{ id: string; name: string }[]>([]);
   let albumSheet = $state(false);
   let shareSheet = $state(false);
@@ -121,7 +144,7 @@
   });
   const firstSync = $derived(source === 'all' && wantThumbs.length > 0 && missingThumbs > 0 && app.peersOnline > 0);
 
-  const layout = $derived(buildLayout(items, { width, minTile, gap: GAP, headHeight: HEAD }));
+  const layout = $derived(buildLayout(items, { width, minTile, gap: GAP, headHeight: HEAD, days: !ranked }));
   const range = $derived(visibleRows(layout, scrollTop, viewport));
   const shown = $derived(layout.rows.slice(range[0], range[1]));
   // The date scroller, once there is more than a couple of screens to scroll through.
@@ -162,6 +185,38 @@
     const progressive = !loaded;
     const out: PhotoSummary[] = [];
     let cursor: PageCursor | null = null;
+    if (source === 'person') {
+      items = await api.personPhotos(photo!);
+      if (gen !== generation) return;
+      loaded = true;
+      complete = true;
+      return;
+    }
+    if (source === 'search' || source === 'similar') {
+      let at: number | null = null;
+      for (let size = progressive ? FIRST_PAGE : PAGE; ; size = PAGE) {
+        const page: SearchPage =
+          source === 'similar' ? await api.similar(photo!, at, size) : await api.search(query, at, size, tzOffset());
+        if (gen !== generation) return;
+        out.push(...page.items);
+        if (at === null) {
+          ranked = page.ranked;
+          onsearch?.({ total: page.total, ranked: page.ranked, filters: page.filters, free_text: page.free_text });
+        }
+        if (page.next === null) break;
+        at = page.next;
+        if (progressive) {
+          items = out.slice();
+          loaded = true;
+        }
+      }
+      items = out.slice();
+      loaded = true;
+      complete = true;
+      const ids = new Set(items.map((p) => p.id));
+      selected = selected.filter((id) => ids.has(id));
+      return;
+    }
     for (let size = progressive ? FIRST_PAGE : PAGE; ; size = PAGE) {
       const page: PhotoPage = source === 'album' && album ? await api.albumPage(album, cursor, size) : await api.libraryPage(cursor, size);
       if (gen !== generation) return;
@@ -185,7 +240,7 @@
   let showing = '';
   $effect(() => {
     app.version;
-    const key = `${source}/${album ?? ''}`;
+    const key = `${source}/${album ?? ''}/${query}`;
     untrack(() => {
       clearTimeout(timer);
       if (key !== showing) {
@@ -333,6 +388,16 @@
     use:longPressDrag={{ onStart: dragStart, onOver: dragOver, onEnd: () => (dragFrom = dragTo = -1) }}>
     {#if !loaded || (items.length === 0 && !complete)}
       <div class="empty">Loading…</div>
+    {:else if items.length === 0 && source === 'search'}
+      <div class="empty">
+        <b>{query.trim() ? 'No photos match' : 'Search your library'}</b>
+        <ul class="tips muted small">
+          {#if query.trim()}<li>Remove a chip to widen the search</li>{/if}
+          <li>Try a year, a month, a place or a camera: "2019", "March", "Lisbon"</li>
+          <li>"videos", "screenshots", "selfies" and "favourites" work too</li>
+          <li>So do "last summer", "weekends" and "Christmas"</li>
+        </ul>
+      </div>
     {:else if items.length === 0}
       <div class="empty">
         <b>{source === 'favorites' ? 'No favorites yet' : source === 'album' ? 'This album is empty' : 'No photos yet'}</b>
@@ -405,7 +470,7 @@
 </div>
 
 {#if viewing !== null && items[viewing]}
-  <Viewer {items} index={viewing} onclose={() => (viewing = null)} onmove={jump} />
+  <Viewer {items} index={viewing} onclose={() => (viewing = null)} onmove={jump} onsimilar={showSimilar} />
 {/if}
 
 <Sheet open={shareAsk > 0} title="Share the location?" onclose={() => (shareAsk = 0)} width={420}>
@@ -472,6 +537,7 @@
   }
   .tiles { position: absolute; left: 0; right: 0; display: flex; }
   .getting { padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; background: var(--info-soft); }
+  .tips { text-align: left; margin: 8px auto 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
   .empty { height: 100%; display: grid; place-content: center; text-align: center; gap: 6px; color: var(--ink-2); padding: 20px; }
   .input { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 0 12px; color: var(--ink); font: inherit; }
 </style>

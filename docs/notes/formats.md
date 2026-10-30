@@ -53,6 +53,10 @@ Each signature or keyed hash starts with its domain, so one can never be replaye
 |---|---|
 | library records (photos, albums, certificates, holdings, settings) | `[version byte] ++ postcard(body)`, version 1 (`codec.rs`, `entry_codec.rs`) |
 | Loro capability payload | version byte 1 (`CAPABILITY_VERSION`); `[2, identity id]` after an epoch change |
+| people records (S1-18) | `persons/<id hex>` → `StateEntry::Person` (name, hidden, merged into: last writer wins per field) and `facelabels/<photo hex>/<face key hex>` → `StateEntry::FaceLabel` (`is` last writer wins, `is_not` add-wins). Appended after the index records; the face key is the box on a 1/64 grid of the photo (4 bytes) |
+| index records (S1-06) | `index/<blob hex>` → `StateEntry::IndexShard` (immutable; any member but a Viewer) and `indexers/<device hex>` → `StateEntry::IndexerStatus` (only that device). Both **appended** to `StateEntry`, so 0.1.0 rejects them as undecodable (at `debug`), keeps them in its document and passes them on (`shoebox-store-loro/tests/index_records.rs`) |
+| blob kinds | `BlobKind::Index` appended (holdings of index shards) |
+| index shard blobs (S1-06) | `"SBIX"`, version byte 1 (`shoebox_search::shard::VERSION`), kind byte (`ShardKind`: 0 vec8, 1 vec1, 2 text, 3 faces), `ModelId` (32), dims u16, count u32, `replaces` (u16 n + n × 32), sorted photo ids, rows; layout in `crates/shoebox-search/src/shard.rs`. At most 1,024 photos. Immutable and content addressed: a new version is a new kind of blob, never a rewrite |
 | shared-album records (meta, items, members, events, people) | `[version byte] ++ postcard(body)`, version 1. `people/<device>` (`AlbumEntry::Person`, which person a device belongs to) was appended to the enum on 2026-10-27, before the 0.1.0 release: builds from before that skip it |
 
 Library settings with a meaning (LWW per key, opaque bytes):
@@ -61,6 +65,9 @@ Library settings with a meaning (LWW per key, opaque bytes):
 |---|---|
 | `redundancy.target` | one byte: copies to keep |
 | `recovery_kit_saved` | one byte |
+| `search.people` | one byte: 0 = people (faces) off for the library; absent or anything else = on (S1-17) |
+| `people.snapshot` | postcard `BlobRef` of the newest people grouping snapshot (postcard `shoebox_search::people::Snapshot`, version 1), kept as search data (S1-18) |
+| `people.me` | 16 bytes: the `PersonId` that is "me" (S1-18) |
 | `profile.name` | UTF-8: the person's name as people they share with see it (A-097) |
 | `shared.albums` | JSON list of `AlbumRef` (`shoebox_store::shared`): the shared albums the person is in, with capability, inviter, role, `cap_ms`, `joined_ms`, `left_ms`, `from_album`, `location` (A-097) |
 
@@ -104,5 +111,10 @@ Node data dir (the keeper storage dir is one, plus `keeper.json`, `keeper.lock`,
 | `holder-confirmations.json` | who confirmed holding which original (free-up) |
 | `epoch-notice.bin` | the latest epoch notice, postcard `EpochNotice` (layout 2; layout 1 had `rotation-notice.bin`) |
 | `admins-seen.bin` | admins this device has seen, for new-admin alerts |
+| `search/vec-<model>.bin` | the picture vectors of one model (S1-12): `"SBVX"`, version 1, model, dims, count, ids, scales, binary codes, then the 8-bit vectors. **A derived cache**, rebuilt from the shards |
+| `search/indexer-since` | when this device first indexed (milliseconds), where the 48-hour takeover counts from (S1-11) |
+| `search.json` (app data folder) | this device's search settings (`{"index": bool}`) |
+| blob tag `idx/<hash>` | search data this device keeps: index shards, the people snapshot, model files (S1-07) |
+| `search/facts.idx` | the search facts index (S1-03): `"SBFX"`, version byte (`FACTS_VERSION`, 1), BLAKE3 of the payload, postcard snapshot. **A derived cache:** deleted, damaged or of another version, it is rebuilt from the library, so it needs no migration and no layout bump |
 
 Layout history: 0 = no marker, 1 = marker (M6-05), 2 = 0.1.0 (epoch notice file).

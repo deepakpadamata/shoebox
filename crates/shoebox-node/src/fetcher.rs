@@ -10,7 +10,7 @@ use crate::blobs::Protection;
 use crate::config::NodeConfig;
 use crate::library_node::LibraryNode;
 use anyhow::{anyhow, bail, Result};
-use shoebox_core::ids::{Blake3Hash, EndpointId};
+use shoebox_core::ids::{Blake3Hash, EndpointId, Timestamp};
 use shoebox_core::model::{BlobKind, BlobRef, PhotoId, PhotoRecord};
 use shoebox_core::policy::{
     fetch_plan, queue_order, rank_holders, Candidate, PathQuality, PlanContext, QueuedFetch,
@@ -186,6 +186,14 @@ impl<L: LibraryStore> LibraryNode<L> {
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?;
         let mut queue = vec![];
+        for item in self.shard_fetch_plan(photos.len()).await? {
+            // Not a photo's blob: ordered by kind alone (newest-first does not apply).
+            queue.push(QueuedFetch {
+                photo: item.blob.hash,
+                taken_at: Timestamp(0),
+                item,
+            });
+        }
         for rec in photos {
             let own_below = rec.imported_by == self.device()
                 && self
@@ -262,6 +270,15 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// Download `blob` from its holders (several at once when it is large, A-099). Does not
     /// publish the holding.
     async fn fetch_from_holders(&self, blob: &BlobRef) -> Result<FetchSource> {
+        self.fetch_from_holders_as(blob, Protection::Library).await
+    }
+
+    /// Fetch search data (a model file) from whoever holds it, kept as `idx/<hash>`.
+    pub(crate) async fn fetch_blob_as_index(&self, blob: &BlobRef) -> Result<FetchSource> {
+        self.fetch_from_holders_as(blob, Protection::Index).await
+    }
+
+    async fn fetch_from_holders_as(&self, blob: &BlobRef, why: Protection) -> Result<FetchSource> {
         if self.node().blobs().has(&blob.hash).await? {
             bail!("already present");
         }
@@ -280,7 +297,7 @@ impl<L: LibraryStore> LibraryNode<L> {
             .collect();
         let report = self
             .node()
-            .fetch_blob_from(&ids, &blob.hash, Some(blob.size), Protection::Library)
+            .fetch_blob_from(&ids, &blob.hash, Some(blob.size), why)
             .await?;
         let device = report
             .main()
@@ -301,6 +318,7 @@ impl<L: LibraryStore> LibraryNode<L> {
             BlobKind::Original => rec.original.clone(),
             BlobKind::Preview => rec.preview.clone(),
             BlobKind::Thumb => rec.thumb.clone(),
+            BlobKind::Index => bail!("index shards are not blobs of a photo"),
         };
         let blob = blob_ref.hash;
         if self.node().blobs().kept(&blob).await? {
@@ -380,7 +398,11 @@ async fn fetch_loop<L: LibraryStore>(
                 let retry = cfg.retry;
                 handles.push(tokio::spawn(async move {
                     let _permit = permit;
-                    match ln2.fetch_from_holders(&item.item.blob).await {
+                    let why = match item.item.kind {
+                        BlobKind::Index => Protection::Index,
+                        _ => Protection::Library,
+                    };
+                    match ln2.fetch_from_holders_as(&item.item.blob, why).await {
                         Ok(_) => {
                             ln2.inner.fetcher.busy.lock().unwrap().remove(&hash);
                             ln2.inner.fetcher.partials.lock().unwrap().remove(&hash);

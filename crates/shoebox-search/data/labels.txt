@@ -1,0 +1,951 @@
+# Labels for photos (S1-13): one per line, `label` or `label: synonym, synonym`. A photo gets
+# the labels its picture embedding is closest to (prompt "a photo of a {label}"); a search for a
+# synonym finds the label. Changing this list changes LABELS_VERSION (crates/shoebox-search/src/labels.rs).
+#
+# People and gatherings
+person: people, human
+man
+woman
+child: kid, kids, children
+baby: infant, newborn, toddler
+boy
+girl
+elderly person: grandparent, grandmother, grandfather, grandma, grandpa
+couple
+family
+group of people: crowd, group
+selfie
+portrait
+friends
+bride
+groom
+wedding: marriage, ceremony
+birthday party: birthday
+party: celebration
+concert: gig
+festival
+parade
+graduation
+christmas tree
+christmas decorations
+halloween costume: costume
+fireworks
+dinner party
+picnic
+barbecue: bbq, grill
+camping
+hiking: hike, trekking
+running: jogging, run
+cycling: bike ride
+swimming: swim
+surfing: surf
+skiing: ski
+snowboarding: snowboard
+skateboarding: skateboard
+climbing: rock climbing, bouldering
+yoga
+dancing: dance
+football match: soccer, football
+basketball game: basketball
+tennis
+baseball game: baseball
+cricket match: cricket
+golf
+volleyball
+rugby
+ice hockey: hockey
+boxing
+martial arts: karate, judo
+gym: workout, fitness
+marathon: race
+horse riding: equestrian
+fishing
+sailing
+kayaking: canoeing, kayak
+rowing
+scuba diving: diving, snorkeling
+playing music: musician
+playing guitar
+playing piano
+singing: singer
+reading: reading a book
+studying
+cooking
+baking
+eating: meal
+drinking
+shopping
+gardening
+painting a picture
+drawing
+knitting
+playing video games: gaming
+board game: chess, board games
+card game: playing cards
+sleeping: asleep
+hugging: hug
+kissing: kiss
+smiling: smile
+laughing: laugh
+crying
+waving
+pointing
+sitting
+jumping: jump
+walking
+queue: line of people
+meeting: conference
+presentation: talk, lecture
+classroom: class
+lecture hall
+protest: demonstration, march
+religious ceremony: worship, prayer
+baptism: christening
+funeral
+award ceremony: prize
+road trip
+holiday: vacation, trip
+honeymoon
+# Animals
+dog: puppy, doggy, pup
+cat: kitten, kitty
+bird
+parrot
+owl
+eagle
+hawk
+pigeon
+seagull: gull
+duck
+goose
+swan
+chicken: hen, rooster
+turkey
+peacock
+penguin
+flamingo
+pelican
+crow: raven
+sparrow
+hummingbird
+horse: pony
+donkey
+cow: cattle, calf
+bull
+pig: piglet
+sheep: lamb
+goat
+llama: alpaca
+camel
+deer: reindeer
+moose: elk
+rabbit: bunny
+hamster
+guinea pig
+mouse: mice
+rat
+squirrel
+chipmunk
+hedgehog
+fox
+wolf
+bear
+polar bear
+panda
+koala
+kangaroo
+monkey: ape
+gorilla
+chimpanzee
+lion
+tiger
+leopard: cheetah, jaguar
+elephant
+giraffe
+zebra
+rhinoceros: rhino
+hippopotamus: hippo
+bat
+otter
+beaver
+raccoon
+skunk
+badger
+seal: sea lion
+walrus
+dolphin
+whale
+shark
+fish: goldfish
+tropical fish
+jellyfish
+octopus
+squid
+crab
+lobster
+shrimp: prawn
+starfish
+seashell: shell, shells
+snail
+turtle: tortoise
+frog: toad
+lizard: gecko, iguana
+snake
+crocodile: alligator
+butterfly
+moth
+bee: bumblebee
+wasp
+ant
+ladybug: ladybird
+dragonfly
+spider
+beetle
+caterpillar
+mosquito
+fly
+worm
+pet: pets
+aquarium: fish tank
+zoo
+bird nest: nest
+dinosaur
+# Food and drink
+food: dish
+breakfast
+lunch
+dinner
+dessert
+snack
+pizza
+burger: hamburger, cheeseburger
+hot dog
+sandwich
+sushi
+ramen: noodles
+pasta: spaghetti
+rice
+curry
+salad
+soup
+steak
+roast chicken
+fried chicken
+fish and chips
+seafood
+taco: tacos
+burrito
+dumplings: dim sum
+fries: chips, french fries
+bread: loaf
+toast
+croissant
+bagel
+pancakes
+waffles
+eggs: egg, omelette
+bacon
+cheese
+fruit
+apple
+banana
+orange
+lemon
+lime
+grapes
+strawberries: strawberry
+blueberries
+cherries
+watermelon
+melon
+pineapple
+mango
+peach
+pear
+kiwi
+coconut
+avocado
+vegetables: vegetable, veggies
+tomato
+potato
+carrot
+broccoli
+lettuce
+cucumber
+pepper: bell pepper, capsicum
+chili pepper: chilli
+onion
+garlic
+mushroom: mushrooms
+corn
+pumpkin
+eggplant: aubergine
+beans
+nuts
+cake
+birthday cake
+wedding cake
+cupcake: cupcakes, muffin
+cookies: cookie, biscuits
+chocolate
+ice cream: gelato
+donut: doughnut
+pie
+candy: sweets
+popcorn
+coffee: espresso, latte, cappuccino
+tea
+cup of coffee
+juice
+smoothie
+milk
+water bottle
+soda: soft drink, cola
+beer
+wine: glass of wine
+cocktail
+champagne
+whisky: whiskey
+restaurant
+cafe: coffee shop
+bar: pub
+bakery
+kitchen
+dining table
+buffet
+street food
+food market
+grocery store: supermarket
+farmers market: market
+menu
+lunch box: bento
+picnic basket
+# Places: nature
+beach: seaside, shore
+ocean: sea
+waves
+sunset: dusk
+sunrise: dawn
+sky
+clouds
+blue sky
+night sky
+stars
+moon
+sun
+rainbow
+storm: thunderstorm
+lightning
+rain
+snow: snowfall
+fog: mist
+mountain: mountains
+mountain peak: summit
+hill: hills
+valley
+cliff
+canyon: gorge
+desert: sand dunes, dunes
+forest: woods
+jungle: rainforest
+tree: trees
+palm tree
+pine tree
+autumn leaves: fall foliage, fall leaves
+flowers: flower
+rose
+sunflower
+tulip
+cherry blossom: sakura
+lotus
+orchid
+daisy
+lavender
+cactus
+grass
+meadow
+field
+farm: farmland
+vineyard
+orchard
+garden
+park
+lake
+river
+stream: creek
+waterfall
+pond
+glacier
+iceberg
+volcano
+cave
+island
+coast: coastline
+bay
+harbor: harbour, marina
+lighthouse
+pier: jetty
+rocks
+coral reef: reef
+countryside: rural
+wetland: marsh, swamp
+savanna
+tundra
+northern lights: aurora
+# Places: built
+city: cityscape
+skyline
+street
+road
+highway: motorway
+bridge
+tunnel
+building: buildings
+skyscraper
+house: home
+apartment building: apartments
+cottage: cabin
+castle
+palace
+tower
+temple
+church
+cathedral
+mosque
+synagogue
+monument: memorial
+statue: sculpture
+fountain
+ruins
+museum
+art gallery: gallery
+library
+school
+university: campus
+hospital
+office
+shop: store
+shopping mall: mall
+stadium: arena
+theater: theatre
+cinema: movie theater
+airport
+train station: railway station
+bus stop
+subway: metro, underground
+parking lot: car park
+gas station: petrol station
+construction site
+factory
+warehouse
+farmhouse
+barn
+playground
+swimming pool: pool
+hot tub: jacuzzi
+spa
+hotel
+hotel room
+resort
+campsite
+tent
+village
+town
+square: plaza
+alley
+staircase: stairs
+balcony
+rooftop
+window
+door
+garage
+fence
+wall
+graffiti: street art
+neon sign: neon lights
+traffic light
+street sign
+crosswalk
+bench
+lamp post: street light
+market stall
+amusement park: theme park
+ferris wheel
+roller coaster
+carousel
+botanical garden
+# Rooms and things at home
+living room
+bedroom
+bathroom
+dining room
+home office: study
+hallway
+attic
+basement
+laundry: washing machine
+sofa: couch
+armchair: chair
+bed
+table
+desk
+bookshelf: books
+lamp
+fireplace
+television: tv
+curtains
+carpet: rug
+pillow: cushion
+blanket
+mirror
+clock
+vase
+candle: candles
+picture frame
+houseplant: potted plant, plant
+toys: toy
+teddy bear
+lego
+doll
+balloons: balloon
+gift: present, presents, wrapped gift
+christmas lights: fairy lights
+bathtub
+shower
+toilet
+sink
+refrigerator: fridge
+oven
+microwave
+dishwasher
+stove
+plate
+bowl
+cup: mug
+glass
+bottle
+knife
+fork
+spoon
+chopsticks
+pan: frying pan
+pot
+cutting board
+umbrella
+bag: handbag, purse
+backpack: rucksack
+suitcase: luggage
+wallet
+keys
+glasses: spectacles
+sunglasses
+hat: cap
+helmet
+shoes: sneakers, trainers
+boots
+socks
+dress
+shirt: t-shirt
+jacket: coat
+suit
+tie
+scarf
+gloves
+jeans
+skirt
+swimsuit: bikini
+uniform
+jewelry: jewellery
+ring: wedding ring
+necklace
+earrings
+watch: wristwatch
+makeup
+perfume
+hairdryer
+toothbrush
+towel
+tools
+hammer
+screwdriver
+ladder
+bicycle: bike
+scooter
+wheelchair
+stroller: pram, pushchair
+baby crib: crib, cot
+high chair
+# Vehicles and transport
+car
+sports car
+vintage car: classic car
+truck: lorry
+van
+bus
+taxi: cab
+police car
+ambulance
+fire truck: fire engine
+motorcycle: motorbike
+tractor
+train
+tram: streetcar
+airplane: plane, aeroplane, jet
+helicopter
+hot air balloon
+boat
+sailboat: yacht
+ship
+cruise ship
+ferry
+canoe
+rocket
+drone
+traffic: traffic jam
+car interior: dashboard
+steering wheel
+tire: tyre
+license plate: number plate
+# Documents and screens
+document: papers
+receipt: bill, invoice
+ticket: boarding pass
+passport
+id card: identity card
+driving license: driver's license, drivers licence
+business card
+letter: envelope
+postcard
+map
+book
+notebook
+newspaper
+magazine
+handwriting: handwritten note, note
+whiteboard
+blackboard: chalkboard
+sign
+poster
+menu board
+calendar
+diagram: chart
+spreadsheet
+screenshot
+text message: chat, messages
+email
+website: web page
+computer screen: monitor
+laptop
+phone: smartphone, mobile phone
+tablet: ipad
+keyboard
+computer mouse
+headphones: earphones, earbuds
+camera
+speaker
+television screen
+game controller
+cables
+printer
+qr code
+barcode
+price tag
+label
+certificate: diploma
+contract
+form
+bank statement
+medical report
+prescription
+recipe
+sheet music
+book cover
+album cover
+# Art, objects and the rest
+painting
+sketch
+artwork: art
+mural
+photograph: photo of a photo, print
+illustration
+cartoon
+comic
+anime
+meme
+logo
+pattern
+texture
+abstract
+black and white photo: monochrome, black and white
+close-up: macro
+silhouette
+reflection
+shadow
+light
+night: nighttime
+lights: city lights
+bokeh
+long exposure
+panorama
+aerial view: drone shot, bird's eye view
+underwater
+blurry photo: blur, blurry
+dark photo
+snowman
+sandcastle
+kite
+flag
+campfire: bonfire
+fire
+smoke
+ice
+water
+sand
+stone: stones, pebbles
+wood
+metal
+plastic
+paper
+cardboard box: box, boxes
+basket
+bucket
+rope
+chain
+lock
+coins: money, cash, banknotes
+credit card: bank card
+trophy
+medal
+musical instrument: instrument
+guitar
+piano: keyboard instrument
+violin
+drums
+trumpet
+saxophone
+flute
+microphone
+dj
+stage
+cinema screen
+puppet
+mask
+crown
+sword
+model train
+puzzle
+dice
+bowling
+billiards: pool table, snooker
+darts
+trampoline
+swing
+slide
+sandbox
+skate park
+ski slope
+ice rink: ice skating
+sledding: sled, sledge
+snowball
+beach umbrella: parasol
+sun lounger: deck chair
+surfboard
+life jacket
+fishing rod
+compass
+binoculars
+telescope
+microscope
+laboratory: lab
+science experiment
+robot
+3d printer
+solar panels
+wind turbine
+power lines
+oil rig
+dam
+canal
+lock gate
+windmill
+clock tower
+street market
+night market
+food truck
+ice cream truck
+vending machine
+atm
+mailbox: postbox
+phone booth
+fire hydrant
+trash can: bin, rubbish bin
+recycling bin
+bicycle rack
+parking meter
+stop sign
+road sign
+speed bump
+roundabout
+intersection
+pedestrian crossing: zebra crossing
+car accident: crash
+flood
+snowstorm: blizzard
+wildfire
+earthquake damage
+rainy street
+puddle
+icicles
+frost
+dew
+spider web: cobweb
+leaves
+branch
+tree trunk
+roots
+moss
+fern
+bamboo
+seaweed
+coral
+pine cones
+acorns
+berries
+wheat field
+rice paddy
+tea plantation
+sunflower field
+lavender field
+tulip field
+cherry blossom tree
+maple leaves
+bonsai
+succulent
+weeds
+hedge
+lawn: yard
+patio
+porch
+deck
+gazebo
+greenhouse
+shed
+treehouse
+bird feeder
+dog bed
+cat tree
+fish bowl
+horse stable: stable
+chicken coop
+beehive
+scarecrow
+hay bales: hay
+# Faces and expressions (for what a photo shows, not who)
+face
+eyes
+hands: hand
+feet
+hair
+beard
+tattoo
+sleeping baby
+baby with parents
+mother and child: mother and baby
+father and child: father and son, father and daughter
+siblings
+twins
+grandparents with grandchildren
+team photo: team
+class photo
+office party
+reunion
+newborn baby: new baby
+pregnancy: pregnant, baby bump
+first day of school
+school uniform
+school play
+sports day
+prom
+anniversary
+engagement: proposal
+date night
+wedding dress
+wedding rings
+bouquet
+first dance
+cake cutting
+raising glasses: cheers
+blowing out candles
+opening presents
+christmas morning
+christmas dinner
+easter eggs
+diwali lamps: diya, diwali
+rangoli
+holi colors: holi
+eid
+hanukkah: menorah
+lunar new year: chinese new year
+lanterns
+thanksgiving dinner
+new year's eve
+valentine's day
+mother's day
+father's day
+carnival
+oktoberfest
+pride parade: pride
+street performer: busker
+magician
+clown
+circus
+rodeo
+air show
+car show
+boat show
+fashion show: catwalk
+art exhibition: exhibition
+museum exhibit
+dinosaur skeleton
+ancient artifact: artifact
+pottery: ceramics
+vase of flowers
+flower arrangement
+wreath
+bouquet of flowers
+gift box
+wrapping paper
+greeting card: card
+invitation
+handwritten letter
+diary: journal
+to-do list: list
+shopping list
+sticky notes: post-it
+calculator
+scissors
+pen
+pencil
+paintbrush
+crayons
+paint
+easel
+canvas
+sewing machine
+yarn: wool
+fabric
+quilt
+embroidery
+woodworking
+workshop
+garage workshop
+car repair: mechanic
+bicycle repair
+doctor
+nurse
+chef
+police officer: police
+firefighter
+soldier
+pilot
+astronaut

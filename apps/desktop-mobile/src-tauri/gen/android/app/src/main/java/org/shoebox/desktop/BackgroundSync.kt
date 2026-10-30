@@ -39,7 +39,17 @@ object BackgroundSync {
             .build()
         val request = PeriodicWorkRequestBuilder<BurstWorker>(15, TimeUnit.MINUTES).setConstraints(constraints).build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(UNIQUE, ExistingPeriodicWorkPolicy.KEEP, request)
+        // Search indexing (S1-11): only while charging, with the battery not low.
+        val charging = Constraints.Builder()
+            .setRequiresCharging(true)
+            .setRequiresBatteryNotLow(true)
+            .build()
+        val index = PeriodicWorkRequestBuilder<IndexWorker>(30, TimeUnit.MINUTES).setConstraints(charging).build()
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(INDEX_UNIQUE, ExistingPeriodicWorkPolicy.KEEP, index)
     }
+
+    const val INDEX_UNIQUE = "shoebox-index"
+    const val INDEX_BUDGET_SECS = 480
 
     /** Run one burst now (used by tests and diagnostics: `adb shell am broadcast -a ...BURST_NOW`). */
     fun runNow(context: Context) {
@@ -59,6 +69,7 @@ class BurstWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
         val prefs = ctx.getSharedPreferences("burst", Context.MODE_PRIVATE)
         val last = prefs.getLong("last_notified_ms", 0L)
         val report = try {
+            ModelAssets.install(ctx)
             NativeBridge.runBurst(ctx.dataDir.absolutePath, BackgroundSync.budgetSecs(), PhotoBackend(ctx), last)
         } catch (e: Throwable) {
             Log.e("ShoeboxBurst", "burst failed", e)
@@ -102,5 +113,23 @@ class BurstWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
             .setAutoCancel(true)
             .build()
         nm.notify(id, n)
+    }
+}
+
+/** Indexes this phone's photos for search while it charges; stops when WorkManager says so. */
+class IndexWorker(private val ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+    override suspend fun doWork(): Result {
+        if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            return Result.success()
+        }
+        val report = try {
+            ModelAssets.install(ctx)
+            NativeBridge.runIndex(ctx.dataDir.absolutePath, BackgroundSync.INDEX_BUDGET_SECS, PhotoBackend(ctx))
+        } catch (e: Throwable) {
+            Log.e("ShoeboxIndex", "indexing failed", e)
+            return Result.retry()
+        }
+        Log.i("ShoeboxIndex", report)
+        return Result.success()
     }
 }

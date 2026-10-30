@@ -15,6 +15,7 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     BackgroundSync.schedule(applicationContext)
+    Thread { ModelAssets.install(applicationContext) }.start()
   }
 
   // The WebView draws edge to edge but does not report the system bars to CSS: hand the insets

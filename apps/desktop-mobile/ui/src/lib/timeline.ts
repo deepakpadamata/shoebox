@@ -36,6 +36,8 @@ export interface LayoutOptions {
   minTile: number;
   gap: number;
   headHeight: number;
+  /** Group by day under date headers (the default); off for results ordered by relevance. */
+  days?: boolean;
 }
 
 /** Items must already be sorted newest first (as the app core returns them). */
@@ -45,6 +47,13 @@ export function buildLayout(items: PhotoSummary[], o: LayoutOptions): Layout {
   const rows: Row[] = [];
   let top = 0;
   let i = 0;
+  if (o.days === false) {
+    for (let k = 0; k < items.length; k += cols) {
+      rows.push({ type: 'tiles', top, height: tile + o.gap, from: k, to: Math.min(k + cols, items.length) });
+      top += tile + o.gap;
+    }
+    return { rows, height: top, cols, tile };
+  }
   while (i < items.length) {
     const day = dayKey(items[i].taken_at);
     let j = i;

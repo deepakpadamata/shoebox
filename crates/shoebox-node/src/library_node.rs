@@ -33,6 +33,9 @@ pub(crate) struct Inner<L: LibraryStore> {
     pub(crate) presence: Mutex<Option<crate::presence::PresenceState>>,
     pub(crate) devices: Mutex<HashMap<EndpointId, crate::presence::DeviceRecord>>,
     pub(crate) fetcher: crate::fetcher::FetcherState,
+    pub(crate) search: crate::search::SearchState,
+    pub(crate) shards: crate::shards::ShardBook,
+    pub(crate) indexer: crate::indexer::IndexerState,
     /// Held (shared) while a file is ingested and (exclusively) while blobs are reconciled, so a
     /// freshly tagged blob whose record is not written yet is never released.
     pub(crate) ingest: tokio::sync::RwLock<()>,
@@ -92,6 +95,9 @@ impl<L: LibraryStore> LibraryNode<L> {
                 presence: Mutex::new(None),
                 devices: Mutex::new(HashMap::new()),
                 fetcher: Default::default(),
+                search: Default::default(),
+                shards: Default::default(),
+                indexer: Default::default(),
                 ingest: tokio::sync::RwLock::new(()),
                 membership: Mutex::new(crate::identity::Membership::Unknown),
                 invites: Default::default(),

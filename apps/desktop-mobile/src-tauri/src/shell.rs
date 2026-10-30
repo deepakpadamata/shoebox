@@ -220,6 +220,12 @@ pub fn run() {
             app.manage(lock);
             let opts = AppOptions {
                 secrets: Some(secret_store(app.handle(), &data_dir)),
+                // Release builds bundle the search models as resources (tauri.models.conf.json).
+                model_dirs: app
+                    .path()
+                    .resource_dir()
+                    .map(|d| vec![d.join("models")])
+                    .unwrap_or_default(),
                 ..AppOptions::default()
             };
             let core = tauri::async_runtime::block_on(AppCore::open(&data_dir, opts))?;

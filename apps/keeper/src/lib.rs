@@ -5,6 +5,7 @@ pub mod alerts;
 pub mod control;
 mod daemon;
 pub mod render;
+mod search_models;
 pub mod service;
 pub mod status;
 

@@ -36,11 +36,19 @@ import type { TransferItem } from '../bindings/TransferItem';
 import type { Transfers } from '../bindings/Transfers';
 import type { Settings } from '../bindings/Settings';
 import type { Profile } from '../bindings/Profile';
+import type { SearchChip } from '../bindings/SearchChip';
+import type { SearchPage } from '../bindings/SearchPage';
+import type { SearchStatus } from '../bindings/SearchStatus';
+import type { FaceOut } from '../bindings/FaceOut';
+import type { PersonCard } from '../bindings/PersonCard';
+import type { PeopleList } from '../bindings/PeopleList';
+import type { SearchIndexer } from '../bindings/SearchIndexer';
+import type { SearchSuggestion } from '../bindings/SearchSuggestion';
 
 export type {
   AboutInfo, AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
   AlbumInfo, AppEvent, BackupFolder, BackupPolicy, BackupScope, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, Health, ImportSummary,
-  LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, Settings, TransferItem, Transfers,
+  LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, FaceOut, PeopleList, PersonCard, SearchChip, SearchIndexer, SearchPage, SearchStatus, SearchSuggestion, Settings, TransferItem, Transfers,
 };
 
 export type BlobKind = 'thumb' | 'preview' | 'original' | 'poster';
@@ -138,6 +146,26 @@ export const api = {
   pairStart: (role: string) => call<PairStart>('pair_start', { role }),
   markRecoveryKitSaved: () => call<{}>('mark_recovery_kit_saved'),
   libraryPage: (cursor: PageCursor | null, limit = 500) => call<PhotoPage>('library_page', { cursor, limit }),
+  search: (text: string, cursor: number | null, limit: number, tz_offset_min: number) =>
+    call<SearchPage>('search', { text, cursor, limit, tz_offset_min }),
+  searchSuggestions: (prefix: string, limit = 12) => call<SearchSuggestion[]>('search_suggestions', { prefix, limit }),
+  /** People (S1-19). */
+  people: () => call<PeopleList>('people'),
+  personPhotos: (id: string) => call<PhotoSummary[]>('person_photos', { id }),
+  namePerson: (id: string, name: string) => call<string>('name_person', { id, name }),
+  mergePeople: (from: string, into: string) => call<null>('merge_people', { from, into }),
+  hidePerson: (id: string, hidden: boolean) => call<null>('hide_person', { id, hidden }),
+  setMe: (id: string) => call<null>('set_me', { id }),
+  photoFaces: (photo: string) => call<FaceOut[]>('photo_faces', { photo }),
+  labelFace: (photo: string, rect: number[], o: { person?: string; name?: string; not?: string }) =>
+    call<null>('label_face', { photo, rect, person: o.person ?? null, name: o.name ?? null, not: o.not ?? null }),
+  setPeople: (on: boolean) => call<null>('set_people', { on }),
+  /** How much of the library search covers here, and who is indexing (S1-16). */
+  searchStatus: () => call<SearchStatus>('search_status'),
+  setSearchIndexing: (on: boolean) => call<null>('set_search_indexing', { on }),
+  rebuildSearchIndex: () => call<null>('rebuild_search_index'),
+  /** Photos that look like `photo` (S1-12), best first. */
+  similar: (photo: string, cursor: number | null, limit: number) => call<SearchPage>('similar', { photo, cursor, limit }),
   counts: () => call<LibraryCounts>('counts'),
   photoDetail: (id: string) => call<PhotoDetail>('photo_detail', { id }),
   setFavorite: (ids: string[], favorite: boolean) => call<{}>('set_favorite', { ids, favorite }),

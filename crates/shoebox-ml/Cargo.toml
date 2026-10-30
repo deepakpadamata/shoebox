@@ -1,0 +1,23 @@
+[package]
+name = "shoebox-ml"
+description = "Search models on desktop, keeper and phone: the encoders behind shoebox-search's traits, run with tract (pure Rust, so it builds into the static keeper)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[dependencies]
+shoebox-core.workspace = true
+shoebox-search.workspace = true
+# 0.23.0-0.23.4 had an advisory on the ONNX loader (docs/notes/search-models.md).
+tract-onnx = "=0.23.9"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+blake3.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

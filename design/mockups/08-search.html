@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>08 · Search — Shoebox mockups</title>
+<link rel="stylesheet" href="assets/mockup.css?v=2">
+<style>
+  .sfield { display:flex; align-items:center; gap:8px; height:36px; border-radius:10px; background:var(--surface-2); border:1px solid var(--line); padding:0 10px; font-size:14px; }
+  .sfield .q { flex:1; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; padding:8px 12px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; background:var(--accent-soft); color:var(--ink); font-size:12.5px; font-weight:600; }
+  .chip .x { color:var(--ink-3); }
+  .sugg { border:1px solid var(--line); border-radius:12px; background:var(--surface); box-shadow:var(--shadow); padding:6px 0; font-size:13.5px; }
+  .sugg .g { font-size:11px; font-weight:700; color:var(--ink-3); text-transform:uppercase; letter-spacing:.05em; padding:8px 12px 4px; }
+  .sugg .r { padding:7px 12px; display:flex; gap:8px; align-items:center; }
+  .sugg .r.on { background:var(--surface-3); }
+  .coverage { font-size:12px; color:var(--ink-3); padding:0 12px 6px; }
+  .empty-s { padding:40px 20px; text-align:center; color:var(--ink-2); }
+  .empty-s ul { text-align:left; display:inline-block; margin-top:10px; color:var(--ink-3); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <a class="crumb" href="index.html">← All screens</a>
+    <h1>08 · Search</h1>
+  </div>
+  <p class="page-intro">Search runs on the device itself, with no other device online. Recognised pieces of a query (a
+    date, a place, a camera, an album, a person) become chips you can remove; the rest of the words rank the results.
+    Results use the timeline grid: newest first with day headers when the query is only filters, "best matches" without
+    headers when there are words to rank by.</p>
+
+  <div class="screens">
+
+    <!-- 8a Phone: search field, recent and suggestions -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><div class="sfield" style="flex:1"><span>⌕</span><span class="q">lis</span><span class="muted">✕</span></div><span style="color:var(--accent)">Cancel</span></div>
+        <div class="body">
+          <div class="sugg" style="margin:6px 12px">
+            <div class="g">Places</div>
+            <div class="r on">📍 Lisbon</div>
+            <div class="r">📍 Lisbon District</div>
+            <div class="g">Albums</div>
+            <div class="r">▤ Lisbon trip</div>
+            <div class="g">Recent</div>
+            <div class="r muted">🕘 videos last summer</div>
+            <div class="r muted">🕘 2019</div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>8a · Typing (phone)</b>The search icon in the top bar opens a full-screen search. While typing: names this library contains, grouped (People, Places, Albums, Things, Cameras); recent searches, kept on this device only.
+        <div class="tags"><span class="tag">F9.1</span><span class="tag">F9.7</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 8b Phone: results -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><div class="sfield" style="flex:1"><span>⌕</span><span class="q">Lisbon 2019 videos</span><span class="muted">✕</span></div><span style="color:var(--accent)">Cancel</span></div>
+        <div class="body">
+          <div class="chips"><span class="chip">📍 Lisbon <span class="x">✕</span></span><span class="chip">📅 2019 <span class="x">✕</span></span><span class="chip">▶ videos <span class="x">✕</span></span></div>
+          <div class="coverage">23 videos · Searching by date, place, camera and album</div>
+          <div class="scroll">
+            <div class="day-head"><b>Sat, 14 Sep 2019</b><span>9</span></div>
+            <div class="grid" data-photos="9" data-seed="12" data-video="0,1,2,3,4,5,6,7,8"></div>
+            <div class="day-head"><b>Fri, 13 Sep 2019</b><span>14</span></div>
+            <div class="grid" data-photos="8" data-seed="14" data-video="0,1,2,3,4,5,6,7"></div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>8b · Results (phone)</b>Only filters: the timeline grid with day headers, newest first. Tap a chip's ✕ to drop it. Opening a photo swipes within the results; long-press selects, as in the Library.
+        <div class="tags"><span class="tag">F9.1</span><span class="tag">F9.2</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 8c Phone: no results -->
+    <figure class="screen">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="island"></span><span class="icons">●●● ▮</span></div>
+        <div class="navbar"><div class="sfield" style="flex:1"><span>⌕</span><span class="q">kerala 2012</span><span class="muted">✕</span></div><span style="color:var(--accent)">Cancel</span></div>
+        <div class="body">
+          <div class="chips"><span class="chip">📍 Kerala <span class="x">✕</span></span><span class="chip">📅 2012 <span class="x">✕</span></span></div>
+          <div class="empty-s"><b>No photos match</b>
+            <ul><li>Remove a chip to widen the search</li><li>Try a year, a month, a place or a camera</li><li>"videos", "screenshots", "favourites" work too</li></ul>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>8c · No results</b>Says what was understood (the chips) and how to widen it. Never suggests asking another device.
+        <div class="tags"><span class="tag">F9.1</span></div>
+      </figcaption>
+    </figure>
+
+    <!-- 8d Desktop -->
+    <figure class="screen wide" style="width:100%">
+      <div class="desktop">
+        <div class="titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="title">Shoebox</span></div>
+        <div class="split">
+          <aside class="sidebar">
+            <div class="it">▦ Library <span class="n">24,108</span></div>
+            <div class="it">♥ Favorites <span class="n">312</span></div>
+            <div class="it">▤ Albums</div>
+          </aside>
+          <div class="main">
+            <div class="toolbar">
+              <h3>Search</h3>
+              <div style="flex:1"></div>
+              <div class="sfield" style="width:320px"><span>⌕</span><span class="q">dog on a beach Portugal</span><span class="muted small">/</span></div>
+              <span class="btn sm primary">Import…</span>
+            </div>
+            <div class="chips"><span class="chip">📍 Portugal <span class="x">✕</span></span><span class="muted small" style="align-self:center">and the words “dog on a beach”</span></div>
+            <div class="coverage">Best matches · 41 photos · Searching 82,113 of 100,402 photos by content; the rest by date, place and camera. <i>Pi in the hall</i> is indexing.</div>
+            <div class="scroll" style="padding:0 6px">
+              <div class="grid c7" data-photos="21" data-seed="21"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>8d · Results (desktop)</b>The field sits in the toolbar; <kbd>/</kbd> or <kbd>⌘F</kbd> focuses it, <kbd>Esc</kbd> clears then closes, arrows move through suggestions. With words to rank by, results are "best matches" without day headers. The coverage line appears once content search exists (S1-16) and hides at 100%.
+        <div class="tags"><span class="tag">F9.1</span><span class="tag">F9.4</span><span class="tag">F9.7</span></div>
+      </figcaption>
+    </figure>
+
+  </div>
+</div>
+<script src="assets/mockup.js?v=2"></script>
+</body>
+</html>

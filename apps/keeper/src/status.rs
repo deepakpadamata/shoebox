@@ -121,6 +121,7 @@ pub(crate) async fn report(shared: &Shared) -> Result<Value> {
         "redundancy_target": ln.redundancy_target().await?,
         "recovery_kit_saved": ln.recovery_kit_saved().await?,
     });
+    out["search"] = crate::control::index_status(ln).await?;
     out["devices"] = json!(devices.devices.iter().filter(|d| !d.revoked).count());
     out["peers"] = json!(peers);
     out["shared_albums"] = albums_json(shared).await?["albums"].clone();

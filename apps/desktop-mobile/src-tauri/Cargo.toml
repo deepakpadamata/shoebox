@@ -41,6 +41,7 @@ tauri-app = [
     "dep:objc2",
     "dep:objc2-app-kit",
     "dep:objc2-foundation",
+    "dep:objc2-vision",
 ]
 # Platform keystore (macOS Keychain, Windows Credential Manager, Secret Service).
 keyring = ["dep:keyring"]
@@ -50,6 +51,8 @@ shoebox-core.workspace = true
 shoebox-node.workspace = true
 shoebox-store.workspace = true
 shoebox-media.workspace = true
+shoebox-search.workspace = true
+shoebox-ml.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "net", "signal", "process"] }
 futures.workspace = true
 anyhow.workspace = true
@@ -77,7 +80,9 @@ keyring = { version = "3", features = ["apple-native"], optional = true }
 # The share picker (`share.rs`); the same versions Tauri already builds.
 objc2 = { version = "0.6", optional = true }
 objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "NSResponder", "NSSharingService", "NSView"] }
-objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "NSArray", "NSGeometry", "NSURL"] }
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "NSArray", "NSGeometry", "NSURL", "NSData", "NSDictionary", "NSString", "NSError"] }
+# Text in photos (S1-14) with Apple Vision.
+objc2-vision = { version = "0.3", optional = true, default-features = false, features = ["std", "VNRequest", "VNRecognizeTextRequest", "VNRequestHandler", "VNObservation", "VNTypes"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"], optional = true }

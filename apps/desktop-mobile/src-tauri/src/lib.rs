@@ -13,13 +13,17 @@ mod export;
 pub mod keystore;
 pub mod media;
 pub mod notify;
+mod people;
 pub mod photos_source;
+mod search_models;
 mod shared;
 pub mod types;
 
 #[cfg(feature = "http")]
 pub mod http;
 
+#[cfg(all(feature = "tauri-app", target_os = "macos"))]
+mod ocr_macos;
 #[cfg(feature = "tauri-app")]
 mod share;
 #[cfg(feature = "tauri-app")]

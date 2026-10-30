@@ -37,6 +37,13 @@ pub struct KeeperOptions {
     /// Use the name saved at pairing (`keeper.json`) over `name`. `run` turns this off when
     /// `--name` is given.
     pub prefer_saved_name: bool,
+    /// Index photos for search by meaning (S1-11) when the model files are installed.
+    pub index: bool,
+    /// Encoder threads (default: half the cores).
+    pub max_threads: Option<usize>,
+    /// Load and offer the search models at all (off in tests: they would hash and offer the
+    /// files of a developer's checkout).
+    pub search_models: bool,
 }
 
 impl KeeperOptions {
@@ -50,6 +57,9 @@ impl KeeperOptions {
             update_feed: shoebox_node::update::PLACEHOLDER_FEED.to_string(),
             create_storage: true,
             prefer_saved_name: true,
+            index: false,
+            max_threads: None,
+            search_models: false,
         }
     }
 
@@ -63,6 +73,9 @@ impl KeeperOptions {
                 .unwrap_or_else(|_| shoebox_node::update::PLACEHOLDER_FEED.to_string()),
             create_storage: true,
             prefer_saved_name: true,
+            index: true,
+            max_threads: None,
+            search_models: true,
         }
     }
 }
@@ -128,6 +141,8 @@ impl Shared {
         ln.start_fetcher(FetcherConfig::default());
         ln.start_maintenance(MaintenanceConfig::default());
         ln.start_presence(PresenceConfig::default()).await?;
+        ln.start_search();
+        crate::search_models::start(&ln, &self.opts).await;
         let albums =
             shoebox_store::SharedAlbums::open(self.node.clone(), &self.opts.storage, true).await?;
         // The keeper takes part in the shared albums its person's other devices are in (A-097).

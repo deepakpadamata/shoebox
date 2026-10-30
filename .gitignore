@@ -10,3 +10,5 @@ dist/
 
 # Planning and bookkeeping (issues, epics, progress): kept locally, not part of the codebase.
 /planning/
+/models/
+/apps/desktop-mobile/src-tauri/gen/android/app/src/main/assets/models/

@@ -13,6 +13,23 @@ What has been measured, what has not, and what failed the acceptance criteria.
 | Interrupted download resumes | only the missing ranges are fetched again (`fetcher.rs: a_partly_downloaded_blob_resumes…`) |
 | Free-up, revocation, late keeper, disk full, clock skew | `failure-scenarios.md` |
 
+## Search at scale (S1-20, Mac, release builds)
+
+| Measure | 100k photos | Budget |
+|---|---|---|
+| Facts query (`kerala 2019 pixel 8`) | under 50 ms | 50 ms |
+| Meaning: scoring every photo's vector (512-d, 8-bit, streamed from `search/vec-*.bin`) | 8 ms | 50 ms (Mac), 150 ms (Pi 5, S25) |
+| Re-labelling from vectors (937 labels) | 22 s | 2 min |
+| Text query encoding | 14 ms | 50 ms (phone) |
+| `facts.idx` | under 15 MB | — |
+| Vectors on disk (`vec8` + `vec1` + ids) | about 59 MB | — |
+| Face shards (one face a photo, 161 bytes each) | about 16 MB | 50 MB |
+| Gazetteer lookups (100k) | 0.3 s | — |
+
+Not measured: the S25, a Pi 5, nest; RSS while searching on a phone (the text model alone takes about 510 MB
+resident on the Mac while loaded, so a phone loads it on the first search by meaning and lets it go after two
+minutes); the week-long endurance run.
+
 ## Not met yet
 
 * **Mobile memory under 300 MB during a 100k-photo sync: not met.** The library state costs about

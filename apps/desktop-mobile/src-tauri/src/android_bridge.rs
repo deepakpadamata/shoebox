@@ -309,6 +309,89 @@ fn run(
     })
 }
 
+/// The indexing job (S1-11): runs only while the phone charges (WorkManager's constraints).
+fn run_index(
+    data_dir: String,
+    budget_secs: u64,
+    backend: Arc<Backend>,
+) -> Result<serde_json::Value> {
+    let dir = PathBuf::from(&data_dir);
+    crate::diagnostics::init_logging();
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("app.lock"))?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => {
+            return Ok(json!({ "skipped": "the app is running" }));
+        }
+        Err(std::fs::TryLockError::Error(e)) => {
+            bail!("cannot lock {}: {e}", dir.join("app.lock").display())
+        }
+    }
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()?;
+    rt.block_on(async move {
+        let store: Arc<dyn SecretStore> = Arc::new(JniKeystore(backend.clone()));
+        let core = AppCore::open(
+            &dir,
+            AppOptions {
+                secrets: Some(store),
+                update_feed: shoebox_node::update::PLACEHOLDER_FEED.to_string(),
+                ..AppOptions::default()
+            },
+        )
+        .await?;
+        if !core.app_state().await?.has_library {
+            core.shutdown().await?;
+            return Ok(json!({ "skipped": "no library on this device yet" }));
+        }
+        let work = core.index_burst(Duration::from_secs(budget_secs));
+        let app_opening = async {
+            while !APP_OPENING.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        };
+        let outcome = tokio::select! {
+            r = work => r,
+            () = app_opening => Ok(json!({ "skipped": "the app was opened" })),
+        };
+        core.shutdown().await?;
+        outcome
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_shoebox_desktop_NativeBridge_runIndex(
+    mut env: JNIEnv,
+    _class: JClass,
+    data_dir: JString,
+    budget_secs: jint,
+    backend: JObject,
+) -> jstring {
+    let result = (|| -> Result<serde_json::Value> {
+        let data_dir: String = env.get_string(&data_dir)?.into();
+        let backend = Arc::new(Backend {
+            vm: env.get_java_vm()?,
+            obj: env.new_global_ref(&backend)?,
+        });
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_index(data_dir, budget_secs.max(30) as u64, backend)
+        }))
+        .map_err(|_| anyhow!("the indexing run panicked"))?
+    })();
+    let text = result
+        .unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))
+        .to_string();
+    env.new_string(text)
+        .map(|s| s.into_raw())
+        .unwrap_or(std::ptr::null_mut())
+}
+
 #[no_mangle]
 pub extern "system" fn Java_org_shoebox_desktop_NativeBridge_runBurst(
     mut env: JNIEnv,

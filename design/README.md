@@ -13,6 +13,8 @@ Photos are generated gradients; QR codes are fake.
 | `04-albums-sharing.html` | 4a Albums · 4b Shared album feed · 4c Invite · 4d Accept invite · 4e Location prompt | F5.1–F5.3, F6.1–F6.5, F6.9, F8.3 |
 | `05-devices.html` | 5a Devices & activity · 5b Add device · 5c Device detail · **Background sync:** 5d Lock-screen nudge · 5e Finishing in foreground · 5f Nothing reachable · **Headless keeper:** 5g CLI pairing · 5h Confirm on phone · 5i `status` | F4.1–F4.7, F6.9, F7.1, F8.1, F8.4 |
 | `06-storage-settings.html` | 6a Library health & free up space · 6b Settings · 6c Relay servers | F7.1–F7.4, F8.1–F8.5 |
+| `08-search.html` | 8a Typing (phone) · 8b Results (phone) · 8c No results · 8d Results (desktop) | F9.1, F9.2, F9.4, F9.7 |
+| `09-people.html` | 9a People (phone) · 9b Naming a group · 9c Faces in a photo | F9.5, F9.6 |
 
 ## Navigation (mobile)
 
@@ -38,7 +40,7 @@ Tabs: **Library · Albums · Shared · Devices**. Settings from the avatar in th
 
 ## Not yet mocked
 
-- Recently Deleted, search, video player, smart albums
+- Recently Deleted, video player, smart albums
 - Shared tab feed, member management (remove member / leave album)
 - Desktop versions of devices, sharing and settings
 - Empty states and first-sync progress (big initial transfer)

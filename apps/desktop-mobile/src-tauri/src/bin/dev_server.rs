@@ -27,6 +27,10 @@ struct Args {
     /// camera roll (a fake photo source), to try backup and its folder choice in a browser.
     #[arg(long)]
     fake_camera_roll: Option<std::path::PathBuf>,
+    /// Load the search models from a checkout's `models/build` (`cargo xtask models`) even
+    /// with `--local-only`, to index and search by meaning.
+    #[arg(long)]
+    search_models: bool,
 }
 
 #[tokio::main]
@@ -42,6 +46,7 @@ async fn main() -> Result<()> {
     if let Some(feed) = args.update_feed {
         opts.update_feed = feed;
     }
+    opts.search_models |= args.search_models;
     let core = desktop_mobile::AppCore::open(&args.data_dir, opts).await?;
     if let Some(roll) = args.fake_camera_roll {
         use desktop_mobile::photos_source::FakePhotoSource;

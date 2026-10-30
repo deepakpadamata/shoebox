@@ -32,6 +32,8 @@ pub enum BlobKind {
     Original,
     Preview,
     Thumb,
+    /// An index shard (S1-06). Appended: postcard encodes variants by index.
+    Index,
 }
 
 /// A reference to a blob in iroh-blobs.
@@ -144,4 +146,113 @@ pub struct Holding {
     pub blob: Blake3Hash,
     pub kind: BlobKind,
     pub since: Hlc,
+}
+
+/// Identity of a search model: BLAKE3 over its weight files and preprocessing description (see
+/// `docs/notes/search-models.md`). Results from different models are never compared.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub struct ModelId(pub [u8; 32]);
+
+/// What an index shard holds (epic S1 §3.1). Appended to only: the byte is in shard headers.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub enum ShardKind {
+    /// Picture embeddings, 8-bit with a scale per photo.
+    Vec8,
+    /// The same embeddings as sign bits.
+    Vec1,
+    /// Labels with scores and text read from the photo.
+    Text,
+    /// Detected faces with their embeddings.
+    Faces,
+}
+
+impl ShardKind {
+    pub const ALL: [ShardKind; 4] = [Self::Vec8, Self::Vec1, Self::Text, Self::Faces];
+
+    pub fn byte(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_byte(b: u8) -> Option<Self> {
+        Self::ALL.get(usize::from(b)).copied()
+    }
+}
+
+/// The library's record of one index shard blob (`index/<blob hash>`). Immutable: the blob it
+/// names is content addressed, and `replaces` is copied from inside it.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct IndexShard {
+    pub blob: BlobRef,
+    pub model: ModelId,
+    pub kind: ShardKind,
+    /// Photos in the shard.
+    pub count: u32,
+    /// Shards of the same model and kind this one supersedes (from the blob's header).
+    pub replaces: Vec<Blake3Hash>,
+    pub made_by: EndpointId,
+    pub hlc: Hlc,
+}
+
+/// What a device can index and how fast (`indexers/<device>`), written only by that device. The
+/// one input to sharing indexing work, with the device list.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct IndexerStatus {
+    pub device: EndpointId,
+    /// Models this build can index with.
+    pub models: Vec<ModelId>,
+    pub kinds: Vec<ShardKind>,
+    /// Measured and rounded; 0 = not indexing.
+    pub photos_per_min: u32,
+    /// A keeper, or a desktop set to index while plugged in.
+    pub always_on: bool,
+    pub hlc: Hlc,
+}
+
+/// Identity of a person (random 16 bytes, chosen by whoever named them first).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub struct PersonId(pub [u8; 16]);
+
+/// A person people have named (`persons/<id>`, S1-18). Every field is last-writer-wins.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Person {
+    pub id: PersonId,
+    pub name: Lww<String>,
+    /// Left out of suggestions and the People screen.
+    pub hidden: Lww<bool>,
+    /// Merged into another person (followed to its end; within a cycle the lowest id is it).
+    pub merged_into: Lww<Option<PersonId>>,
+}
+
+impl Person {
+    /// Field by field, the later write wins.
+    pub fn merge(&self, other: &Person) -> Option<Person> {
+        (self.id == other.id).then(|| Person {
+            id: self.id,
+            name: self.name.merge(&other.name),
+            hidden: self.hidden.merge(&other.hidden),
+            merged_into: self.merged_into.merge(&other.merged_into),
+        })
+    }
+}
+
+/// What people said about one face (`facelabels/<photo>/<face key>`, S1-18): who it is
+/// (last writer wins), and who it is not (an add-wins set). `face` is the face's box on a 1/64
+/// grid of the photo (`shoebox_search::faces::FaceKey`).
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct FaceLabel {
+    pub photo: PhotoId,
+    pub face: [u8; 4],
+    pub is: Lww<Option<PersonId>>,
+    pub is_not: OrSet<PersonId>,
+}
+
+impl FaceLabel {
+    pub fn merge(&self, other: &FaceLabel) -> Option<FaceLabel> {
+        (self.photo == other.photo && self.face == other.face).then(|| FaceLabel {
+            photo: self.photo,
+            face: self.face,
+            is: self.is.merge(&other.is),
+            is_not: self.is_not.merge(&other.is_not),
+        })
+    }
 }

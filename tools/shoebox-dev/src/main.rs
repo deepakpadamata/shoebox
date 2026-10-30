@@ -74,6 +74,12 @@ enum Cmd {
     },
     /// List the library, newest first.
     Ls,
+    /// Search the library ("2019", "videos last summer", "Lisbon").
+    Search {
+        query: String,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
     /// Sync once with every known peer.
     Sync,
     /// Show known peers and whether they can be reached right now.
@@ -268,6 +274,7 @@ async fn main() -> Result<()> {
         }
         Cmd::Import { paths, reference } => cmd_import(&cli, paths, *reference).await,
         Cmd::Ls => cmd_ls(&cli).await,
+        Cmd::Search { query, limit } => cmd_search(&cli, query, *limit).await,
         Cmd::Sync => cmd_sync(&cli).await,
         Cmd::Peers => cmd_peers(&cli).await,
         Cmd::Holdings { id } => cmd_holdings(&cli, id).await,
@@ -553,6 +560,40 @@ async fn cmd_import(cli: &Cli, paths: &[PathBuf], reference: bool) -> Result<()>
         text
     });
     s.close().await
+}
+
+async fn cmd_search(cli: &Cli, query: &str, limit: usize) -> Result<()> {
+    let s = open(cli).await?;
+    let now = shoebox_core::ids::Timestamp(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis() as i64,
+    );
+    let res =
+        s.ln.search(query, &shoebox_node::SearchOptions::utc(now), 0, limit)
+            .await?;
+    let filters: Vec<String> = res.query.filters.iter().map(|f| f.label.clone()).collect();
+    let ids: Vec<String> = res.hits.ids.iter().map(|i| i.to_string()).collect();
+    let value = json!({
+        "filters": filters,
+        "free_text": res.query.free_text,
+        "total": res.hits.total,
+        "ids": ids,
+    });
+    print(cli, value, || {
+        let mut text = format!(
+            "filters: [{}]  words: {:?}  {} found\n",
+            filters.join(", "),
+            res.query.free_text,
+            res.hits.total
+        );
+        for id in &ids {
+            text.push_str(id);
+            text.push('\n');
+        }
+        text
+    });
+    Ok(())
 }
 
 async fn cmd_ls(cli: &Cli) -> Result<()> {

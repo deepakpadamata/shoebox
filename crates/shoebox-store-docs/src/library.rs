@@ -302,6 +302,51 @@ impl LibraryStore for DocsLibrary {
             .await
     }
 
+    async fn put_index_shard(&self, shard: IndexShard) -> Result<()> {
+        let now = self.now();
+        self.write(|s| Ok(((), s.put_index_shard(&shard, now)?)))
+            .await
+    }
+
+    async fn index_shards(&self) -> Result<Vec<IndexShard>> {
+        Ok(self.read(|s| s.index_shards()).await)
+    }
+
+    async fn put_indexer_status(&self, status: IndexerStatus) -> Result<()> {
+        let now = self.now();
+        self.write(|s| Ok(((), s.put_indexer_status(&status, now)?)))
+            .await
+    }
+
+    async fn indexer_statuses(&self) -> Result<Vec<IndexerStatus>> {
+        Ok(self.read(|s| s.indexers()).await)
+    }
+
+    async fn edit_person(&self, id: PersonId, edit: PersonEdit) -> Result<()> {
+        let now = self.now();
+        self.write(|s| {
+            Ok((
+                (),
+                s.edit_person(id, edit.name, edit.hidden, edit.merged_into, now)?,
+            ))
+        })
+        .await
+    }
+
+    async fn persons(&self) -> Result<Vec<Person>> {
+        Ok(self.read(|s| s.persons()).await)
+    }
+
+    async fn label_face(&self, photo: PhotoId, face: [u8; 4], edit: FaceEdit) -> Result<()> {
+        let now = self.now();
+        self.write(|s| Ok(((), s.label_face(photo, face, edit.is, edit.is_not, now)?)))
+            .await
+    }
+
+    async fn face_labels(&self) -> Result<Vec<FaceLabel>> {
+        Ok(self.read(|s| s.face_labels()).await)
+    }
+
     fn subscribe(&self) -> BoxStream<'static, Change> {
         let (tx, rx) = unbounded();
         self.inner.subs.lock().unwrap().push(tx);

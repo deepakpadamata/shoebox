@@ -20,6 +20,8 @@
   import Health from './Health.svelte';
   import Settings from './Settings.svelte';
   import RecoveryKit from './RecoveryKit.svelte';
+  import Search from './Search.svelte';
+  import People from './People.svelte';
 
   const tabs = [
     { id: 'library', label: 'Library', icon: '▦' },
@@ -28,7 +30,7 @@
     { id: 'devices', label: 'Devices', icon: '⇄' },
   ];
   const sec = $derived(section() || 'library');
-  const tab = $derived(sec === 'album' ? 'albums' : ['favorites', 'deleted', 'health', 'settings'].includes(sec) ? '' : sec);
+  const tab = $derived(['album', 'people', 'person'].includes(sec) ? 'albums' : ['favorites', 'deleted', 'health', 'settings', 'search', 'similar'].includes(sec) ? '' : sec);
   const atRisk = $derived(app.counts?.at_risk ?? 0);
   let kitOpen = $state(false);
   let addOpen = $state(false);
@@ -65,20 +67,30 @@
   const eta = $derived((app.counts, etaSeconds()));
   const etaText = $derived(eta === null ? '' : eta < 90 ? 'about a minute left' : eta < 3600 ? `about ${Math.ceil(eta / 60)} min left` : `about ${Math.ceil(eta / 3600)} h left`);
   const unreachable = $derived(atRisk > 0 && app.peersOnline === 0);
-  const titles: Record<string, string> = { library: 'Library', favorites: 'Favorites', albums: 'Albums', album: 'Album', shared: 'Shared', deleted: 'Recently Deleted', devices: 'Devices', health: 'Storage', settings: 'Settings' };
+  const titles: Record<string, string> = { people: 'People', person: 'Person', library: 'Library', favorites: 'Favorites', albums: 'Albums', album: 'Album', shared: 'Shared', deleted: 'Recently Deleted', devices: 'Devices', health: 'Storage', settings: 'Settings' };
 </script>
 
 <div class="phone">
+  {#if sec === 'search'}
+    <!-- Full-screen search: its own field and Cancel, no tabs. -->
+    <main class="content"><Search mobile /></main>
+  {:else if sec === 'similar'}
+    <header class="navbar"><div class="grow"><button class="back" onclick={() => history.back()}>‹ Back</button></div></header>
+    <main class="content">{#key param()}<Search similar={param()} />{/key}</main>
+  {:else}
   <header class="navbar">
     <div class="grow">
-      {#if ['favorites', 'deleted', 'health', 'settings', 'album'].includes(sec)}
-        <button class="back" onclick={() => go(sec === 'album' ? 'albums' : 'library')}>‹ Library</button>
+      {#if ['favorites', 'deleted', 'health', 'settings', 'album', 'people', 'person'].includes(sec)}
+        <button class="back" onclick={() => go(sec === 'album' || sec === 'people' ? 'albums' : sec === 'person' ? 'people' : 'library')}>‹ {sec === 'album' || sec === 'people' ? 'Albums' : sec === 'person' ? 'People' : 'Library'}</button>
       {/if}
       <h2>{titles[sec] ?? 'Library'}</h2>
       {#if sec === 'library'}
         <div class="small muted row-flex"><span class="sd" class:busy={app.syncing.length > 0}></span>{app.syncing.length > 0 ? 'Syncing…' : app.syncError ? 'Some devices are not reachable' : 'Up to date'}</div>
       {/if}
     </div>
+    {#if sec === 'library' || sec === ''}
+      <button class="add-btn" aria-label="Search" onclick={() => go('search')}>⌕</button>
+    {/if}
     {#if canAdd && (sec === 'library' || sec === '')}
       <button class="add-btn" aria-label="Add photos" onclick={() => (addOpen = true)}>＋</button>
     {/if}
@@ -123,6 +135,8 @@
     {:else if sec === 'favorites'}<Library source="favorites" />
     {:else if sec === 'albums'}<Albums />
     {:else if sec === 'album'}{#key param()}<Library source="album" album={param()} />{/key}
+    {:else if sec === 'people'}<People />
+    {:else if sec === 'person'}{#key param()}<Library source="person" photo={param()} />{/key}
     {:else if sec === 'shared'}<Shared />
     {:else if sec === 'deleted'}<Deleted />
     {:else if sec === 'devices'}<Devices />
@@ -136,6 +150,7 @@
       <a class="t" class:on={tab === t.id} href="#/{t.id}"><span class="i">{t.icon}</span>{t.label}</a>
     {/each}
   </nav>
+  {/if}
 </div>
 
 <Sheet open={menuOpen} title="This device" onclose={() => (menuOpen = false)}>

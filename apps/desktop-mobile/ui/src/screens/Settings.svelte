@@ -1,7 +1,8 @@
 <script lang="ts">
   // Settings (mockup 6b/6c): this device, how many copies to keep, relay, watched folders, theme.
   import { onMount } from 'svelte';
-  import { api, type AboutInfo, type Settings } from '../lib/api';
+  import { api, type AboutInfo, type SearchStatus, type Settings } from '../lib/api';
+  import { viewport } from '../lib/viewport.svelte';
   import { app, fail, refreshState, toast } from '../lib/store.svelte';
   import Button from '../components/Button.svelte';
   import List from '../components/List.svelte';
@@ -49,6 +50,11 @@
     }
   }
   onMount(() => { api.about().then((a) => (about = a)).catch(() => {}); });
+  // Search on this device (S1-16).
+  let search = $state<SearchStatus | null>(null);
+  let rebuilding = $state(false);
+  onMount(() => { api.searchStatus().then((st) => (search = st)).catch(() => {}); });
+  const pct = (n: number, of: number) => (of === 0 ? 100 : Math.floor((n * 100) / of));
   // Replacing the recovery phrase: the current one in, the new kit out (shown once).
   let replaceOpen = $state(false);
   let oldPhrase = $state('');
@@ -160,6 +166,27 @@
         <Segmented value={String(s.keep_recent_days)} options={[{ value: '0', label: 'Off' }, { value: '30', label: '30 days' }, { value: '90', label: '90 days' }, { value: '365', label: '1 year' }]}
           onchange={(v) => save(() => api.setKeepRules(Number(v), s!.keep_favorites), 'Saved')} />
         <label class="row-flex"><Toggle checked={s.keep_favorites} label="Keep favourites" onchange={(v) => save(() => api.setKeepRules(s!.keep_recent_days, v), 'Saved')} /> Also keep my favourites</label>
+      </div>
+    {/if}
+
+    {#if search && s.role !== 'viewer'}
+      <div class="section">Search</div>
+      <div class="card pad stack">
+        <label class="row-flex"><Toggle checked={search.index_here} label="Index photos on this device"
+          onchange={(v) => save(async () => { await api.setSearchIndexing(v); search = await api.searchStatus(); }, v ? 'Indexing on' : 'Indexing off')} />
+          {viewport.mobile ? 'Index photos while charging' : 'Index photos on power when idle'}</label>
+        <p class="small muted" style="margin:0">Indexing lets your devices find photos by what is in them. It is shared out between the devices that do it; turned off here, the others take this device's share.</p>
+        <div class="small muted">
+          By content: {pct(search.content, search.total)}% · Labels: {pct(search.labelled, search.total)}% · Text read: {search.text_read.toLocaleString()} photos
+          {#if !search.meaning}<br />This device searches by words and labels: the model for searching by meaning is not installed.{/if}
+        </div>
+        {#each search.indexers as i}
+          <div class="small muted">{i.this_device ? 'This device' : i.name || 'A device'}: {i.photos_per_min.toLocaleString()} photos a minute{i.reads_text ? ', reads text' : ''}</div>
+        {/each}
+        <div class="row-flex">
+          <span class="small muted grow">Search data on this device: {(search.held_bytes / 1e6).toFixed(1)} MB</span>
+          <Button size="sm" kind="ghost" disabled={rebuilding} onclick={async () => { rebuilding = true; try { await api.rebuildSearchIndex(); toast('Search index rebuilt'); } catch (e) { fail(e); } finally { rebuilding = false; } }}>Rebuild this device's search index</Button>
+        </div>
       </div>
     {/if}
 

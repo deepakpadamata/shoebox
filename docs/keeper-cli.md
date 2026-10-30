@@ -8,7 +8,7 @@ be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held w
 
 | Command | What it does |
 |---|---|
-| `run [--name N] [--relay default\|off\|URL] [--no-mdns] [--no-create]` | run the daemon in the foreground (logs to stderr, journald friendly); `--no-create` (the service's) fails when the storage folder is missing instead of starting a new, empty keeper there; without `--name` the keeper uses the name it was paired with (else "keeper") |
+| `run [--name N] [--relay default\|off\|URL] [--no-mdns] [--no-create] [--max-threads N] [--no-index]` | run the daemon in the foreground (logs to stderr, journald friendly); `--no-create` (the service's) fails when the storage folder is missing instead of starting a new, empty keeper there; without `--name` the keeper uses the name it was paired with (else "keeper"); `--max-threads` caps indexing for search (default half the cores), `--no-index` leaves indexing to other devices |
 | `pair <ticket> [--name N] [--yes]` | join a library; shows a 6-digit code to compare with the other device; `--name` is the name the other devices show, kept in `keeper.json` from then on |
 | `recover --from <link> [--phrase P] [--name N]` | rejoin a library with the 24-word recovery phrase through a surviving device (prompts for the phrase, typing hidden, if omitted) |
 | `address` | print this keeper's link (`shoebox-peer1…`), which a recovering device uses to reach it |
@@ -22,6 +22,8 @@ be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held w
 | `album list [--json]` / `album keep <id>` / `album drop <id>` / `album join <invitation>` | shared albums this keeper is in; `keep` fetches every original of the album, `drop` lets them go; ids may be shortened to a unique prefix |
 | `service install [--system] [--user U] [--print]` / `service uninstall` | systemd unit (Linux) / launchd plist (macOS) |
 | `alerts` / `alerts ack` | security alerts (a new admin, a replaced recovery phrase); `ack` clears them |
+| `search "<query>" [--limit N] [--tz-offset M] [--json]` | search the library here: the chips the query was read as, then the photos found |
+| `index [status\|pause\|resume\|compact] [--json]` | search indexing: coverage by kind, the devices indexing and their rates, time left, search data held; pause or resume this keeper's indexing (paused, it announces 0 photos a minute and the others take its share); merge small index shards now |
 | `licences` | this keeper's licence, where its source is, and the third-party notices |
 | `stop` | ask the daemon to shut down |
 

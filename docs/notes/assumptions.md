@@ -76,6 +76,23 @@ The 300 MB at 100k photos target for phones is not met (about 500–700 MB).
   on the placeholder it prefers among its own replicas. Android makes posters during backup with the system
   thumbnailer (`PhotoSource::video_frame`, at most 60 a run); elsewhere the app grabs a frame when it shows a video no
   device has a poster for. Posters in an earlier build's `posters/` folder move into the library at start, once.
+- **A-105 · search by facts and places (S1-02…S1-05, 2026-10-30)** · Dates in a query are read in the
+  asking device's time zone (the app sends its offset; the keeper and `shoebox-dev` use UTC unless given
+  `--tz-offset`). `taken_at` is UTC when the photo's EXIF has an offset, else the camera's local time stored as if
+  UTC, so a photo near midnight can fall on the neighbouring day. Seasons are three calendar months, checked in the
+  photo's hemisphere (from its GPS, else the device's, today always northern); a season's year is the year it
+  starts in (southern summer 2019 is Dec 2019–Feb 2020). Holidays are fixed rules (Christmas 24–26 Dec, Easter
+  Good Friday to Easter Monday, Thanksgiving the US one) and Diwali is a table for 2000–2030, matched a day either
+  side. Screenshots are photos without a camera that are PNG or exactly a common screen size; selfies are photos
+  whose lens says "front"; live photos are not recorded yet. Label words are suggested but stay in the free text,
+  so they rank rather than filter. A name that is several kinds at once is a person first, then an album, a place,
+  a camera. Places come from GeoNames `cities5000` (70k places, 1.9 MB): the nearest town within 25 km, plus the
+  biggest city (≥ 100k people) within 15 km, and the nearest town's region and country within 200 km; no borders,
+  so a photo near a border can get the neighbouring country.
+- **A-106 · search models (S1-01, 2026-10-30)** · Chosen on licences alone; nothing is measured yet (no Pi 5 or
+  S25 at hand, and too little disk on the development Mac to fetch and convert the weights). See
+  [search-models.md](search-models.md). Until the measurements in S1-01 exist, S1-06 onwards is built against an
+  `Encoder` trait with a deterministic test encoder, and the real encoders are optional.
 - **A-032 · M1-05** · The docs backend keeps the *replicated records* as iroh-docs entries (layout in
   `shoebox-store-docs::codec`, values `[v1] ++ postcard`) and answers queries from a merged in-memory `LibraryState`
   rebuilt at open and refreshed by (debounced) rescans. This deviates from the issue's "secondary key by taken_at":
@@ -695,3 +712,19 @@ Not open questions, but they must be honoured by any format or protocol change, 
   (`f64` in the bindings): fine for millisecond timestamps and sizes, not for ids (those are hex strings).
 - **A-081 · M5-05 removing a member** · The owner writes a new namespace with the same album id, items, activity and the members that stay, and pushes `Moved{capability, owner}` to each of them over `shoebox/album/0` until acknowledged (retried every few seconds while the owner runs). A member accepts only if the sender is the inviter it joined through (only the owner invites); until 2026-10-26 it checked the membership entries, which any contributor can forge, so a contributor could make itself "owner" and move everyone, the real owner included, to a space it controlled. The owner's own device has no inviter, so it never follows a `Moved`. Contributors get the write capability, viewers the read capability. Viewers cannot write a membership entry, so the owner records them when they present their invitation (`viewers` in the registry; they are shown as "Viewer ab12cd34"). A member that is offline when the owner is online follows when both are next online; until then it keeps working in the old space, where nobody who stayed will see its additions. The removed member keeps the photos they downloaded, still has the old namespace (frozen), and is dropped from the owner's blob gate at once. The owner cannot be removed and leaving as owner leaves an album nobody can invite to.
 - **A-082 · M5 limits and scale** · 50 members and 50,000 photos are enforced when inviting and adding (clear messages). Writing 50,000 items takes about a minute on a laptop (`cargo test -p shoebox-store-docs --test album_reopen -- --ignored`); the "50k items to a new member in under 2 minutes" criterion is covered by `album_sync_of_50k_items` (ignored, run on demand).
+
+- **A-107 · search models measured (S1-01, S1-08…S1-12, 2026-10-30)** · On the Mac, OpenCLIP ViT-B/32 at 8 bits finds the
+  captioned photo of 1,000 COCO photos (indexed from 256 px thumbnails) at R@1 60.5 / R@10 93.7, as well as at full
+  precision; storing vectors as `vec8`, or `vec1` first, costs under half a point. The text model takes 14 ms a query
+  and about 510 MB resident while loaded (it is let go after two idle minutes); scoring 100k photos takes 8 ms.
+  **Android uses tract too**, not ONNX Runtime through Kotlin: one code path; NNAPI speed is unmeasured. Not measured:
+  the S25, a Pi 5, nest. The label list has 937 labels (the plan said 2,000–5,000): role and composite labels
+  misfired on the eval set and were dropped; captions confirm 56% of kept labels (a floor: captions leave things out).
+  Text in photos is read on macOS (Apple Vision) only; Android ML Kit, Windows OCR and a keeper engine are not written.
+- **A-108 · people and model upgrades (S1-15, S1-18, 2026-10-30)** · A Viewer publishes no people records (S2). Old
+  models are retired without a record: a device lets another model's shards go once its own model's `vec8` shards
+  cover at least as many photos (S3), so a device still on the old build keeps its own copies. Naming a group labels
+  its five best faces; the group's name follows the majority of its labelled faces. Grouping is greedy leader
+  clustering (cosine ≥ 0.45), not constrained agglomerative clustering; "not Ana" is enforced at resolution.
+  Desktop indexing on Linux and Windows assumes mains power and an idle user when it cannot tell (macOS asks
+  `pmset` and `ioreg`).

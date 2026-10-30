@@ -99,6 +99,26 @@ old one and your library stays. It asks the Shoebox website twice a day and send
 * **Ask for help.** *Settings → Help → Create a diagnostics report* makes a text with versions, counts and
   recent errors. It contains no photos, names, places or file names. Nothing is sent: copy it or save it.
 
+## Searching
+
+Type in the search field (`/` or ⌘F on a computer, the magnifier on a phone). Shoebox understands dates and ranges
+("2019", "March 2021", "last summer", "weekends", "Christmas"), "videos", "screenshots", "selfies", "favourites",
+cameras, albums and places, and shows each as a chip you can remove. Other words are matched against what is in the
+photos ("dog on a beach"), labels, text in the photos and names. Searches run on the device you are holding: they work
+with every other device switched off.
+
+Finding photos by what is in them needs each photo to be indexed once, by any of your devices: a keeper does it all
+the time, a computer when it is plugged in and you are away, a phone while it charges. Until then the line under the
+results says how far it has come. *Settings → Search* turns indexing on this device on or off and rebuilds this
+device's index if something looks wrong. In the viewer, ≈ shows similar photos.
+
+## People
+
+Faces are found and grouped on your own devices and never leave them. *People* (in the sidebar on a computer, in
+Albums on a phone) shows the groups: give a group a name and its photos are found by that name ("Ana", "Ana and
+me" once you said which person is you). In a photo's info panel you can name a face or say it is not someone. People
+can be turned off for the whole library at the top of the People screen.
+
 ## Your data is yours
 
 *Settings → Export* copies every original on that device into plain folders by year and month with a

@@ -68,9 +68,18 @@ back up the 24-word recovery phrase separately.
 | `devices replace-phrase` | replace the recovery phrase after it may have been seen; prints the new 24 words once |
 | `address` | the link another device needs to recover through this keeper |
 | `album list` / `album join <invitation>` / `album keep <id>` / `album drop <id>` | shared albums the keeper is in; `keep` makes it hold every original of an album |
+| `search "<query>" [--limit N] [--json]` | search the library on the keeper itself |
+| `index [status\|pause\|resume\|compact] [--json]` | indexing for search: how much is covered, by whom, how long is left; pause or resume this keeper's indexing; compact the index shards now |
 | `stop` | shut the daemon down cleanly |
 
 Full reference: `docs/keeper-cli.md`.
+
+## Search indexing
+
+A keeper indexes photos for search all the time, at up to half its cores (`run --max-threads N`, or `--no-index` to
+leave it to other devices). It needs the model files next to it (the release tarball puts them in
+`share/shoebox/models`); without them it still searches by date, place and keywords. Search data takes about 150–200
+MB per 100,000 photos; the models about 200 MB.
 
 ## Upgrading
 

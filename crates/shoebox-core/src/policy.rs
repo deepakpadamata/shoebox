@@ -11,11 +11,20 @@
 //!   source the other devices get them from.
 //! - **Shared albums**: previews only, plus originals when the album's "keep originals" is on.
 //!
-//! The caller turns these plans into a queue ordered thumbnails → previews → originals, newest
-//! photos first ([`queue_order`]).
+//! - **Index shards** (S1-07): every device holds every live shard ([`index_plan`]), except that
+//!   a Viewer of a library larger than [`VIEWER_VEC8_LIMIT`] leaves out the 8-bit vectors.
+//!
+//! The caller turns these plans into a queue ordered thumbnails → shards → previews → originals,
+//! newest photos first ([`queue_order`]).
 
-use crate::ids::Timestamp;
-use crate::model::{BlobKind, BlobRef, PhotoId, PhotoRecord, Role, SharedItem};
+use crate::ids::{EndpointId, Timestamp};
+use crate::model::{
+    BlobKind, BlobRef, IndexShard, PhotoId, PhotoRecord, Role, ShardKind, SharedItem,
+};
+
+/// Above this many photos a Viewer keeps only the binary codes for search by meaning, not the
+/// 8-bit vectors (epic S1 §7): somewhat less precise, still complete and offline.
+pub const VIEWER_VEC8_LIMIT: usize = 250_000;
 
 /// Facts about one photo that decide whether this device wants its original.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -115,6 +124,56 @@ pub fn shared_item_plan(role: Role, item: &SharedItem, keep_originals: bool) -> 
     plan
 }
 
+/// Index shards this device should hold, from the shards that count (or will once fetched).
+pub fn index_plan<'a>(
+    role: Role,
+    library_size: usize,
+    shards: impl IntoIterator<Item = &'a IndexShard>,
+) -> Vec<FetchItem> {
+    let skip_vec8 = role == Role::Viewer && library_size > VIEWER_VEC8_LIMIT;
+    let mut plan = vec![];
+    for s in shards {
+        if skip_vec8 && s.kind == ShardKind::Vec8 {
+            continue;
+        }
+        push_unique(&mut plan, BlobKind::Index, &s.blob);
+    }
+    plan
+}
+
+/// A device that shares the indexing backlog (an always-on indexer), weighted by its speed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IndexCandidate {
+    pub device: EndpointId,
+    /// Photos per minute; 0 = takes no share.
+    pub weight: u32,
+}
+
+/// Which candidate indexes `photo` for `kind` (epic S1 §5.2): weighted rendezvous hashing. Each
+/// device scores `-ln(h) / weight`, `h` uniform in (0, 1) from BLAKE3(photo ‖ kind ‖ device), and
+/// the lowest score wins (ties by device id). Shares follow the weights, and adding or removing
+/// a device moves only that device's share. Every device computes the same answer.
+pub fn index_owner(
+    photo: &PhotoId,
+    kind: ShardKind,
+    candidates: &[IndexCandidate],
+) -> Option<EndpointId> {
+    candidates
+        .iter()
+        .filter(|c| c.weight > 0)
+        .map(|c| {
+            let mut h = blake3::Hasher::new();
+            h.update(&photo.0);
+            h.update(&[kind.byte()]);
+            h.update(&c.device.0);
+            let x = u64::from_le_bytes(h.finalize().as_bytes()[..8].try_into().expect("8"));
+            let u = (x as f64 + 0.5) / 18_446_744_073_709_551_616.0;
+            (-u.ln() / f64::from(c.weight), c.device)
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|(_, d)| d)
+}
+
 /// A planned fetch with what is needed to order it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueuedFetch {
@@ -126,12 +185,14 @@ pub struct QueuedFetch {
 fn kind_rank(kind: BlobKind) -> u8 {
     match kind {
         BlobKind::Thumb => 0,
-        BlobKind::Preview => 1,
-        BlobKind::Original => 2,
+        // Shards right after thumbnails: a new device can search soon after it shows the grid.
+        BlobKind::Index => 1,
+        BlobKind::Preview => 2,
+        BlobKind::Original => 3,
     }
 }
 
-/// Order a queue: all thumbnails before any preview before any original; within a kind, newest
+/// Order a queue: all thumbnails, then index shards, then previews, then originals; within a kind, newest
 /// photo first (ties by photo id, then blob hash, so the order is deterministic).
 pub fn queue_order(queue: &mut [QueuedFetch]) {
     queue.sort_by(|a, b| {
@@ -371,6 +432,137 @@ mod tests {
                 (BlobKind::Original, 3),
                 (BlobKind::Original, 1),
             ]
+        );
+    }
+
+    fn shard(n: u8, kind: ShardKind) -> IndexShard {
+        IndexShard {
+            blob: BlobRef {
+                hash: Blake3Hash([n; 32]),
+                size: 10,
+                mime: "application/x-shoebox-index".into(),
+            },
+            model: crate::model::ModelId([1; 32]),
+            kind,
+            count: 1,
+            replaces: vec![],
+            made_by: EndpointId([1; 32]),
+            hlc: Hlc::GENESIS,
+        }
+    }
+
+    #[test]
+    fn shards_come_after_thumbnails_and_before_previews() {
+        let rec = photo(1, 100);
+        let mut queue: Vec<QueuedFetch> = fetch_plan(Role::Keeper, &rec, &PlanContext::default())
+            .into_iter()
+            .map(|item| QueuedFetch {
+                photo: rec.id,
+                taken_at: rec.taken_at,
+                item,
+            })
+            .collect();
+        for item in index_plan(Role::Keeper, 1, &[shard(50, ShardKind::Vec8)]) {
+            queue.insert(
+                0,
+                QueuedFetch {
+                    photo: item.blob.hash,
+                    taken_at: Timestamp(0),
+                    item,
+                },
+            );
+        }
+        queue_order(&mut queue);
+        let kinds: Vec<BlobKind> = queue.iter().map(|q| q.item.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                BlobKind::Thumb,
+                BlobKind::Index,
+                BlobKind::Preview,
+                BlobKind::Original
+            ]
+        );
+    }
+
+    #[test]
+    fn a_viewer_of_a_huge_library_keeps_binary_codes_only() {
+        let shards = [
+            shard(1, ShardKind::Vec8),
+            shard(2, ShardKind::Vec1),
+            shard(3, ShardKind::Text),
+            shard(4, ShardKind::Faces),
+        ];
+        let held = |role, size| -> Vec<u8> {
+            index_plan(role, size, &shards)
+                .iter()
+                .map(|i| i.blob.hash.0[0])
+                .collect()
+        };
+        assert_eq!(held(Role::Viewer, 300_000), vec![2, 3, 4]);
+        assert_eq!(held(Role::Viewer, 100_000), vec![1, 2, 3, 4]);
+        assert_eq!(held(Role::Companion, 300_000), vec![1, 2, 3, 4]);
+        assert_eq!(held(Role::Keeper, 300_000), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn rendezvous_follows_weights_and_moves_little() {
+        let dev = |n: u8| EndpointId([n; 32]);
+        let cands = [
+            IndexCandidate {
+                device: dev(1),
+                weight: 10,
+            },
+            IndexCandidate {
+                device: dev(2),
+                weight: 20,
+            },
+            IndexCandidate {
+                device: dev(3),
+                weight: 40,
+            },
+        ];
+        let photos: Vec<PhotoId> = (0..7_000u32)
+            .map(|i| crate::ids::Blake3Hash::of_bytes(&i.to_le_bytes()))
+            .collect();
+        let owners: Vec<EndpointId> = photos
+            .iter()
+            .map(|p| index_owner(p, ShardKind::Vec8, &cands).unwrap())
+            .collect();
+        for (d, want) in [(1u8, 1.0 / 7.0), (2, 2.0 / 7.0), (3, 4.0 / 7.0)] {
+            let share = owners.iter().filter(|o| **o == dev(d)).count() as f64 / 7_000.0;
+            assert!(
+                (share / want - 1.0).abs() < 0.1,
+                "device {d}: {share:.3} vs {want:.3}"
+            );
+        }
+        // Device 2 leaves: only its photos move.
+        let without: Vec<EndpointId> = photos
+            .iter()
+            .map(|p| index_owner(p, ShardKind::Vec8, &[cands[0], cands[2]]).unwrap())
+            .collect();
+        for (a, b) in owners.iter().zip(&without) {
+            assert!(a == b || *a == dev(2));
+        }
+        // Another kind is shared out independently, and no candidate means nobody.
+        let other = photos
+            .iter()
+            .filter(|p| {
+                index_owner(p, ShardKind::Faces, &cands) != index_owner(p, ShardKind::Vec8, &cands)
+            })
+            .count();
+        assert!(other > 1_000);
+        assert_eq!(index_owner(&photos[0], ShardKind::Vec8, &[]), None);
+        assert_eq!(
+            index_owner(
+                &photos[0],
+                ShardKind::Vec8,
+                &[IndexCandidate {
+                    device: dev(1),
+                    weight: 0
+                }]
+            ),
+            None
         );
     }
 

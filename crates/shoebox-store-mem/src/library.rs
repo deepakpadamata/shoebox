@@ -197,6 +197,51 @@ impl LibraryStore for MemLibrary {
         self.with_state(|s| Ok(((), s.put_setting(key, value, now)?)))
     }
 
+    async fn put_index_shard(&self, shard: IndexShard) -> Result<()> {
+        self.writable()?;
+        let now = self.now();
+        self.with_state(|s| Ok(((), s.put_index_shard(&shard, now)?)))
+    }
+
+    async fn index_shards(&self) -> Result<Vec<IndexShard>> {
+        Ok(self.read(|s| s.index_shards()))
+    }
+
+    async fn put_indexer_status(&self, status: IndexerStatus) -> Result<()> {
+        self.writable()?;
+        let now = self.now();
+        self.with_state(|s| Ok(((), s.put_indexer_status(&status, now)?)))
+    }
+
+    async fn indexer_statuses(&self) -> Result<Vec<IndexerStatus>> {
+        Ok(self.read(|s| s.indexers()))
+    }
+
+    async fn edit_person(&self, id: PersonId, edit: PersonEdit) -> Result<()> {
+        self.writable()?;
+        let now = self.now();
+        self.with_state(|s| {
+            Ok((
+                (),
+                s.edit_person(id, edit.name, edit.hidden, edit.merged_into, now)?,
+            ))
+        })
+    }
+
+    async fn persons(&self) -> Result<Vec<Person>> {
+        Ok(self.read(|s| s.persons()))
+    }
+
+    async fn label_face(&self, photo: PhotoId, face: [u8; 4], edit: FaceEdit) -> Result<()> {
+        self.writable()?;
+        let now = self.now();
+        self.with_state(|s| Ok(((), s.label_face(photo, face, edit.is, edit.is_not, now)?)))
+    }
+
+    async fn face_labels(&self) -> Result<Vec<FaceLabel>> {
+        Ok(self.read(|s| s.face_labels()))
+    }
+
     fn subscribe(&self) -> BoxStream<'static, Change> {
         let (tx, rx) = unbounded();
         self.shared.subs.lock().unwrap().push(tx);

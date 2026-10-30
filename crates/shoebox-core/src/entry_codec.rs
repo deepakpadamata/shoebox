@@ -11,6 +11,10 @@
 //! holdings/<deviceId hex>/<blob hex>   → StateEntry::Holding   (written only by that device)
 //! purged/<photoId hex>                 → StateEntry::Purged
 //! settings/<key>                       → StateEntry::Setting
+//! index/<blob hex>                     → StateEntry::IndexShard    (immutable)
+//! indexers/<deviceId hex>              → StateEntry::IndexerStatus (written only by that device)
+//! persons/<personId hex>               → StateEntry::Person
+//! facelabels/<photoId hex>/<face hex>  → StateEntry::FaceLabel
 //! ```
 //!
 //! Shared-album namespace (one per album):
@@ -70,6 +74,12 @@ pub fn library_key(e: &StateEntry) -> String {
         }
         StateEntry::Purged { id, .. } => format!("purged/{}", hex32(&id.0)),
         StateEntry::Setting { key, .. } => format!("settings/{key}"),
+        StateEntry::IndexShard(s) => format!("index/{}", hex32(&s.blob.hash.0)),
+        StateEntry::IndexerStatus(s) => format!("indexers/{}", hex32(&s.device.0)),
+        StateEntry::Person(p) => format!("persons/{}", hex::encode(p.id.0)),
+        StateEntry::FaceLabel(l) => {
+            format!("facelabels/{}/{}", hex32(&l.photo.0), hex::encode(l.face))
+        }
     }
 }
 
@@ -85,6 +95,12 @@ pub fn touched_key(t: &Touched) -> String {
         }
         Touched::Purged(id) => format!("purged/{}", hex32(&id.0)),
         Touched::Setting(key) => format!("settings/{key}"),
+        Touched::IndexShard(blob) => format!("index/{}", hex32(&blob.0)),
+        Touched::Indexer(device) => format!("indexers/{}", hex32(&device.0)),
+        Touched::Person(id) => format!("persons/{}", hex::encode(id.0)),
+        Touched::FaceLabel(photo, face) => {
+            format!("facelabels/{}/{}", hex32(&photo.0), hex::encode(face))
+        }
     }
 }
 

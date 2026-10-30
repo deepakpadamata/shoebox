@@ -49,6 +49,42 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Command::Gazetteer { input, out } => match xtask::gazetteer::write(&input, &out) {
+            Ok(s) => {
+                println!(
+                    "{} places, {} regions, {} countries: {} bytes written to {}",
+                    s.places,
+                    s.regions,
+                    s.countries,
+                    s.bytes,
+                    out.display()
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Models { dir, check } => {
+            let root = std::env::current_dir().expect("cwd");
+            match xtask::models::run(&root, &dir, check) {
+                Ok(r) => {
+                    for (name, hash, size) in r.files {
+                        println!("{name}: {size} bytes, BLAKE3 {hash}");
+                    }
+                    match r.written {
+                        Some(p) => println!("wrote {}", p.display()),
+                        None => println!("the built models match the compiled-in hashes"),
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Command::Samples { out } => match write_samples(&out) {
             Ok(files) => {
                 println!(

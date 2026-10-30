@@ -1,7 +1,7 @@
 //! The local control socket: newline-delimited JSON over a Unix domain socket (mode 0600).
 //!
 //! One request per connection line: `{"cmd": "status" | "devices" | "revoke" | "pair" | "album" |
-//! "shutdown", ...}`. Replies are `{"type":"ok","data":…}` or `{"type":"error","message":…}`.
+//! "search" | "index" | "shutdown", ...}`. Replies are `{"type":"ok","data":…}` or `{"type":"error","message":…}`.
 //! `pair` is a short conversation: the daemon first sends `{"type":"code","sas":…,
 //! "peer_name":…,"peer_role":…}`, the client answers `{"confirm":true|false}` and the final
 //! `ok`/`error` follows.
@@ -229,6 +229,8 @@ async fn dispatch(shared: &Arc<Shared>, cmd: &str, req: &Value) -> Result<Value>
             Ok(json!({ "library": hex::encode(grant.cap.library.0) }))
         }
         "album" => crate::status::album(shared, req).await,
+        "search" => search(shared, req).await,
+        "index" => index(shared, req).await,
         "shutdown" => {
             let _ = shared.shutdown.send(true);
             Ok(json!({}))
@@ -480,4 +482,94 @@ impl Client {
             }
         }
     }
+}
+
+/// `{"cmd":"search","text":…,"limit":…,"tz_offset_min":…}`: what the query was understood as and
+/// the matching photos, best first.
+/// `{"cmd":"index","action":"status"|"pause"|"resume"|"compact"}` (S1-16).
+async fn index(shared: &Arc<Shared>, req: &Value) -> Result<Value> {
+    let ln = library(shared).await?;
+    match req["action"].as_str().unwrap_or("status") {
+        "pause" => ln.pause_indexer(),
+        "resume" => ln.resume_indexer(),
+        "compact" => {
+            let r = ln.compact_shards(true).await?;
+            return Ok(json!({"merged": r.merged, "written": r.written, "dropped": r.dropped}));
+        }
+        "status" => {}
+        other => bail!("unknown index action `{other}`"),
+    }
+    index_status(&ln).await
+}
+
+pub(crate) async fn index_status(ln: &LibraryNode<Library>) -> Result<Value> {
+    let s = ln.search_status().await?;
+    let p = ln.index_progress();
+    let names: std::collections::HashMap<EndpointId, String> = ln
+        .store()
+        .device_list()
+        .await?
+        .devices
+        .into_iter()
+        .map(|d| (d.device, d.name))
+        .collect();
+    Ok(json!({
+        "total": s.total,
+        "content": s.content,
+        "labelled": s.labelled,
+        "text_read": s.text_read,
+        "faces": s.faces,
+        "meaning": s.meaning,
+        "eta_secs": s.eta_secs,
+        "held_bytes": s.held_bytes,
+        "running": p.running,
+        "paused": p.paused,
+        "photos_per_min": p.photos_per_min,
+        "indexers": s.indexers.iter().map(|i| json!({
+            "device": i.device.to_string(),
+            "name": names.get(&i.device).cloned().unwrap_or_default(),
+            "photos_per_min": i.photos_per_min,
+            "always_on": i.always_on,
+            "reads_text": i.reads_text,
+            "this": i.device == ln.device(),
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+async fn search(shared: &Arc<Shared>, req: &Value) -> Result<Value> {
+    let ln = library(shared).await?;
+    let text = req["text"].as_str().unwrap_or_default();
+    let limit = req["limit"].as_u64().unwrap_or(50).clamp(1, 10_000) as usize;
+    let opts = shoebox_node::SearchOptions {
+        now: shoebox_core::ids::Timestamp(shoebox_core::clock::Clock::now_ms(
+            &shoebox_core::clock::SystemClock,
+        ) as i64),
+        tz_offset_min: req["tz_offset_min"].as_i64().unwrap_or(0) as i32,
+        southern: false,
+    };
+    let res = ln.search(text, &opts, 0, limit).await?;
+    let mut items = Vec::with_capacity(res.hits.ids.len());
+    for id in &res.hits.ids {
+        let Some(rec) = ln.store().photo(id).await? else {
+            continue;
+        };
+        let camera = shoebox_search::facts::camera_name(
+            rec.exif.camera_make.as_deref(),
+            rec.exif.camera_model.as_deref(),
+        );
+        items.push(json!({"id": id.to_string(), "taken_at": rec.taken_at.0, "camera": camera}));
+    }
+    let filters: Vec<Value> = res
+        .query
+        .filters
+        .iter()
+        .map(|f| json!({"label": f.label}))
+        .collect();
+    Ok(json!({
+        "total": res.hits.total,
+        "ranked": res.hits.ranked,
+        "filters": filters,
+        "free_text": res.query.free_text,
+        "items": items,
+    }))
 }

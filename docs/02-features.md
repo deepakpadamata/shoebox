@@ -108,9 +108,24 @@ Each mockup screen lists the IDs it covers (see `design/README.md`).
 
 ---
 
+## F9 · Search
+
+Everything a search needs is on every device: a search works with every other device switched off. Indexing (the
+one-time work) is shared out between the devices that can do it.
+
+| # | Feature | Notes |
+|---|---|---|
+| F9.1 | Search by facts | Dates and ranges ("2019", "March 2021", "last summer", "weekends", "Christmas"), videos, screenshots, selfies, favourites, cameras, lenses and album names, as removable chips |
+| F9.2 | Places | Place names from a list of 70,000 places shipped with the app (GeoNames), worked out on each device from the photo's GPS |
+| F9.3 | Text in photos | Receipts, signs, documents and screenshots found by their words; read where the system has an engine (macOS today) |
+| F9.4 | Search by meaning | "dog on a beach" finds dogs on beaches: a picture–text model (OpenCLIP ViT-B/32) on every device, pictures indexed once and shared as shards; labels ("dog", "receipt") also as words |
+| F9.5 | People | Faces found and grouped on your own devices; name a group once, correct a face ("not Ana"), merge, hide, *this is me*; "Ana and me". On or off for the whole library |
+| F9.6 | Similar photos | From the viewer: photos that look like this one |
+| F9.7 | Coverage | Search says how much of the library each kind of search covers so far and who is indexing; *Settings → Search*, `shoebox-keeper index` |
+
 ## Later / ideas parking lot
 
-- On-device search (CLIP-style embeddings), faces, places map, "On this day" memories.
+- Places map, "On this day" memories.
 - Duplicate & near-duplicate detection beyond exact hashes.
 - Partner sharing (auto-share photos of certain people/dates with a partner).
 - Desktop "photo frame" mode / TV app as a Viewer device.

@@ -128,6 +128,49 @@ def standard_text_for(expression):
     return None
 
 
+# Data and models built into both apps (search, S1). Each entry names what it is, its licence and
+# the attribution its licence asks for.
+DATA = [
+    {
+        "name": "GeoNames place list (crates/shoebox-search/data/places.bin)",
+        "license": "CC-BY-4.0",
+        "notice": (
+            "Contains data from GeoNames (https://www.geonames.org), licensed under the Creative\n"
+            "Commons Attribution 4.0 License (https://creativecommons.org/licenses/by/4.0/).\n"
+            "Built from cities5000, admin1CodesASCII and countryInfo by `cargo xtask gazetteer`;\n"
+            "only names and coordinates are kept."
+        ),
+    },
+    {
+        "name": "OpenCLIP ViT-B/32 laion2b_s34b_b79k (search by meaning: clip-text-int8.onnx, clip-image-int8.onnx)",
+        "license": "MIT",
+        "notice": (
+            "Weights by LAION (https://huggingface.co/laion/CLIP-ViT-B-32-laion2B-s34B-b79K), MIT;\n"
+            "OpenCLIP (https://github.com/mlfoundations/open_clip), Copyright (c) 2012-2021 Gabriel\n"
+            "Ilharco, Mitchell Wortsman, Nicholas Carlini, Rohan Taori, Achal Dave, Vaishaal Shankar,\n"
+            "John Miller, Hongseok Namkoong, Hannaneh Hajishirzi, Ali Farhadi, Ludwig Schmidt, MIT.\n"
+            "ONNX export by Immich (https://huggingface.co/immich-app/ViT-B-32__laion2b-s34b-b79k);\n"
+            "weights quantised to 8 bits by scripts/quantize_clip.py."
+        ),
+    },
+    {
+        "name": "YuNet face detector (face-detect-yunet.onnx)",
+        "license": "MIT",
+        "notice": "From the OpenCV model zoo (https://github.com/opencv/opencv_zoo), Copyright (c) 2020 Shiqi Yu, MIT.",
+    },
+    {
+        "name": "SFace face recognizer (face-embed-sface.onnx)",
+        "license": "Apache-2.0",
+        "notice": "From the OpenCV model zoo (https://github.com/opencv/opencv_zoo), by Yaoyao Zhong and Weihong Deng, Apache-2.0.",
+    },
+    {
+        "name": "CLIP tokenizer vocabulary (crates/shoebox-search/data/clip-merges.txt)",
+        "license": "MIT",
+        "notice": "From OpenAI CLIP (https://github.com/openai/CLIP), Copyright (c) 2021 OpenAI, MIT.",
+    },
+]
+
+
 def render(app, rust, npm):
     lines = [
         f"Third-party software in Shoebox ({app})",
@@ -136,6 +179,9 @@ def render(app, rust, npm):
         "(apps/LICENSE-AGPL), libraries Apache-2.0 OR MIT (LICENSE-APACHE, LICENSE-MIT).",
         "",
     ]
+    lines += [f"== Data and models ({len(DATA)}) ==", ""]
+    for d in DATA:
+        lines += [f"{d['name']}: {d['license']}", "", d["notice"], ""]
     texts = {}  # hash -> (text, [packages])
     used_standard = set()
     for title, packages in (("Rust crates", rust), ("JavaScript packages (the user interface)", npm)):

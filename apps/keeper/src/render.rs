@@ -65,6 +65,21 @@ pub fn status(v: &Value) -> String {
     if lib["recovery_kit_saved"] != true {
         out.push_str("  ! the recovery kit has not been saved yet\n");
     }
+    let search = &v["search"];
+    if let Some(total) = search["total"].as_u64() {
+        let content = search["content"].as_u64().unwrap_or(0);
+        let state = if search["paused"] == true {
+            "paused".to_string()
+        } else if search["running"] == true {
+            format!("indexing, {} photos/min", search["photos_per_min"])
+        } else {
+            "not indexing".to_string()
+        };
+        let _ = writeln!(
+            out,
+            "  search           {content} of {total} photos by content ({state})"
+        );
+    }
     let _ = writeln!(out, "\nDevices ({})", v["devices"]);
     for p in v["peers"].as_array().into_iter().flatten() {
         let latency = p["latency_ms"]
@@ -136,6 +151,113 @@ pub fn devices(v: &Value) -> String {
             state,
             tags
         );
+    }
+    out
+}
+
+/// `search`: what was understood, then one line per photo (date, camera, id).
+/// `shoebox-keeper index` (S1-16).
+pub fn index(v: &Value) -> String {
+    if v.get("written").is_some() {
+        return format!(
+            "Compacted {} shards into {} ({} rows dropped)\n",
+            v["merged"], v["written"], v["dropped"]
+        );
+    }
+    let total = v["total"].as_u64().unwrap_or(0);
+    let pct = |n: &Value| {
+        (n.as_u64().unwrap_or(0) * 100)
+            .checked_div(total)
+            .unwrap_or(100)
+    };
+    let mut out = format!(
+        "Search covers {total} photos: by content {}%, labels {}%, text read {}%\n",
+        pct(&v["content"]),
+        pct(&v["labelled"]),
+        pct(&v["text_read"])
+    );
+    out.push_str(&format!(
+        "This keeper: {}{}\n",
+        if v["paused"].as_bool() == Some(true) {
+            "paused".to_string()
+        } else if v["running"].as_bool() == Some(true) {
+            format!("indexing ({} photos/min)", v["photos_per_min"])
+        } else {
+            "not indexing (no image model installed)".to_string()
+        },
+        if v["meaning"].as_bool() == Some(true) {
+            ""
+        } else {
+            "; no text model, so keyword search only"
+        }
+    ));
+    for i in v["indexers"].as_array().into_iter().flatten() {
+        let name = i["name"]
+            .as_str()
+            .filter(|n| !n.is_empty())
+            .unwrap_or("a device");
+        out.push_str(&format!(
+            "  {name}{}: {} photos/min{}\n",
+            if i["this"].as_bool() == Some(true) {
+                " (this keeper)"
+            } else {
+                ""
+            },
+            i["photos_per_min"],
+            if i["reads_text"].as_bool() == Some(true) {
+                ", reads text"
+            } else {
+                ""
+            }
+        ));
+    }
+    if let Some(eta) = v["eta_secs"].as_u64() {
+        out.push_str(&format!("About {} left\n", uptime(eta)));
+    }
+    let mb = v["held_bytes"].as_u64().unwrap_or(0) as f64 / 1e6;
+    out.push_str(&format!("Search data here: {mb:.1} MB\n"));
+    out
+}
+
+pub fn search(v: &Value) -> String {
+    let mut out = String::new();
+    let chips: Vec<&str> = v["filters"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|f| f["label"].as_str())
+        .collect();
+    let words = v["free_text"].as_str().unwrap_or_default();
+    if !chips.is_empty() {
+        out.push_str(&format!("Filters: {}\n", chips.join(", ")));
+    }
+    if !words.is_empty() {
+        out.push_str(&format!("Words: {words}\n"));
+    }
+    let total = v["total"].as_u64().unwrap_or(0);
+    let items = v["items"].as_array().cloned().unwrap_or_default();
+    out.push_str(&format!(
+        "{total} photo{}{}\n",
+        if total == 1 { "" } else { "s" },
+        if (items.len() as u64) < total {
+            format!(", first {}", items.len())
+        } else {
+            String::new()
+        }
+    ));
+    for it in &items {
+        let ms = it["taken_at"].as_i64().unwrap_or(0);
+        let d = shoebox_search::Zone::UTC.date(shoebox_core::ids::Timestamp(ms));
+        let camera = it["camera"].as_str().unwrap_or("-");
+        let id = it["id"].as_str().unwrap_or_default();
+        out.push_str(&format!(
+            "{}-{:02}-{:02}  {:<24} {}\n",
+            d.year,
+            d.month,
+            d.day,
+            camera,
+            &id[..id.len().min(16)]
+        ));
     }
     out
 }

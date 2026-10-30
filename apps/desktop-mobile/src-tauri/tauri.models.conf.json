@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": {
+      "../../../models/build/clip-text-int8.onnx": "models/clip-text-int8.onnx",
+      "../../../models/build/clip-image-int8.onnx": "models/clip-image-int8.onnx",
+      "../../../models/build/face-detect-yunet.onnx": "models/face-detect-yunet.onnx",
+      "../../../models/build/face-embed-sface.onnx": "models/face-embed-sface.onnx"
+    }
+  }
+}

@@ -62,12 +62,12 @@ pub const CLIP_MODEL: ModelId = ModelId([
 pub const CLIP_DIMS: usize = 512;
 
 /// How faces are found and described (part of their id).
-pub const FACES_PREPROCESS: &str = "yunet-2023mar on the preview letterboxed into 640 (BGR, 0-255), score >= 0.8, NMS 0.3, faces >= 40 px; sface-2021dec on the face aligned to the ArcFace 112 template (RGB, 0-255); L2-normalised 128-d";
+pub const FACES_PREPROCESS: &str = "yunet-2023mar on the upright preview or original (EXIF orientation applied, at most 2048 px) letterboxed into 640 (BGR, 0-255), score >= 0.8, NMS 0.3, faces >= 40 px; sface-2021dec on the face aligned to the ArcFace 112 template (RGB, 0-255); L2-normalised 128-d";
 
 /// The face models: BLAKE3 over their files' hashes, then [`FACES_PREPROCESS`].
 pub const FACES_MODEL: ModelId = ModelId([
-    101, 122, 250, 240, 202, 228, 125, 138, 228, 21, 80, 133, 27, 86, 252, 220, 24, 69, 71, 158,
-    206, 17, 194, 71, 169, 145, 184, 18, 128, 215, 80, 88,
+    15, 85, 161, 227, 31, 246, 190, 235, 195, 99, 20, 152, 204, 103, 91, 40, 24, 253, 170, 179,
+    167, 116, 143, 231, 28, 221, 232, 206, 53, 194, 187, 226,
 ]);
 
 pub const FACE_DIMS: usize = 128;

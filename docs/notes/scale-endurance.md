@@ -26,9 +26,34 @@ What has been measured, what has not, and what failed the acceptance criteria.
 | Face shards (one face a photo, 161 bytes each) | about 16 MB | 50 MB |
 | Gazetteer lookups (100k) | 0.3 s | — |
 
-Not measured: the S25, a Pi 5, nest; RSS while searching on a phone (the text model alone takes about 510 MB
-resident on the Mac while loaded, so a phone loads it on the first search by meaning and lets it go after two
-minutes); the week-long endurance run.
+### On the S25 and nest (2026-10-30)
+
+`device_bench` (`crates/shoebox-ml/examples/device_bench.rs`) at 100k synthetic photos, one thread, release builds;
+full table in `search-models.md`:
+
+| Measure | Mac | nest (Ryzen 5 3600, musl) | S25 | Budget |
+|---|---|---|---|---|
+| Facts query, p50 / p95 | 2.1 / 2.5 ms | 5.4 / 6.5 ms | 2.6 / 3.0 ms | 50 ms |
+| Meaning: scoring 100k vectors, p50 / p95 | 7.5 / 7.9 ms | 26 / 28 ms | 17 / 18 ms | 150 ms (S25) |
+| Text query encoding, p50 / p95 | 14 / 15 ms | 95 / 102 ms | 68 / 69 ms | 50 ms (phone): **not met** |
+| A search by meaning, end to end (encode + score + facts) | about 25 ms | about 135 ms | about 90 ms | p95 150 ms: met |
+| Text model resident while loaded | 590 MB | 200 MB | 174 MB | — |
+| Image encoding (indexing), ms/photo | 35 | 296 | 285–465 | — |
+
+The real library (5,766 photos), on the devices:
+
+* **S25** (debug APK, text model only): "waterfall" finds 53 photos, all of waterfalls, from vectors the Mac and nest
+  made. Search data on the phone: `facts.idx` 1.3 MB, `vec-*.bin` 3.5 MB (written on the first search by meaning).
+  App memory (`dumpsys meminfo`, native heap): 270–285 MB idle, 461–467 MB after a search by meaning, back to 284 MB
+  2.5 minutes after leaving the search screen. While the search screen stays open the text model stays loaded:
+  each refresh of the results (sync brings changes) counts as a use, even when the query's vector is cached.
+* **nest** (keeper, musl, models in `/usr/local/share/shoebox/models`): indexes at about 340 photos a minute with
+  half its cores (the Mac: about 1,800); keeper RSS 0.86–1.0 GB while indexing with all models loaded. Search data
+  4.7 MB under `search/`, 10.3 MB of shard blobs.
+
+Not measured: a Pi 5 (none at hand); the app's idle memory against a build without search (the "added idle RSS
+under 30 MB" criterion); search with every other device off (the S25 searched with the others online); the
+week-long endurance run.
 
 ## Not met yet
 

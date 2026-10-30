@@ -134,6 +134,37 @@ pub fn thumbnail(image: &DynamicImage) -> Result<Rendition, AnalyzeError> {
     )
 }
 
+/// A decoded picture brought down to at most `max_edge` px on its long side (never up), then
+/// turned upright.
+pub fn upright(image: DynamicImage, exif_orientation: u16, max_edge: u32) -> DynamicImage {
+    let image = if image.width().max(image.height()) > max_edge {
+        image.resize(max_edge, max_edge, FilterType::Triangle)
+    } else {
+        image
+    };
+    orient(image, exif_orientation)
+}
+
+/// A `size` × `size` JPEG around a face in a decoded picture that is not yet upright. `rect` is
+/// the face box (left, top, right, bottom) as fractions of the upright picture; the square has
+/// room around the face, as the people screens show it, and stays inside the picture.
+pub fn face_crop(
+    image: DynamicImage,
+    exif_orientation: u16,
+    rect: [f32; 4],
+    size: u32,
+) -> Result<Rendition, AnalyzeError> {
+    let image = upright(image, exif_orientation, PREVIEW_LONG_EDGE);
+    let (w, h) = (image.width() as f32, image.height() as f32);
+    let [x1, y1, x2, y2] = rect.map(|v| v.clamp(0.0, 1.0));
+    let side = ((x2 - x1) * w).max((y2 - y1) * h) * 1.5;
+    let side = side.clamp(1.0, w.min(h));
+    let left = (((x1 + x2) / 2.0) * w - side / 2.0).clamp(0.0, w - side);
+    let top = (((y1 + y2) / 2.0) * h - side / 2.0).clamp(0.0, h - side);
+    let square = image.crop_imm(left as u32, top as u32, side as u32, side as u32);
+    encode_jpeg(&square.resize_exact(size, size, FilterType::Triangle), 85)
+}
+
 /// The thumbnail and the preview (long edge at most [`PREVIEW_LONG_EDGE`], never upscaled) of a
 /// decoded picture that is not yet upright, and its upright size. The work is done on the
 /// smallest picture that serves: the preview is cut from the full image and turned upright, the
@@ -157,4 +188,27 @@ pub fn renditions(
     };
     let small = orient(small, exif_orientation);
     Ok((thumbnail(&small)?, encode_jpeg(&small, 85)?, upright))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{Rgb, RgbImage};
+
+    #[test]
+    fn face_crop_is_a_square_around_the_face_in_the_upright_picture() {
+        // 400 × 200, stored on its side (EXIF 6: turn a quarter clockwise to be upright, 200 × 400).
+        // The red face is at the top left of the upright picture.
+        let mut stored = RgbImage::from_pixel(400, 200, Rgb([0, 0, 255]));
+        for x in 0..80 {
+            for y in 120..200 {
+                stored.put_pixel(x, y, Rgb([255, 0, 0]));
+            }
+        }
+        let crop = face_crop(DynamicImage::ImageRgb8(stored), 6, [0.0, 0.0, 0.4, 0.2], 64).unwrap();
+        assert_eq!((crop.width, crop.height), (64, 64));
+        let img = image::load_from_memory(&crop.bytes).unwrap().to_rgb8();
+        let top_left = img.get_pixel(8, 8);
+        assert!(top_left[0] > 200 && top_left[2] < 60, "{top_left:?}");
+    }
 }

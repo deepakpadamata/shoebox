@@ -21,6 +21,37 @@ use std::path::Path;
 pub use render::{PREVIEW_LONG_EDGE, THUMB_SIZE};
 pub use strip::{strip_location, StripError, Stripped};
 
+/// The picture in an image file (a preview, or an original shown as it is), at most `max_edge`
+/// px on its long side and upright (EXIF orientation applied), as a viewer shows it.
+pub fn decode_upright(bytes: &[u8], max_edge: u32) -> Result<image::DynamicImage, AnalyzeError> {
+    let (image, orientation) = decode_with_orientation(bytes)?;
+    Ok(render::upright(image, orientation, max_edge))
+}
+
+/// A square JPEG of `size` px around the face at `rect` (left, top, right, bottom as fractions of
+/// the upright picture) in an image file: a preview, or an original shown as it is. A phone shows
+/// faces this way instead of handing its webview whole originals (S1-19).
+pub fn face_crop(bytes: &[u8], rect: [f32; 4], size: u32) -> Result<Rendition, AnalyzeError> {
+    let (image, orientation) = decode_with_orientation(bytes)?;
+    render::face_crop(image, orientation, rect, size)
+}
+
+fn decode_with_orientation(bytes: &[u8]) -> Result<(image::DynamicImage, u16), AnalyzeError> {
+    Ok(match detect::sniff(bytes, None) {
+        detect::Format::Jpeg => (
+            render::decode(bytes, image::ImageFormat::Jpeg)?,
+            exif_data::read(bytes).orientation,
+        ),
+        detect::Format::Png => (render::decode(bytes, image::ImageFormat::Png)?, 1),
+        detect::Format::Heic => (render::decode_heic(bytes)?, 1),
+        other => {
+            return Err(AnalyzeError::Unsupported(format!(
+                "not a picture: {other:?}"
+            )))
+        }
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MediaKind {
     Photo,

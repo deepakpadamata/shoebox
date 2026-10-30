@@ -96,14 +96,22 @@ Recall@k (text → photo: is the captioned photo among the k best of the 1,000):
 | int8 (shipped) | **vec8** | 60.5 | 86.4 | 93.7 |
 | int8 (shipped) | vec1 → best 10% → vec8 | 60.4 | 86.3 | 93.3 |
 
-Speed and memory (tract 0.23.9, release build, one thread):
+Speed and memory (tract 0.23.9, release build, one thread; `cargo run --release -p shoebox-ml --example
+device_bench -- <models dir> <photos dir>`, run on 2026-10-30; the S25 run through `adb shell`, the device on USB power):
 
-| | Mac (M-series) | nest (x86_64 musl) | Pi 5 (1 core) | S25 |
+| | Mac (M-series) | nest (Ryzen 5 3600, musl) | Pi 5 | S25 (Snapdragon 8 Elite) |
 |---|---|---|---|---|
-| Text encoder, ms/query | 14 | — | — | — |
-| Image encoder, ms/photo (int8 / full precision) | 38 / 27 | — | — | — |
-| Text model resident after loading | 510 MB | — | — | — |
-| Scoring 100k photos (vec8, streamed from the file) | 8 ms | — | — | — |
+| Text encoder, ms/query (p50 / p95) | 14 / 15 | 95 / 102 | — | 68 / 69 |
+| Image encoder, ms/photo (256 px thumbnail) | 35 | 296 | — | 285–465 |
+| Face detection, ms/photo / embedding, ms/face | 15 / 15 | 64 / 63 | — | 78 / 75 |
+| Text model resident after loading | 590 MB | 200 MB | — | 174 MB |
+| Image model / face models resident | 214 / 44 MB | 140 / 54 MB | — | 117 / 54 MB |
+| Scoring 100k photos (vec8, streamed from the file; p50 / p95) | 7.5 / 7.9 ms | 26 / 28 ms | — | 17 / 18 ms |
+| Facts query at 100k photos (p50 / p95) | 2.1 / 2.5 ms | 5.4 / 6.5 ms | — | 2.6 / 3.0 ms |
+
+The Mac is 5–10× faster than the other two at the encoders: tract uses Apple's matrix unit there; on x86_64 and
+Android it runs its portable SIMD kernels. Pinning the S25 run to the two prime cores (`taskset c0`) changed little.
+No Pi 5 was at hand.
 
 The relative cut of meaning results (S1-12; `MEANING_MARGIN`), on the same set:
 

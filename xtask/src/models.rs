@@ -84,7 +84,7 @@ pub const BUILT: &[Built] = &[
 ];
 
 /// How faces are found and described (part of the face model's id, `FACES_MODEL`).
-pub const FACES_PREPROCESS: &str = "yunet-2023mar on the preview letterboxed into 640 (BGR, 0-255), score >= 0.8, NMS 0.3, faces >= 40 px; sface-2021dec on the face aligned to the ArcFace 112 template (RGB, 0-255); L2-normalised 128-d";
+pub const FACES_PREPROCESS: &str = "yunet-2023mar on the upright preview or original (EXIF orientation applied, at most 2048 px) letterboxed into 640 (BGR, 0-255), score >= 0.8, NMS 0.3, faces >= 40 px; sface-2021dec on the face aligned to the ArcFace 112 template (RGB, 0-255); L2-normalised 128-d";
 
 /// What the image–text model's vectors depend on besides the weights (part of its `ModelId`).
 pub const CLIP_PREPROCESS: &str = "openclip-vit-b-32-laion2b_s34b_b79k; image: 256 px square thumbnail, shortest side to 224 (bicubic), centre crop, mean 0.48145466,0.4578275,0.40821073, std 0.26862954,0.26130258,0.27577711; text: CLIP BPE 49408, 77 tokens; weight-only int8; L2-normalised 512-d";

@@ -35,6 +35,9 @@ pub async fn serve(
     kind: &str,
     range: Option<(u64, Option<u64>)>,
 ) -> Result<Option<BlobBytes>> {
+    if let Some(rect) = kind.strip_prefix("face:") {
+        return face(core, id, rect).await;
+    }
     if let Some(rest) = kind.strip_prefix("album:") {
         // `album:<album id>:<kind>`: a photo of a shared album.
         let (album, kind) = rest
@@ -100,6 +103,56 @@ pub async fn serve(
         }
         other => other,
     }
+}
+
+/// Side of a face crop in pixels: sharp at 120 px on a 2× screen.
+const FACE_PX: u32 = 256;
+
+/// Face crops being cut at once: each decodes a whole preview or original.
+static FACE_CUTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
+/// A face cut out of its photo (`kind=face:<left>,<top>,<right>,<bottom>`, fractions of the
+/// photo), made once and kept in `face-crops/`. The webview gets a small JPEG instead of the
+/// photo: on a phone the photo is often the original from the gallery, and a screen of faces
+/// passed through Android's Java heap as whole originals ran it out of memory.
+async fn face(core: &Arc<AppCore>, id: &str, rect: &str) -> Result<Option<BlobBytes>> {
+    let rect: Vec<f32> = rect
+        .split(',')
+        .map(|v| v.parse::<f32>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| anyhow!("malformed face box"))?;
+    let rect: [f32; 4] = rect.try_into().map_err(|_| anyhow!("malformed face box"))?;
+    let key = Blake3Hash::of_bytes(format!("{id}/{rect:?}/{FACE_PX}").as_bytes());
+    let path = core
+        .data_dir()
+        .join("face-crops")
+        .join(format!("{key}.jpg"));
+    let done = |bytes: Vec<u8>| BlobBytes {
+        total: bytes.len() as u64,
+        etag: format!("face-{key}"),
+        bytes,
+        content_type: "image/jpeg".into(),
+        range: None,
+    };
+    if let Ok(bytes) = std::fs::read(&path) {
+        return Ok(Some(done(bytes)));
+    }
+    let _cut = FACE_CUTS.acquire().await?;
+    let Some(photo) = Box::pin(serve(core, id, "preview", None)).await? else {
+        return Ok(None);
+    };
+    if photo.range.is_some() {
+        // Larger than one unranged read: not a picture to cut faces from.
+        return Ok(None);
+    }
+    let crop =
+        tokio::task::spawn_blocking(move || shoebox_media::face_crop(&photo.bytes, rect, FACE_PX))
+            .await??;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&path, &crop.bytes)?;
+    Ok(Some(done(crop.bytes)))
 }
 
 /// A `Range: bytes=first-[last]` header value (one range).

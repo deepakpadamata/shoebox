@@ -646,13 +646,9 @@ impl<L: LibraryStore> LibraryNode<L> {
 
 /// The faces in a photo's preview (or original), as stored in a faces shard.
 fn describe_faces(bytes: &[u8], m: &FaceModels) -> Result<Vec<Face>> {
-    let img = image::load_from_memory(bytes).context("decoding a preview")?;
-    // Previews are at most 2048 px and already upright (`render.rs`); bring originals down too.
-    let img = if img.width().max(img.height()) > 2048 {
-        img.resize(2048, 2048, image::imageops::FilterType::Triangle)
-    } else {
-        img
-    };
+    // Previews are at most 2048 px and already upright (`render.rs`); originals are brought down
+    // and turned upright too, so face boxes are where a viewer shows the face.
+    let img = shoebox_media::decode_upright(bytes, 2048).context("decoding a preview")?;
     let rgb = img.to_rgb8();
     let (w, h) = (rgb.width() as f32, rgb.height() as f32);
     let image = Rgb {

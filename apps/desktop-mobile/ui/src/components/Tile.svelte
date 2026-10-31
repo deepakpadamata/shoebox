@@ -3,12 +3,12 @@
   import { ensurePoster } from '../lib/poster';
   import { dateTime } from '../lib/format';
   interface Props {
-    id: string; size: number; favorite?: boolean; video?: boolean; copies?: number; target?: number;
+    id: string; size: number; favorite?: boolean; video?: boolean; live?: boolean; copies?: number; target?: number;
     transferring?: boolean; selected?: boolean; selecting?: boolean; hasThumb?: boolean;
     hasPoster?: boolean; needsPoster?: boolean; hasOriginal?: boolean; backedUp?: boolean; index?: number; takenAt?: number;
     onclick?: (e: MouseEvent) => void;
   }
-  let { id, size, favorite = false, video = false, copies, target = 2, transferring = false, selected = false, selecting = false, hasThumb = true, hasPoster = false, needsPoster = false, hasOriginal = false, backedUp = true, index, takenAt, onclick }: Props = $props();
+  let { id, size, favorite = false, video = false, live = false, copies, target = 2, transferring = false, selected = false, selecting = false, hasThumb = true, hasPoster = false, needsPoster = false, hasOriginal = false, backedUp = true, index, takenAt, onclick }: Props = $props();
   // A video nobody has made a poster for yet gets one here if this device has the original;
   // until then a neutral tile. (One made elsewhere arrives like any thumbnail.)
   let madePoster = $state(false);
@@ -20,7 +20,7 @@
   });
   const poster = $derived(video && (hasPoster || madePoster));
   // Badges only where it matters (design README): red = not backed up enough, blue = in transit.
-  const label = $derived(`${video ? 'Video' : 'Photo'}${takenAt ? ` from ${dateTime(takenAt)}` : ''}${favorite ? ', favorite' : ''}${copies !== undefined && copies < target && !backedUp ? `, only ${copies} ${copies === 1 ? 'copy' : 'copies'}` : ''}`);
+  const label = $derived(`${video ? 'Video' : live ? 'Live Photo' : 'Photo'}${takenAt ? ` from ${dateTime(takenAt)}` : ''}${favorite ? ', favorite' : ''}${copies !== undefined && copies < target && !backedUp ? `, only ${copies} ${copies === 1 ? 'copy' : 'copies'}` : ''}`);
   const risk = $derived(copies !== undefined && copies < target && !backedUp);
 </script>
 
@@ -33,7 +33,7 @@
     <span class="placeholder" aria-hidden="true"></span>
   {/if}
   {#if favorite}<span class="fav" aria-label="Favorite">♥</span>{/if}
-  {#if video}<span class="vid" aria-label="Video">▶</span>{/if}
+  {#if video}<span class="vid" aria-label="Video">▶</span>{:else if live}<span class="vid" aria-label="Live Photo">◎ LIVE</span>{/if}
   {#if transferring}<span class="b sync" title="Transferring">↻</span>
   {:else if risk}<span class="b risk" title="Only {copies} {copies === 1 ? 'copy' : 'copies'}">{copies} {copies === 1 ? 'copy' : 'copies'}</span>{/if}
   <span class="sel" class:on={selecting} aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 12.5l3.2 3.2L17 9" /></svg></span>

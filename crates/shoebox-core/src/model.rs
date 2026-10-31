@@ -34,6 +34,8 @@ pub enum BlobKind {
     Thumb,
     /// An index shard (S1-06). Appended: postcard encodes variants by index.
     Index,
+    /// The video of a Live Photo or motion photo (F2.10). Appended, like `Index`.
+    Motion,
 }
 
 /// A reference to a blob in iroh-blobs.
@@ -189,6 +191,28 @@ pub struct IndexShard {
     pub count: u32,
     /// Shards of the same model and kind this one supersedes (from the blob's header).
     pub replaces: Vec<Blake3Hash>,
+    pub made_by: EndpointId,
+    pub hlc: Hlc,
+}
+
+/// How a photo's video came to be.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub enum MotionSource {
+    /// A separate file imported with the still (an iPhone's Live Photo: `IMG_1.HEIC` + `IMG_1.MOV`).
+    Paired,
+    /// Cut out of the still's own file (a Samsung or Google motion photo); the original keeps it too.
+    Embedded,
+}
+
+/// The video that goes with a photo (`motion/<photo hex>`, F2.10): the moving half of a Live Photo
+/// or motion photo. The video is a blob of its own and never an item of the timeline. The photo's
+/// own record and original are untouched, so a build that does not know this record shows the still.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct MotionRecord {
+    pub photo: PhotoId,
+    pub video: BlobRef,
+    pub duration_ms: u32,
+    pub source: MotionSource,
     pub made_by: EndpointId,
     pub hlc: Hlc,
 }

@@ -56,6 +56,8 @@ pub enum StateEntry {
     Person(Person),
     /// What people said about one face (S1-18).
     FaceLabel(FaceLabel),
+    /// The video that goes with a photo (F2.10). Appended, like the records before.
+    Motion(MotionRecord),
 }
 
 /// Which stored record a write changed (and so must be persisted/announced).
@@ -72,6 +74,7 @@ pub enum Touched {
     Indexer(EndpointId),
     Person(PersonId),
     FaceLabel(PhotoId, [u8; 4]),
+    Motion(PhotoId),
 }
 
 /// The result of a state mutation.
@@ -141,6 +144,7 @@ pub struct LibraryState {
     indexers: BTreeMap<EndpointId, IndexerStatus>,
     persons: BTreeMap<PersonId, Person>,
     face_labels: BTreeMap<(PhotoId, [u8; 4]), FaceLabel>,
+    motions: BTreeMap<PhotoId, MotionRecord>,
     /// Devices currently holding each blob (any kind).
     holders_by_blob: BTreeMap<Blake3Hash, BTreeSet<EndpointId>>,
 }
@@ -215,6 +219,7 @@ impl LibraryState {
             indexers: BTreeMap::new(),
             persons: BTreeMap::new(),
             face_labels: BTreeMap::new(),
+            motions: BTreeMap::new(),
             holders_by_blob: BTreeMap::new(),
         }
     }
@@ -393,6 +398,18 @@ impl LibraryState {
         }
     }
 
+    /// One video per photo: the later record (HLC, then author) wins, so every replica keeps the same.
+    fn merge_motion(&mut self, motion: &MotionRecord) -> bool {
+        self.observe(&motion.hlc);
+        match self.motions.get(&motion.photo) {
+            Some(e) if (e.hlc, e.made_by) >= (motion.hlc, motion.made_by) => false,
+            _ => {
+                self.motions.insert(motion.photo, motion.clone());
+                true
+            }
+        }
+    }
+
     fn merge_indexer(&mut self, status: &IndexerStatus) -> bool {
         self.observe(&status.hlc);
         match self.indexers.get(&status.device) {
@@ -524,6 +541,30 @@ impl LibraryState {
         if self.merge_index_shard(&rec) {
             fx.change(Change::IndexChanged);
             fx.touch(Touched::IndexShard(rec.blob.hash));
+        }
+        Ok(fx)
+    }
+
+    /// Record the video of a photo made by this device (`made_by` and `hlc` are set here). The photo
+    /// must exist, and the same video again is no change.
+    pub fn put_motion(&mut self, motion: &MotionRecord, now_ms: u64) -> Result<Effect> {
+        if !self.photos.contains_key(&motion.photo) {
+            return Err(StoreError::NotFound);
+        }
+        if self
+            .motions
+            .get(&motion.photo)
+            .is_some_and(|e| e.video.hash == motion.video.hash)
+        {
+            return Ok(Effect::default());
+        }
+        let mut rec = motion.clone();
+        rec.made_by = self.device;
+        rec.hlc = self.tick(now_ms);
+        let mut fx = Effect::default();
+        if self.merge_motion(&rec) {
+            fx.change(Change::MotionChanged(rec.photo));
+            fx.touch(Touched::Motion(rec.photo));
         }
         Ok(fx)
     }
@@ -875,6 +916,12 @@ impl LibraryState {
                     fx.touch(Touched::IndexShard(shard.blob.hash));
                 }
             }
+            StateEntry::Motion(m) => {
+                if self.merge_motion(m) {
+                    fx.change(Change::MotionChanged(m.photo));
+                    fx.touch(Touched::Motion(m.photo));
+                }
+            }
             StateEntry::IndexerStatus(status) => {
                 if self.merge_indexer(status) {
                     fx.change(Change::IndexChanged);
@@ -929,6 +976,7 @@ impl LibraryState {
                 .get(blob)
                 .cloned()
                 .map(StateEntry::IndexShard),
+            Touched::Motion(photo) => self.motions.get(photo).cloned().map(StateEntry::Motion),
             Touched::Indexer(device) => self
                 .indexers
                 .get(device)
@@ -972,6 +1020,7 @@ impl LibraryState {
                 .cloned()
                 .map(StateEntry::IndexShard),
         );
+        out.extend(self.motions.values().cloned().map(StateEntry::Motion));
         out.extend(
             self.indexers
                 .values()
@@ -1015,6 +1064,16 @@ impl LibraryState {
 
     pub fn setting(&self, key: &str) -> Option<Vec<u8>> {
         self.settings.get(key).map(|l| l.value.clone())
+    }
+
+    /// The video of a photo, if it has one.
+    pub fn motion(&self, photo: &PhotoId) -> Option<MotionRecord> {
+        self.motions.get(photo).cloned()
+    }
+
+    /// Every motion record, in photo order.
+    pub fn motions(&self) -> Vec<MotionRecord> {
+        self.motions.values().cloned().collect()
     }
 
     /// Every index shard record (live or replaced: liveness needs the shards' headers, see

@@ -10,6 +10,8 @@ pub mod commands;
 mod core;
 pub mod diagnostics;
 mod export;
+#[cfg(target_os = "macos")]
+mod heic_macos;
 pub mod keystore;
 pub mod media;
 pub mod notify;
@@ -33,6 +35,8 @@ pub mod shell;
 pub mod android_bridge;
 #[cfg(all(feature = "tauri-app", target_os = "android"))]
 pub mod android_photos;
+#[cfg(all(feature = "tauri-app", target_os = "android"))]
+mod heic_android;
 
 pub use crate::backup::pause_reason;
 pub use crate::core::{AppCore, AppOptions};

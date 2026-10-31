@@ -15,6 +15,7 @@
 //! indexers/<deviceId hex>              → StateEntry::IndexerStatus (written only by that device)
 //! persons/<personId hex>               → StateEntry::Person
 //! facelabels/<photoId hex>/<face hex>  → StateEntry::FaceLabel
+//! motion/<photoId hex>                 → StateEntry::Motion       (a photo's video, F2.10)
 //! ```
 //!
 //! Shared-album namespace (one per album):
@@ -80,6 +81,7 @@ pub fn library_key(e: &StateEntry) -> String {
         StateEntry::FaceLabel(l) => {
             format!("facelabels/{}/{}", hex32(&l.photo.0), hex::encode(l.face))
         }
+        StateEntry::Motion(m) => format!("motion/{}", hex32(&m.photo.0)),
     }
 }
 
@@ -101,6 +103,7 @@ pub fn touched_key(t: &Touched) -> String {
         Touched::FaceLabel(photo, face) => {
             format!("facelabels/{}/{}", hex32(&photo.0), hex::encode(face))
         }
+        Touched::Motion(photo) => format!("motion/{}", hex32(&photo.0)),
     }
 }
 

@@ -82,6 +82,13 @@ impl<L: LibraryStore> LibraryNode<L> {
         for rec in live.iter().chain(deleted.iter()) {
             referenced.extend([rec.original.hash, rec.preview.hash, rec.thumb.hash]);
         }
+        // The video of a Live Photo is kept as long as its photo is (even in Recently Deleted).
+        let photos: HashSet<PhotoId> = live.iter().chain(deleted.iter()).map(|r| r.id).collect();
+        for m in self.store().motions().await? {
+            if photos.contains(&m.photo) {
+                referenced.insert(m.video.hash);
+            }
+        }
         let mut released: Vec<Blake3Hash> = self
             .node()
             .blobs()

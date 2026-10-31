@@ -192,3 +192,42 @@ async fn photos_with_gps_are_found_by_place() {
     let r = ln.search("Portugal", &opts(), 0, 10).await.unwrap();
     assert_eq!(r.query.filters.len(), 1, "a place in the library is a chip");
 }
+
+/// F2.10: "live photos" finds the photos that have a video, before and after the index is built.
+#[tokio::test]
+async fn live_photos_are_found_by_their_chip() {
+    let dir = tempfile::tempdir().unwrap();
+    let ln = open(dir.path()).await;
+    let (a, b) = (Blake3Hash::of_bytes(b"a"), Blake3Hash::of_bytes(b"b"));
+    for name in ["a", "b"] {
+        ln.store()
+            .upsert_photo(record(name, IN_2019, "Pixel 8"))
+            .await
+            .unwrap();
+    }
+    let motion = |photo| MotionRecord {
+        photo,
+        video: BlobRef {
+            hash: Blake3Hash::of_bytes(b"clip"),
+            size: 1,
+            mime: "video/quicktime".into(),
+        },
+        duration_ms: 1_500,
+        source: MotionSource::Paired,
+        made_by: EndpointId([9; 32]),
+        hlc: Hlc::GENESIS,
+    };
+    // Found when the index is first built from the library...
+    ln.store().put_motion(motion(a)).await.unwrap();
+    ln.start_search();
+    assert_eq!(ids(&ln, "live photos").await, [a]);
+    assert_eq!(
+        ids(&ln, "photos").await.len(),
+        2,
+        "a Live Photo is a photo too"
+    );
+
+    // ...and when a video arrives later, from this device or by sync.
+    ln.store().put_motion(motion(b)).await.unwrap();
+    eventually(&ln, "live photos", 2).await;
+}

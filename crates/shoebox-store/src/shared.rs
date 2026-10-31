@@ -217,8 +217,10 @@ pub fn item_blob(item: &SharedItem, kind: BlobKind) -> Blake3Hash {
     match kind {
         BlobKind::Thumb => item.thumb.hash,
         BlobKind::Preview => item.preview.hash,
-        // Shared albums have no index shards of their own.
-        BlobKind::Original | BlobKind::Index => item.shared_hash.unwrap_or(item.original.hash),
+        // Shared albums have no index shards of their own, and share no videos (yet).
+        BlobKind::Original | BlobKind::Index | BlobKind::Motion => {
+            item.shared_hash.unwrap_or(item.original.hash)
+        }
     }
 }
 

@@ -2,7 +2,7 @@
   // Full-size viewer (M3-08/09): the preview shows at once, the original replaces it when it is
   // here or once fetched on demand; the info panel says where every copy is stored.
   import { onMount } from 'svelte';
-  import { api, blobUrl, videoUrl, type FaceOut, type PhotoDetail, type PhotoSummary } from '../lib/api';
+  import { api, blobUrl, motionUrl, videoUrl, type FaceOut, type PhotoDetail, type PhotoSummary } from '../lib/api';
   import FaceCrop from '../components/FaceCrop.svelte';
   import { bytes, dateTime, plural } from '../lib/format';
   import { fail, toast } from '../lib/store.svelte';
@@ -37,6 +37,9 @@
   let zoom = $state(1);
   let pullY = $state(0);
   let originalReady = $state(false);
+  // A Live Photo or motion photo: its video plays over the picture (F2.10).
+  let playingLive = $state(false);
+  let liveFetching = $state(false);
   // The original is here but the media element could not play it (a codec this device lacks).
   let unplayable = $state(false);
 
@@ -44,6 +47,8 @@
     const id = photo.id;
     detail = null;
     originalReady = false;
+    playingLive = false;
+    liveFetching = false;
     unplayable = false;
     fetching = false;
     zoom = 1;
@@ -88,6 +93,32 @@
   // fails to load (or one still loading from before the original was ready) says nothing.
   function imageFailed() {
     if (!photo.is_video && originalReady) originalFailed();
+  }
+
+  // Play the video of a Live Photo, getting it from another device first if this one has not got it.
+  async function playLive() {
+    if (playingLive) { playingLive = false; return; }
+    if (!detail?.has_motion) {
+      liveFetching = true;
+      const id = photo.id;
+      try {
+        await api.fetchNow(id, 'motion');
+        const d = await api.photoDetail(id);
+        if (photo.id !== id) return;
+        detail = d;
+      } catch (e) {
+        fail(e);
+        return;
+      } finally {
+        liveFetching = false;
+      }
+    }
+    playingLive = true;
+  }
+
+  function liveFailed() {
+    playingLive = false;
+    toast('This device cannot play the video of this Live Photo');
   }
 
   async function getOriginal() {
@@ -164,8 +195,14 @@
       {#if photo.is_video && originalReady}
         <!-- svelte-ignore a11y_media_has_caption -->
         <video src={videoUrl(photo.id)} poster={poster ?? undefined} controls autoplay onerror={originalFailed}></video>
+      {:else if playingLive}
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <video src={motionUrl(photo.id)} autoplay playsinline onended={() => (playingLive = false)} onerror={liveFailed} onclick={() => (playingLive = false)}></video>
       {:else}
         {#key photo.id}{#if src}<img {src} alt={`${photo.is_video ? 'Video' : 'Photo'} from ${dateTime(photo.taken_at)}`} style="transform: translateY({pullY}px) scale({zoom}); opacity: {1 - Math.min(0.5, pullY / 400)}" ondblclick={() => (zoom = zoom > 1 ? 1 : 2.5)} onerror={imageFailed} />{/if}{/key}
+      {/if}
+      {#if detail?.live && !photo.is_video}
+        <button class="live" aria-pressed={playingLive} aria-label={playingLive ? 'Stop the Live Photo' : 'Play the Live Photo'} disabled={liveFetching} onclick={playLive}>{liveFetching ? 'Getting video…' : playingLive ? '■ LIVE' : '◎ LIVE'}</button>
       {/if}
       {#if detail && !originalReady}
         <div class="overlay">
@@ -250,6 +287,9 @@
   .nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; background: rgba(255,255,255,.1); border: 0; color: #fff; width: 40px; height: 64px; font-size: 28px; cursor: pointer; border-radius: 10px; }
   .nav:disabled { opacity: .25; cursor: default; }
   .left { left: 10px; } .right { right: 10px; }
+  .live { position: absolute; left: 62px; bottom: 16px; z-index: 2; background: rgba(0,0,0,.55); color: #fff; border: 0; border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 700; letter-spacing: .04em; cursor: pointer; }
+  .live[aria-pressed='true'] { background: var(--accent); color: var(--accent-ink); }
+  .live:disabled { opacity: .7; cursor: default; }
   .overlay { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.7); padding: 10px 14px; border-radius: 12px; display: flex; flex-direction: column; gap: 4px; align-items: center; font-size: 13px; }
   .info { width: 320px; flex: none; background: var(--surface); color: var(--ink); padding: 18px 16px; overflow: auto; border-left: 1px solid var(--line); }
   @media (max-width: 720px) {

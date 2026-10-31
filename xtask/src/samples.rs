@@ -211,6 +211,17 @@ pub fn write_samples(out: &Path) -> io::Result<Vec<String>> {
     )? {
         written.push("photo.heic".into());
     }
+    let avif = out.join("photo.avif");
+    if run(
+        Command::new("heif-enc")
+            .arg("-A")
+            .arg(&jpg)
+            .arg("-o")
+            .arg(&avif),
+        "AVIF encode (heif-enc)",
+    )? {
+        written.push("photo.avif".into());
+    }
     let clip = |name: &str, extra: &[&str]| -> io::Result<bool> {
         run(
             Command::new("ffmpeg")
@@ -230,6 +241,84 @@ pub fn write_samples(out: &Path) -> io::Result<Vec<String>> {
     }
     if clip("clip.mov", &["-metadata", "location=+48.8584+002.2945/"])? {
         written.push("clip.mov".into());
+    }
+    written.extend(other_formats(out, &jpg)?);
+    Ok(written)
+}
+
+/// The formats exports bring besides the camera ones (I1-03): stills made from `photo-gps.jpg`
+/// (WebP keeps its EXIF), and one-second clips in each older container, dated 2024-06-01.
+fn other_formats(out: &Path, jpg: &Path) -> io::Result<Vec<String>> {
+    let mut written = vec![];
+    let mut make = |name: &str, cmd: &mut Command| -> io::Result<()> {
+        if run(cmd, &format!("{name} (needs cwebp, magick and ffmpeg)"))? {
+            written.push(name.to_string());
+        }
+        Ok(())
+    };
+    make(
+        "photo.webp",
+        Command::new("cwebp")
+            .args(["-quiet", "-resize", "160", "120", "-metadata", "exif"])
+            .arg(jpg)
+            .arg("-o")
+            .arg(out.join("photo.webp")),
+    )?;
+    make(
+        "photo.tif",
+        Command::new("magick")
+            .arg(jpg)
+            .args(["-resize", "160x120", "-compress", "zip"])
+            .arg(out.join("photo.tif")),
+    )?;
+    make(
+        "photo.bmp",
+        Command::new("magick")
+            .arg(jpg)
+            .args(["-resize", "64x48"])
+            .arg(out.join("photo.bmp")),
+    )?;
+    make(
+        "anim.gif",
+        Command::new("ffmpeg")
+            .args(["-y", "-loglevel", "error", "-f", "lavfi", "-i"])
+            .arg("testsrc2=size=160x120:rate=5:duration=0.6")
+            .arg(out.join("anim.gif")),
+    )?;
+    for (name, codec) in [
+        ("clip.3gp", &["-c:v", "h263"][..]),
+        (
+            "clip.m4v",
+            &[
+                "-c:v", "libx264", "-crf", "35", "-pix_fmt", "yuv420p", "-f", "ipod",
+            ],
+        ),
+        (
+            "clip.avi",
+            &[
+                "-metadata",
+                "date=2024-06-01",
+                "-c:v",
+                "mpeg4",
+                "-q:v",
+                "20",
+            ],
+        ),
+        ("clip.mpg", &["-c:v", "mpeg1video", "-q:v", "20"]),
+        (
+            "clip.mkv",
+            &["-c:v", "libx264", "-crf", "35", "-pix_fmt", "yuv420p"],
+        ),
+    ] {
+        make(
+            name,
+            Command::new("ffmpeg")
+                .args(["-y", "-loglevel", "error", "-f", "lavfi", "-i"])
+                .arg("testsrc2=size=176x144:rate=25:duration=1")
+                .args(["-metadata", "creation_time=2024-06-01T12:00:00Z"])
+                .args(codec)
+                .arg(out.join(name)),
+        )?;
     }
     Ok(written)
 }

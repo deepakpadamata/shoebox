@@ -38,7 +38,7 @@ async fn has_all(n: &LibraryNode<DocsLibrary>, kinds: &[BlobKind], expect_count:
                 BlobKind::Original => &r.original,
                 BlobKind::Preview => &r.preview,
                 BlobKind::Thumb => &r.thumb,
-                BlobKind::Index => unreachable!("not a photo blob"),
+                BlobKind::Index | BlobKind::Motion => unreachable!("not a photo blob"),
             };
             if !n.node().blobs().has(&blob.hash).await.unwrap() {
                 return false;

@@ -5,6 +5,10 @@
  */
 export type PhotoSummary = { id: string, taken_at: number, favorite: boolean, is_video: boolean, 
 /**
+ * A Live Photo or motion photo: it has a video (F2.10).
+ */
+live: boolean, 
+/**
  * Devices holding the original (this one included).
  */
 copies: number, 

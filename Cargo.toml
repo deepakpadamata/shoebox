@@ -87,3 +87,8 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# libheif's bindings with a build that links libheif and libde265 statically (I1-02): see
+# vendor/libheif-sys/build.rs and docs/notes/assumptions.md (A-031).
+[patch.crates-io]
+libheif-sys = { path = "vendor/libheif-sys" }

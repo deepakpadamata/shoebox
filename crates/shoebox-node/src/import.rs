@@ -10,10 +10,10 @@ use notify::{EventKind, RecursiveMode, Watcher};
 use shoebox_core::hlc::Hlc;
 use shoebox_core::ids::Blake3Hash;
 use shoebox_core::merge::Lww;
-use shoebox_core::model::{BlobKind, BlobRef, PhotoId, PhotoRecord};
+use shoebox_core::model::{BlobKind, BlobRef, MotionRecord, MotionSource, PhotoId, PhotoRecord};
 use shoebox_core::store::LibraryStore;
-use shoebox_media::{analyze, AnalyzeError, ImportResult, MediaKind, Rendition};
-use std::collections::BTreeSet;
+use shoebox_media::{analyze, AnalyzeError, EmbeddedVideo, ImportResult, MediaKind, Rendition};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{debug, warn};
@@ -25,6 +25,13 @@ const WATCH_DEBOUNCE: Duration = Duration::from_millis(400);
 const PROGRESS_EVERY: usize = 10;
 /// Publish holdings after this many newly stored blobs, so a crash loses little.
 const HOLDINGS_BATCH: usize = 300;
+/// A Live Photo's video is a few seconds; a longer file next to a picture of the same name is a clip of
+/// its own.
+const MAX_COMPANION_MS: u32 = 10_000;
+/// Pictures a Live Photo's video can go with, in the order one is chosen when several share a name.
+const STILL_EXTENSIONS: [&str; 4] = ["heic", "heif", "jpg", "jpeg"];
+/// An iPhone writes `.MOV`; Google Photos' export names the video of a Live Photo `.MP4`.
+const VIDEO_EXTENSIONS: [&str; 2] = ["mov", "mp4"];
 /// A poster frame is a small JPEG (480 px long edge, tens of KB); anything near this is not one.
 const MAX_POSTER_BYTES: usize = 512 * 1024;
 
@@ -61,8 +68,13 @@ pub struct ImportReport {
     pub duplicates: Vec<PhotoId>,
     /// Files that are not media this app understands.
     pub skipped: Vec<PathBuf>,
+    /// How many of `skipped` each reason covers ("unrecognised file type (.psd)", "AVIF is not
+    /// supported yet"), so a report can say what was left out by format.
+    pub skipped_why: BTreeMap<String, usize>,
     /// Files that look like media but could not be read or decoded, with the reason.
     pub failed: Vec<(PathBuf, String)>,
+    /// Photos that were given a video by this run (Live Photos, motion photos): not new photos.
+    pub with_video: Vec<PhotoId>,
     /// Every file that is in the library after this run (imported or a duplicate), with its photo.
     pub by_path: Vec<(PathBuf, PhotoId)>,
 }
@@ -104,6 +116,105 @@ fn collect_files(paths: &[PathBuf], failed: &mut Vec<(PathBuf, String)>) -> Vec<
         }
     }
     out.into_iter().collect()
+}
+
+/// Whether a video is short enough to be the moving half of a Live Photo.
+fn is_companion_clip(r: &ImportResult) -> bool {
+    r.kind == MediaKind::Video && r.duration_ms.is_some_and(|d| d <= MAX_COMPANION_MS)
+}
+
+fn extension_of(path: &Path) -> Option<String> {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+}
+
+/// Files next to each other in `dir`, by lower-case name without extension.
+fn siblings(dir: &Path) -> HashMap<String, Vec<PathBuf>> {
+    let mut by_stem: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let hidden = entry.file_name().to_string_lossy().starts_with('.');
+        if hidden || !entry.file_type().is_ok_and(|t| t.is_file()) {
+            continue;
+        }
+        let path = entry.path();
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            by_stem
+                .entry(stem.to_ascii_lowercase())
+                .or_default()
+                .push(path);
+        }
+    }
+    by_stem
+}
+
+/// Videos that may be the moving half of a picture (`IMG_0001.MOV` next to `IMG_0001.HEIC`), each
+/// with its picture. Decided from the folder, not from this batch: a watched folder can hand the two
+/// over separately. Both files are added to `files` so a pair is always imported together; whether a
+/// video really is a companion (short enough) is decided once it is analysed.
+fn find_pairs(files: &mut Vec<PathBuf>) -> BTreeMap<PathBuf, PathBuf> {
+    let mut dirs: HashMap<PathBuf, HashMap<String, Vec<PathBuf>>> = HashMap::new();
+    let mut candidates: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut videos_of_stills: Vec<(PathBuf, String)> = vec![];
+    for f in files.iter() {
+        match extension_of(f).as_deref() {
+            Some(e) if VIDEO_EXTENSIONS.contains(&e) => {
+                candidates.insert(f.clone());
+            }
+            Some(e) if STILL_EXTENSIONS.contains(&e) => {
+                if let (Some(dir), Some(stem)) =
+                    (f.parent(), f.file_stem().and_then(|s| s.to_str()))
+                {
+                    videos_of_stills.push((dir.to_path_buf(), stem.to_ascii_lowercase()));
+                }
+            }
+            _ => {}
+        }
+    }
+    // A video may sit next to a picture that was handed over without it.
+    for (dir, stem) in videos_of_stills {
+        let group = dirs.entry(dir.clone()).or_insert_with(|| siblings(&dir));
+        for e in VIDEO_EXTENSIONS {
+            if let Some(v) = group
+                .get(&stem)
+                .into_iter()
+                .flatten()
+                .find(|p| extension_of(p).as_deref() == Some(e))
+            {
+                candidates.insert(v.clone());
+            }
+        }
+    }
+    let mut pairs = BTreeMap::new();
+    for video in candidates {
+        let (Some(dir), Some(stem)) = (video.parent(), video.file_stem().and_then(|s| s.to_str()))
+        else {
+            continue;
+        };
+        let group = dirs
+            .entry(dir.to_path_buf())
+            .or_insert_with(|| siblings(dir));
+        let still = STILL_EXTENSIONS.iter().find_map(|e| {
+            group
+                .get(&stem.to_ascii_lowercase())?
+                .iter()
+                .find(|p| extension_of(p).as_deref() == Some(e))
+        });
+        if let Some(still) = still {
+            pairs.insert(video, still.clone());
+        }
+    }
+    let have: BTreeSet<PathBuf> = files.iter().cloned().collect();
+    files.extend(
+        pairs
+            .iter()
+            .flat_map(|(v, s)| [v, s])
+            .filter(|p| !have.contains(*p))
+            .cloned(),
+    );
+    files.sort();
+    files.dedup();
+    pairs
 }
 
 fn rendition_ref(r: &Rendition, hash: Blake3Hash) -> BlobRef {
@@ -152,7 +263,9 @@ impl<L: LibraryStore> LibraryNode<L> {
         opts: ImportOptions,
     ) -> Result<ImportReport> {
         let mut report = ImportReport::default();
-        let files = collect_files(paths, &mut report.failed);
+        let mut files = collect_files(paths, &mut report.failed);
+        let pairs = find_pairs(&mut files);
+        let mut clips: HashMap<PathBuf, ImportResult> = HashMap::new();
         let total = files.len();
         let mut held: Vec<(Blake3Hash, BlobKind)> = vec![];
 
@@ -170,19 +283,19 @@ impl<L: LibraryStore> LibraryNode<L> {
                 Err(join) => report
                     .failed
                     .push((path, format!("analysis task failed: {join}"))),
-                Ok(Err(AnalyzeError::Unsupported(_))) => report.skipped.push(path),
+                Ok(Err(AnalyzeError::Unsupported(why))) => {
+                    *report.skipped_why.entry(why).or_default() += 1;
+                    report.skipped.push(path);
+                }
                 Ok(Err(e)) => report.failed.push((path, e.to_string())),
-                Ok(Ok(result)) => match self.ingest(&path, &result, &opts, &mut held).await {
-                    Ok(Outcome::Imported(id)) => {
-                        report.imported.push(id);
-                        report.by_path.push((path, id));
-                    }
-                    Ok(Outcome::Duplicate(id)) => {
-                        report.duplicates.push(id);
-                        report.by_path.push((path, id));
-                    }
-                    Err(e) => report.failed.push((path, format!("{e:#}"))),
-                },
+                // The moving half of a Live Photo waits for its picture: it is no item of its own.
+                Ok(Ok(result)) if pairs.contains_key(&path) && is_companion_clip(&result) => {
+                    clips.insert(path, result);
+                }
+                Ok(Ok(result)) => {
+                    self.ingest_into(&path, &result, &opts, &mut held, &mut report)
+                        .await
+                }
             }
             if held.len() >= HOLDINGS_BATCH {
                 self.publish_holdings(std::mem::take(&mut held)).await?;
@@ -201,6 +314,34 @@ impl<L: LibraryStore> LibraryNode<L> {
                     failed: report.failed.len(),
                 });
             }
+        }
+        // Live Photos: each clip goes with its picture, once that has an id.
+        for (video, result) in clips {
+            let photo = pairs.get(&video).and_then(|still| {
+                report
+                    .by_path
+                    .iter()
+                    .find(|(p, _)| p == still)
+                    .map(|(_, id)| *id)
+            });
+            let Some(photo) = photo else {
+                // The picture did not come in (skipped, damaged): the clip is a video like any other.
+                self.ingest_into(&video, &result, &opts, &mut held, &mut report)
+                    .await;
+                continue;
+            };
+            match self
+                .attach_clip(&video, &result, photo, &opts, &mut held)
+                .await
+            {
+                Ok(true) => report.with_video.push(photo),
+                Ok(false) => {}
+                Err(e) => {
+                    report.failed.push((video, format!("{e:#}")));
+                    continue;
+                }
+            }
+            report.by_path.push((video, photo));
         }
         self.publish_holdings(held).await?;
         if !report.imported.is_empty() {
@@ -248,6 +389,153 @@ impl<L: LibraryStore> LibraryNode<L> {
             .await?;
         self.publish_holdings(vec![(hash, BlobKind::Thumb)]).await?;
         Ok(true)
+    }
+
+    /// Ingest one analysed file and record the outcome in `report`; a motion photo's video goes in
+    /// with it.
+    async fn ingest_into(
+        &self,
+        path: &Path,
+        result: &ImportResult,
+        opts: &ImportOptions,
+        held: &mut Vec<(Blake3Hash, BlobKind)>,
+        report: &mut ImportReport,
+    ) {
+        let id = match self.ingest(path, result, opts, held).await {
+            Ok(Outcome::Imported(id)) => {
+                report.imported.push(id);
+                id
+            }
+            Ok(Outcome::Duplicate(id)) => {
+                report.duplicates.push(id);
+                id
+            }
+            Err(e) => {
+                report.failed.push((path.to_path_buf(), format!("{e:#}")));
+                return;
+            }
+        };
+        report.by_path.push((path.to_path_buf(), id));
+        if let Some(video) = &result.embedded_video {
+            // The picture is in; a video that cannot be kept does not undo that.
+            match self.attach_embedded(path, video, id, held).await {
+                Ok(true) => report.with_video.push(id),
+                Ok(false) => {}
+                Err(e) => warn!("the video in {} was not kept: {e:#}", path.display()),
+            }
+        }
+    }
+
+    /// Give `photo` the video `r` (a clip imported from its own file). `Ok(false)`: it had it already.
+    async fn attach_clip(
+        &self,
+        path: &Path,
+        r: &ImportResult,
+        photo: PhotoId,
+        opts: &ImportOptions,
+        held: &mut Vec<(Blake3Hash, BlobKind)>,
+    ) -> Result<bool> {
+        let _ingesting = self.inner.ingest.read().await;
+        let store = self.store();
+        if store
+            .motion(&photo)
+            .await?
+            .is_some_and(|m| m.video.hash == r.hash)
+        {
+            return Ok(false);
+        }
+        let blobs = self.node().blobs();
+        if !blobs.has(&r.hash).await? {
+            let stored = blobs.add_path(path, opts.mode, Protection::Library).await?;
+            anyhow::ensure!(
+                stored == r.hash,
+                "{} changed while it was being imported",
+                path.display()
+            );
+            if opts.mode == ImportMode::Reference {
+                blobs.protect(&r.hash, Protection::InPlace).await?;
+            }
+            held.push((r.hash, BlobKind::Motion));
+        }
+        self.put_motion(
+            photo,
+            BlobRef {
+                hash: r.hash,
+                size: r.size,
+                mime: r.mime.clone(),
+            },
+            r.duration_ms,
+            MotionSource::Paired,
+        )
+        .await?;
+        Ok(true)
+    }
+
+    /// Give `photo` the video found inside its file (a Samsung or Google motion photo): the bytes
+    /// are copied out into a blob of their own so a device can fetch and play it without the still.
+    async fn attach_embedded(
+        &self,
+        path: &Path,
+        video: &EmbeddedVideo,
+        photo: PhotoId,
+        held: &mut Vec<(Blake3Hash, BlobKind)>,
+    ) -> Result<bool> {
+        let _ingesting = self.inner.ingest.read().await;
+        let store = self.store();
+        // The photo's id is the hash of the whole file, so its video is always the same one.
+        if store.motion(&photo).await?.is_some() {
+            return Ok(false);
+        }
+        let (path, offset, len) = (path.to_path_buf(), video.offset, video.len);
+        let bytes = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<u8>> {
+            use std::io::{Read, Seek, SeekFrom};
+            let mut file = std::fs::File::open(path)?;
+            file.seek(SeekFrom::Start(offset))?;
+            let mut bytes = vec![0u8; usize::try_from(len).map_err(std::io::Error::other)?];
+            file.read_exact(&mut bytes)?;
+            Ok(bytes)
+        })
+        .await??;
+        let size = bytes.len() as u64;
+        let blobs = self.node().blobs();
+        let hash = Blake3Hash::of_bytes(&bytes);
+        if !blobs.has(&hash).await? {
+            blobs.add_bytes(bytes, Protection::Library).await?;
+            held.push((hash, BlobKind::Motion));
+        }
+        self.put_motion(
+            photo,
+            BlobRef {
+                hash,
+                size,
+                mime: "video/mp4".into(),
+            },
+            Some(video.duration_ms),
+            MotionSource::Embedded,
+        )
+        .await?;
+        Ok(true)
+    }
+
+    async fn put_motion(
+        &self,
+        photo: PhotoId,
+        video: BlobRef,
+        duration_ms: Option<u32>,
+        source: MotionSource,
+    ) -> Result<()> {
+        self.store()
+            .put_motion(MotionRecord {
+                photo,
+                video,
+                duration_ms: duration_ms.unwrap_or(0),
+                source,
+                // Set by the store.
+                made_by: self.device(),
+                hlc: Hlc::GENESIS,
+            })
+            .await?;
+        Ok(())
     }
 
     async fn ingest(

@@ -11,6 +11,10 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
   index shards every device holds. *Settings → Search* and `shoebox-keeper index` say how much is covered.
 - **People**: faces found and grouped on your own devices; name, merge, hide, *this is me*, "not Ana". On or off for
   the whole library.
+- **More formats**: GIF, WebP, BMP and TIFF photos (an animated GIF or WebP shows its first frame; the original plays
+  as it is), and 3GP, M4V, AVI, MPEG and Matroska videos, with their date and size read from the file. Samsung and
+  Google motion photos import as their JPEG. HEIC photos (iPhone, iCloud exports) import on macOS, Android (9 and later), Windows, Linux and with the keeper, and AVIF on macOS and Android (12 and later): read by the system on macOS and Android, by libheif and libde265 built into the others. An import says what it left out, by reason.
+- **Live Photos and motion photos** (F2.10): an iPhone's `.HEIC`/`.JPG` with its `.MOV` (or Google Photos' `.MP4`) imports as one photo with a video, and so does a Samsung or Google motion photo. The video is no item of its own; a *LIVE* badge marks the photo, the viewer plays it, and *live photos* is a search. Keepers hold the videos, a viewer streams them, and *Free up space* frees them with the originals.
 
 - From this version on, wire protocols, signing domains and on-disk files are kept compatible: see
   [docs/notes/formats.md](docs/notes/formats.md) and "Changing a format" in [CONTRIBUTING.md](CONTRIBUTING.md).

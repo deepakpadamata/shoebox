@@ -34,7 +34,7 @@ Each mockup screen lists the IDs it covers (see `design/README.md`).
 | F2.7 | Favorites | MVP | |
 | F2.8 | Delete → Recently Deleted (30 days) → purge | MVP | Tombstone syncs to all devices; blob GC after purge. |
 | F2.9 | Video support (playback + sync) | MVP | Originals streamed with verified range requests. |
-| F2.10 | Live Photos / RAW+JPEG pairs as one item | v1.x | |
+| F2.10 | Live Photos / RAW+JPEG pairs as one item | v1.x | Live Photos and Samsung/Google motion photos: done (A-109). RAW+JPEG pairs: not yet. |
 | F2.11 | Hide / private album (excluded from shares, maybe extra lock) | v1.x | |
 | F2.12 | Import from Google Takeout / iCloud export | v1.x | |
 

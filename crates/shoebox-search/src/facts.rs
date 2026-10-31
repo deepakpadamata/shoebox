@@ -15,8 +15,8 @@ use shoebox_core::ids::Timestamp;
 use shoebox_core::model::{AlbumId, PhotoId, PhotoRecord};
 use std::collections::{HashMap, HashSet};
 
-/// What the index keeps of a photo: derived from its record and nothing else, so every device
-/// derives the same facts.
+/// What the index keeps of a photo: derived from its record (and whether it has a video), so
+/// every device derives the same facts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PhotoFacts {
     pub id: PhotoId,
@@ -28,6 +28,9 @@ pub struct PhotoFacts {
     pub height: u32,
     pub favourite: bool,
     pub deleted: bool,
+    /// A Live Photo or motion photo: its record has a video (F2.10). Not in `PhotoRecord`: set
+    /// with [`PhotoFacts::with_live`].
+    pub live: bool,
     /// Latitude below the equator (for seasons); `None` without GPS.
     pub southern: Option<bool>,
     pub gps: Option<shoebox_core::model::Gps>,
@@ -50,9 +53,16 @@ impl PhotoFacts {
             height: e.height,
             favourite: rec.favorite.value,
             deleted: rec.deleted_at.value.is_some(),
+            live: false,
             southern: e.gps.map(|g| g.lat_e7 < 0),
             gps: e.gps,
         }
+    }
+
+    /// These facts, for a photo that has (or has not) a video.
+    pub fn with_live(mut self, live: bool) -> Self {
+        self.live = live;
+        self
     }
 
     pub fn is_video(&self) -> bool {
@@ -88,8 +98,7 @@ impl PhotoFacts {
             MediaKind::Screenshot => self.is_screenshot(),
             MediaKind::Selfie => self.is_selfie(),
             MediaKind::Raw => self.is_raw(),
-            // Live photos are not recorded yet.
-            MediaKind::Live => false,
+            MediaKind::Live => self.live,
         }
     }
 }
@@ -670,7 +679,7 @@ pub struct Snapshot {
 
 const MAGIC: &[u8; 4] = b"SBFX";
 /// Bumped whenever the encoding or what is derived changes; another version is rebuilt.
-pub const FACTS_VERSION: u8 = 1;
+pub const FACTS_VERSION: u8 = 2;
 
 /// `facts.idx`: magic, version, BLAKE3 of the payload, then the postcard-encoded snapshot.
 pub fn encode(s: &Snapshot) -> Vec<u8> {

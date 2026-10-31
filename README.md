@@ -108,6 +108,10 @@ site/            the static website and download page
 
 - **Rust** through [rustup](https://rustup.rs). `rust-toolchain.toml` pins `stable` with rustfmt and clippy, so
   rustup installs the right toolchain on the first `cargo` command.
+- **cmake** and a **C++ compiler**: the keeper and the Windows and Linux apps build libheif and libde265 from
+  `vendor/` for HEIC photos (`heic-static`; macOS uses the system's decoder). For the static Linux keeper
+  (`cargo zigbuild --release -p keeper --target x86_64-unknown-linux-musl`) the C++ compiler is zig, which
+  `uv tool install cargo-zigbuild` brings.
 - **Node.js 22** and npm, for the app's UI.
 - **Python 3**, for the CI scripts (licence notices, dependency guard, site build).
 - **Linux only:** the webview and tray libraries the desktop app links against:

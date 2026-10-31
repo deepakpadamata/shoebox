@@ -21,6 +21,8 @@ shoebox-core.workspace = true
 shoebox-node.workspace = true
 shoebox-search.workspace = true
 shoebox-ml.workspace = true
+# HEIC and AVIF-free HEVC decoding, built in and static: a keeper needs no libheif on the machine (I1-02).
+shoebox-media = { workspace = true, features = ["heic-static"] }
 shoebox-store.workspace = true
 tokio = { workspace = true, features = ["signal", "net", "io-util", "fs"] }
 anyhow.workspace = true

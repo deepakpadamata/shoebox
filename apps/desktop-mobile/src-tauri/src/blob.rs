@@ -74,6 +74,18 @@ pub async fn serve(
                 range: None,
             }));
     }
+    if kind == "motion" {
+        // The video of a Live Photo: served like an original, and "not here" until it is fetched
+        // (the viewer asks with `fetch_now`, as it does for an original).
+        let motion = core
+            .motion(&photo)
+            .await?
+            .ok_or_else(|| anyhow!("this photo has no video"))?;
+        if core.blobs().size(&motion.video.hash).await?.is_none() {
+            return Ok(None);
+        }
+        return read_blob(core, &motion.video.hash, &motion.video.mime, range).await;
+    }
     let (mut blob, mut bk) = match kind {
         "thumb" => (&rec.thumb, BlobKind::Thumb),
         "preview" => (&rec.preview, BlobKind::Preview),

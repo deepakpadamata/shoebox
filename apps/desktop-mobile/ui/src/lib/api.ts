@@ -51,7 +51,7 @@ export type {
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, FaceOut, PeopleList, PersonCard, SearchChip, SearchIndexer, SearchPage, SearchStatus, SearchSuggestion, Settings, TransferItem, Transfers,
 };
 
-export type BlobKind = 'thumb' | 'preview' | 'original' | 'poster';
+export type BlobKind = 'thumb' | 'preview' | 'original' | 'poster' | 'motion';
 
 const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -103,6 +103,12 @@ export function videoUrl(id: string, album?: string): string {
   if (!mediaBase) return blobUrl(id, 'original', album);
   const kind = album ? `album:${album}:original` : 'original';
   return `${mediaBase}/blob/${id}?kind=${kind}`;
+}
+
+/** Where a `<video>` loads the video of a Live Photo or motion photo from. */
+export function motionUrl(id: string): string {
+  if (!mediaBase) return blobUrl(id, 'motion');
+  return `${mediaBase}/blob/${id}?kind=motion`;
 }
 
 /** Subscribe to app events; returns the unsubscribe function. */

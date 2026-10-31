@@ -55,7 +55,8 @@ Each signature or keyed hash starts with its domain, so one can never be replaye
 | Loro capability payload | version byte 1 (`CAPABILITY_VERSION`); `[2, identity id]` after an epoch change |
 | people records (S1-18) | `persons/<id hex>` → `StateEntry::Person` (name, hidden, merged into: last writer wins per field) and `facelabels/<photo hex>/<face key hex>` → `StateEntry::FaceLabel` (`is` last writer wins, `is_not` add-wins). Appended after the index records; the face key is the box on a 1/64 grid of the photo (4 bytes) |
 | index records (S1-06) | `index/<blob hex>` → `StateEntry::IndexShard` (immutable; any member but a Viewer) and `indexers/<device hex>` → `StateEntry::IndexerStatus` (only that device). Both **appended** to `StateEntry`, so 0.1.0 rejects them as undecodable (at `debug`), keeps them in its document and passes them on (`shoebox-store-loro/tests/index_records.rs`) |
-| blob kinds | `BlobKind::Index` appended (holdings of index shards) |
+| blob kinds | `BlobKind::Index` appended (holdings of index shards) and `BlobKind::Motion` (holdings of a Live Photo's video; a video is never counted as a copy of the original) |
+| motion records (F2.10) | `motion/<photo hex>` → `StateEntry::Motion` (`MotionRecord`: photo, video `BlobRef`, `duration_ms`, `source` Paired or Embedded, author, HLC). One per photo, the later (HLC, author) wins; written by any member but a Viewer, for a photo that exists. Appended to `StateEntry` on 2026-10-31, before the 0.1.0 release; a build that does not know it keeps it and passes it on, and shows the still. The video is a blob of its own (`lib/<hash>`): the file next to the picture (Apple's `.MOV`, Google's `.MP4`) or the MP4 cut out of a Samsung or Google motion photo, whose original stays the whole file |
 | index shard blobs (S1-06) | `"SBIX"`, version byte 1 (`shoebox_search::shard::VERSION`), kind byte (`ShardKind`: 0 vec8, 1 vec1, 2 text, 3 faces), `ModelId` (32), dims u16, count u32, `replaces` (u16 n + n × 32), sorted photo ids, rows; layout in `crates/shoebox-search/src/shard.rs`. At most 1,024 photos. Immutable and content addressed: a new version is a new kind of blob, never a rewrite |
 | shared-album records (meta, items, members, events, people) | `[version byte] ++ postcard(body)`, version 1. `people/<device>` (`AlbumEntry::Person`, which person a device belongs to) was appended to the enum on 2026-10-27, before the 0.1.0 release: builds from before that skip it |
 
@@ -115,6 +116,6 @@ Node data dir (the keeper storage dir is one, plus `keeper.json`, `keeper.lock`,
 | `search/indexer-since` | when this device first indexed (milliseconds), where the 48-hour takeover counts from (S1-11) |
 | `search.json` (app data folder) | this device's search settings (`{"index": bool}`) |
 | blob tag `idx/<hash>` | search data this device keeps: index shards, the people snapshot, model files (S1-07) |
-| `search/facts.idx` | the search facts index (S1-03): `"SBFX"`, version byte (`FACTS_VERSION`, 1), BLAKE3 of the payload, postcard snapshot. **A derived cache:** deleted, damaged or of another version, it is rebuilt from the library, so it needs no migration and no layout bump |
+| `search/facts.idx` | the search facts index (S1-03): `"SBFX"`, version byte (`FACTS_VERSION`, 2: facts gained `live`), BLAKE3 of the payload, postcard snapshot. **A derived cache:** deleted, damaged or of another version, it is rebuilt from the library, so it needs no migration and no layout bump |
 
 Layout history: 0 = no marker, 1 = marker (M6-05), 2 = 0.1.0 (epoch notice file).

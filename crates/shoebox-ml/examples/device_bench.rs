@@ -4,7 +4,11 @@
 //!
 //! ```text
 //! cargo run --release -p shoebox-ml --example device_bench -- <models dir> <photos dir> [scratch dir]
+//! device_bench --idle <scratch dir>
 //! ```
+//!
+//! The first run leaves a 100k-photo `bench-facts.idx` and `bench-vec.bin` in the scratch dir;
+//! `--idle`, in a fresh process, loads them as the app does at start and says what they hold.
 
 use anyhow::{Context, Result};
 use image::imageops::FilterType;
@@ -17,7 +21,7 @@ use shoebox_search::calendar::{Date, Zone};
 use shoebox_search::clip_tokenizer::ClipTokenizer;
 use shoebox_search::encoder::{normalize, ImageEncoder, Rgb, TextEncoder};
 use shoebox_search::faces::{FaceDetector, FaceEmbedder};
-use shoebox_search::facts::{encode, FactsIndex, Field, PhotoFacts};
+use shoebox_search::facts::{decode, encode, FactsIndex, Field, PhotoFacts};
 use shoebox_search::query::{parse, ParseContext};
 use shoebox_search::shard::{sign_bits, Vec8};
 use shoebox_search::vectors::{RowIn, VectorIndex};
@@ -86,7 +90,7 @@ fn blob(tag: &str) -> BlobRef {
     }
 }
 
-fn facts() {
+fn facts(scratch: &Path) -> Result<()> {
     let mut ix = FactsIndex::new();
     let start = Date::new(2005, 1, 1).days();
     let cams = ["Canon EOS R5", "iPhone 15 Pro", "Pixel 8", "X-T5"];
@@ -120,7 +124,9 @@ fn facts() {
         }
     }
     let built = t.elapsed();
-    let size = encode(&ix.snapshot()).len();
+    let bytes = encode(&ix.snapshot());
+    let size = bytes.len();
+    std::fs::write(scratch.join("bench-facts.idx"), &bytes)?;
     let cx = ParseContext {
         now: Zone::UTC.start_of(Date::new(2026, 10, 30)),
         zone: Zone::UTC,
@@ -149,6 +155,7 @@ fn facts() {
         size as f64 / 1e6,
         rss_mb()
     );
+    Ok(())
 }
 
 fn vectors(scratch: &Path) -> Result<()> {
@@ -191,7 +198,6 @@ fn vectors(scratch: &Path) -> Result<()> {
         "meaning: scoring {PHOTOS} vectors p50 {p50:.1} ms p95 {p95:.1} ms, file {:.1} MB, rss {before} MB",
         size as f64 / 1e6
     );
-    std::fs::remove_file(&path)?;
     Ok(())
 }
 
@@ -216,13 +222,35 @@ fn photos(dir: &Path) -> Result<Vec<image::DynamicImage>> {
         .collect()
 }
 
+/// What search holds while idle: the facts index and the meaning index loaded at start.
+fn idle(scratch: &Path) -> Result<()> {
+    let base = rss_mb();
+    let bytes = std::fs::read(scratch.join("bench-facts.idx"))?;
+    let ix = FactsIndex::from_snapshot(decode(&bytes).context("bench-facts.idx")?);
+    drop(bytes);
+    let facts = rss_mb();
+    let v = VectorIndex::open(&scratch.join("bench-vec.bin")).context("bench-vec.bin")?;
+    let vectors = rss_mb();
+    println!(
+        "idle at {PHOTOS} photos: baseline {base} MB, facts index +{} MB, meaning index +{} MB, total +{} MB",
+        facts.saturating_sub(base),
+        vectors.saturating_sub(facts),
+        vectors.saturating_sub(base)
+    );
+    drop((ix, v));
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args: Vec<PathBuf> = std::env::args().skip(1).map(PathBuf::from).collect();
+    if args.first().is_some_and(|a| a.as_os_str() == "--idle") {
+        return idle(args.get(1).context("scratch dir")?);
+    }
     let models = args.first().context("models dir")?;
     let photo_dir = args.get(1).context("photos dir")?;
     let scratch = args.get(2).cloned().unwrap_or_else(std::env::temp_dir);
     println!("baseline rss {} MB", rss_mb());
-    facts();
+    facts(&scratch)?;
     vectors(&scratch)?;
 
     let tok = ClipTokenizer::from_merges(include_str!("../../shoebox-search/data/clip-merges.txt"))

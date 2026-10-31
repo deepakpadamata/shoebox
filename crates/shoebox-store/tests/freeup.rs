@@ -340,3 +340,70 @@ async fn without_a_keeper_previews_are_kept() {
     assert!(nodes[0].release_previews().await.unwrap().is_empty());
     c.shutdown().await;
 }
+
+/// F2.10: freeing a Live Photo's original frees its video too, and the dry run counts both.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_live_photos_video_is_freed_with_its_original() {
+    let c = Cluster::with_roles(&[Role::Companion, Role::Keeper, Role::Keeper])
+        .await
+        .unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    let phone = &nodes[0];
+    phone.set_keep_rules(0, false).unwrap();
+    let samples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/samples");
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("live");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(samples.join("photo-gps.jpg"), dir.join("IMG_0001.JPG")).unwrap();
+    std::fs::copy(samples.join("clip.mov"), dir.join("IMG_0001.MOV")).unwrap();
+    let report = phone
+        .import_paths(&[dir], ImportOptions::default())
+        .await
+        .unwrap();
+    let photo = report.imported[0];
+    let video = phone.store().motion(&photo).await.unwrap().unwrap().video;
+    let sizes = phone.node().blobs().size(&photo).await.unwrap().unwrap() + video.size;
+    for n in &nodes[1..] {
+        n.start_fetcher(fast());
+    }
+
+    // Both keepers hold the original and the video, and the phone has heard of it.
+    wait_until(Duration::from_secs(60), || async {
+        let holders = phone.store().holders(&video.hash).await.unwrap();
+        phone.copy_count(&photo).await.unwrap() == 3
+            && holders
+                .iter()
+                .filter(|h| h.kind == shoebox_core::model::BlobKind::Motion)
+                .count()
+                == 3
+    })
+    .await
+    .expect("keepers fetch the original and the video and say so");
+
+    let dry = phone.free_up_space(true).await.unwrap();
+    assert_eq!(dry.photos, vec![photo]);
+    assert_eq!(dry.bytes, sizes, "the original and its video");
+
+    let done = phone.free_up_space(false).await.unwrap();
+    assert_eq!(done.bytes, dry.bytes);
+    wait_until(Duration::from_secs(20), || async {
+        !phone.node().blobs().has(&photo).await.unwrap()
+            && !phone.node().blobs().has(&video.hash).await.unwrap()
+    })
+    .await
+    .expect("the original and the video are collected");
+    // The record stays, and the keepers know the phone let go of the video.
+    assert!(phone.store().motion(&photo).await.unwrap().is_some());
+    wait_until(Duration::from_secs(20), || async {
+        nodes[1]
+            .store()
+            .holders(&video.hash)
+            .await
+            .unwrap()
+            .iter()
+            .all(|h| h.device != phone.device())
+    })
+    .await
+    .expect("the phone retracted its holding of the video");
+    c.shutdown().await;
+}

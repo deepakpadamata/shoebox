@@ -316,3 +316,185 @@ fn medium_corpus_imports_at_20_photos_per_second_or_better() {
     eprintln!("medium corpus: {n} photos at {rate:.0} photos/s");
     assert!(rate >= 20.0, "{rate:.0} photos/s");
 }
+
+/// I1-03: stills from messaging apps, scanners and old phones.
+#[test]
+fn other_still_formats_yield_renditions() {
+    for (name, mime, size) in [
+        ("photo.webp", "image/webp", (160, 120)),
+        ("photo.tif", "image/tiff", (160, 120)),
+        ("photo.bmp", "image/bmp", (64, 48)),
+        ("anim.gif", "image/gif", (160, 120)),
+    ] {
+        let r = analyze(&samples().join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            (r.kind, r.mime.as_str()),
+            (MediaKind::Photo, mime),
+            "{name}"
+        );
+        assert_eq!((r.exif.width, r.exif.height), size, "{name}");
+        let thumb = r.thumb.expect("thumb");
+        assert_eq!(decode(&thumb.bytes).dimensions(), (256, 256), "{name}");
+        assert_eq!(
+            decode(&r.preview.unwrap().bytes).dimensions(),
+            size,
+            "{name}"
+        );
+    }
+    // cwebp carries the EXIF over, so the WebP keeps its date and place.
+    let webp = analyze(&samples().join("photo.webp")).unwrap();
+    assert_eq!(webp.taken_at, Timestamp(1_717_243_200_000));
+    assert_eq!(webp.taken_at_source, TakenAtSource::Exif);
+    assert!(webp.exif.gps.is_some());
+}
+
+/// I1-03: the containers of older phones and cameras, read for their size and date.
+#[test]
+fn other_video_containers_yield_metadata() {
+    const NOON: Timestamp = Timestamp(1_717_243_200_000);
+    for (name, mime, taken_at) in [
+        ("clip.3gp", "video/3gpp", Some(NOON)),
+        ("clip.m4v", "video/x-m4v", Some(NOON)),
+        // AVI's INFO date has no time of day.
+        (
+            "clip.avi",
+            "video/x-msvideo",
+            Some(Timestamp(1_717_200_000_000)),
+        ),
+        ("clip.mkv", "video/x-matroska", Some(NOON)),
+        // MPEG program streams carry no date: the file's own time is used.
+        ("clip.mpg", "video/mpeg", None),
+    ] {
+        let r = analyze(&samples().join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            (r.kind, r.mime.as_str()),
+            (MediaKind::Video, mime),
+            "{name}"
+        );
+        assert_eq!((r.exif.width, r.exif.height), (176, 144), "{name}");
+        match taken_at {
+            Some(t) => assert_eq!(
+                (r.taken_at, r.taken_at_source),
+                (t, TakenAtSource::Exif),
+                "{name}"
+            ),
+            None => assert_eq!(r.taken_at_source, TakenAtSource::FileMtime, "{name}"),
+        }
+        assert!(
+            r.thumb.is_none(),
+            "{name}: a video tile until poster frames"
+        );
+    }
+}
+
+/// Samsung and Google motion photos are JPEGs with the video appended after the picture.
+#[test]
+fn a_motion_photo_is_a_jpeg_with_its_video_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let jpeg = std::fs::read(samples().join("photo-gps.jpg")).unwrap();
+    let clip = std::fs::read(samples().join("clip.mp4")).unwrap();
+    let mut bytes = jpeg.clone();
+    bytes.extend(&clip);
+    let path = write(dir.path(), "PXL_20240601_120000000.MP.jpg", &bytes);
+    let r = analyze(&path).unwrap();
+    assert_eq!((r.kind, r.mime.as_str()), (MediaKind::Photo, "image/jpeg"));
+    assert_eq!((r.exif.width, r.exif.height), (640, 480));
+    assert_eq!(
+        r.hash,
+        Blake3Hash::of_bytes(&bytes),
+        "the whole file is the original"
+    );
+    let video = r.embedded_video.expect("the appended video is found");
+    assert_eq!(
+        (video.offset, video.len),
+        (jpeg.len() as u64, clip.len() as u64)
+    );
+    assert!((1_900..=2_100).contains(&video.duration_ms), "{video:?}");
+    let start = video.offset as usize;
+    assert_eq!(&bytes[start + 4..start + 8], b"ftyp");
+
+    // Something after the video does not change where it ends.
+    let mut more = bytes.clone();
+    more.extend([0u8; 300]);
+    let r = analyze(&write(dir.path(), "padded.jpg", &more)).unwrap();
+    assert_eq!(r.embedded_video.unwrap().len, clip.len() as u64);
+}
+
+/// Gain maps and vendor trailers follow a JPEG too; only a whole movie counts as a video.
+#[test]
+fn trailers_that_are_not_videos_are_not_motion() {
+    let dir = tempfile::tempdir().unwrap();
+    let jpeg = std::fs::read(samples().join("photo-gps.jpg")).unwrap();
+    let plain = analyze(&write(dir.path(), "plain.jpg", &jpeg)).unwrap();
+    assert!(plain.embedded_video.is_none());
+
+    let mut gain_map = jpeg.clone();
+    gain_map.extend(jpeg.iter().take(5_000));
+    let r = analyze(&write(dir.path(), "gain.jpg", &gain_map)).unwrap();
+    assert!(r.embedded_video.is_none());
+
+    // The bytes "ftyp" and a box size, but no movie behind them.
+    let mut fake = jpeg.clone();
+    fake.extend([0u8; 2_000]);
+    fake.extend(&[0, 0, 0, 24]);
+    fake.extend(b"ftypisom\0\0\0\0isomiso2");
+    fake.extend([7u8; 2_000]);
+    let r = analyze(&write(dir.path(), "fake.jpg", &fake)).unwrap();
+    assert!(r.embedded_video.is_none());
+
+    // A cut-off video is not a whole one.
+    let clip = std::fs::read(samples().join("clip.mp4")).unwrap();
+    let mut cut = jpeg;
+    cut.extend(&clip[..clip.len() / 2]);
+    let r = analyze(&write(dir.path(), "cut.jpg", &cut)).unwrap();
+    assert!(r.embedded_video.is_none());
+}
+
+#[test]
+fn videos_report_how_long_they_are() {
+    for (name, ms) in [
+        ("clip.mp4", 2_000),
+        ("clip.mov", 2_000),
+        ("clip.3gp", 1_000),
+        ("clip.m4v", 1_000),
+    ] {
+        let r = analyze(&samples().join(name)).unwrap();
+        let got = r
+            .duration_ms
+            .unwrap_or_else(|| panic!("{name}: no duration"));
+        assert!(got.abs_diff(ms) <= 100, "{name}: {got} ms, not about {ms}");
+    }
+    assert!(analyze(&samples().join("photo-gps.jpg"))
+        .unwrap()
+        .duration_ms
+        .is_none());
+}
+
+#[test]
+fn text_that_starts_like_a_bitmap_is_not_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = write(dir.path(), "BM.txt", b"BMW owners' club minutes, 2019");
+    assert!(matches!(analyze(&text), Err(AnalyzeError::Unsupported(_))));
+}
+
+/// I1-02 with libheif, the decoder of the Linux keeper and Windows.
+#[cfg(feature = "heic")]
+#[test]
+fn heic_decodes_with_libheif() {
+    let r = analyze(&samples().join("photo.heic")).unwrap();
+    assert_eq!((r.kind, r.mime.as_str()), (MediaKind::Photo, "image/heic"));
+    assert_eq!((r.exif.width, r.exif.height), (640, 480));
+    assert_eq!(r.taken_at, Timestamp(1_717_243_200_000));
+    assert!(r.exif.gps.is_some());
+    assert_eq!(decode(&r.thumb.unwrap().bytes).dimensions(), (256, 256));
+}
+
+/// The static build has no AV1 decoder: an AVIF is skipped with its reason, not reported broken.
+#[cfg(feature = "heic-static")]
+#[test]
+fn avif_is_skipped_by_a_build_without_an_av1_decoder() {
+    match analyze(&samples().join("photo.avif")) {
+        Err(AnalyzeError::Unsupported(why)) => assert!(why.contains("cannot decode"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+}

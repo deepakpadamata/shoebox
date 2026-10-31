@@ -15,7 +15,8 @@ use crate::hlc::Hlc;
 use crate::ids::{Blake3Hash, EndpointId, Timestamp};
 use crate::model::{
     AdminCert, AlbumId, AlbumMeta, BlobKind, DeviceCert, FaceLabel, Holding, IndexShard,
-    IndexerStatus, Member, MemberRole, Person, PersonId, PhotoId, PhotoRecord, SharedItem,
+    IndexerStatus, Member, MemberRole, MotionRecord, Person, PersonId, PhotoId, PhotoRecord,
+    SharedItem,
 };
 use async_trait::async_trait;
 use futures::stream::BoxStream;
@@ -146,6 +147,8 @@ pub enum Change {
     IndexChanged,
     /// A person or a face label arrived or was written (S1-18).
     PeopleChanged,
+    /// A photo got (or was given another) video: a Live Photo or motion photo (F2.10).
+    MotionChanged(PhotoId),
     RemoteSyncProgress {
         peer: EndpointId,
         done: u64,
@@ -382,6 +385,19 @@ pub trait LibraryStore: Send + Sync + 'static {
     /// Write a setting with a fresh HLC. **Last writer wins** per key, on every replica. An invalid
     /// key is `Invalid`; the value is opaque bytes (callers define the encoding).
     async fn put_setting(&self, key: &str, value: Vec<u8>) -> Result<()>;
+
+    // ----- Live Photos and motion photos (F2.10) -----
+
+    /// Record the video that goes with `motion.photo` (`made_by` and `hlc` are set by the store).
+    /// The photo must exist (`NotFound` otherwise). Writing the same video again changes nothing;
+    /// another video replaces it, on every replica alike.
+    async fn put_motion(&self, motion: MotionRecord) -> Result<()>;
+
+    /// The video of one photo, if it has one.
+    async fn motion(&self, photo: &PhotoId) -> Result<Option<MotionRecord>>;
+
+    /// Every motion record, in photo order.
+    async fn motions(&self) -> Result<Vec<MotionRecord>>;
 
     // ----- search index (S1-06) -----
 

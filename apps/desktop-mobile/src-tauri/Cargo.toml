@@ -75,6 +75,11 @@ getrandom = "0.3"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"], optional = true }
 
+# HEIC where the system has no decoder: libheif and libde265 built in, statically (I1-02). macOS uses
+# ImageIO (heic_macos.rs) and Android its own decoder.
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+shoebox-media = { workspace = true, features = ["heic-static"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"], optional = true }
 # The share picker (`share.rs`); the same versions Tauri already builds.

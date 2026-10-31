@@ -20,4 +20,11 @@ object NativeBridge {
      */
     @JvmStatic
     external fun runIndex(dataDir: String, budgetSecs: Int, backend: PhotoBackend): String
+
+    /**
+     * Hand Rust the decoder it reads HEIC and AVIF with (`HeifDecoder`): call it once per process,
+     * before anything imports or shows a picture. Calling it again changes nothing.
+     */
+    @JvmStatic
+    external fun registerImageDecoder(decoder: HeifDecoder)
 }

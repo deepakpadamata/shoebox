@@ -147,6 +147,8 @@ async fn unsupported_and_broken_files_do_not_stop_the_import() {
     std::fs::copy(samples.join("photo-gps.jpg"), dir.join("a.jpg")).unwrap();
     std::fs::copy(samples.join("screenshot.png"), dir.join("sub/b.png")).unwrap();
     std::fs::write(dir.join("notes.txt"), b"not a photo").unwrap();
+    std::fs::copy(samples.join("photo.webp"), dir.join("sub/c.webp")).unwrap();
+    std::fs::copy(samples.join("clip.avi"), dir.join("sub/d.avi")).unwrap();
     std::fs::write(dir.join(".hidden.jpg"), b"hidden files are ignored").unwrap();
     let good = std::fs::read(samples.join("photo-gps.jpg")).unwrap();
     std::fs::write(dir.join("cut.jpg"), &good[..good.len() / 3]).unwrap();
@@ -155,8 +157,12 @@ async fn unsupported_and_broken_files_do_not_stop_the_import() {
         r.ln.import_paths(std::slice::from_ref(&dir), ImportOptions::default())
             .await
             .unwrap();
-    assert_eq!(report.imported.len(), 2, "{report:?}");
+    assert_eq!(report.imported.len(), 4, "{report:?}");
     assert_eq!(report.skipped, vec![dir.join("notes.txt")]);
+    assert_eq!(
+        report.skipped_why.into_iter().collect::<Vec<_>>(),
+        vec![("unrecognised file type (.txt)".to_string(), 1)]
+    );
     assert_eq!(report.failed.len(), 1);
     assert_eq!(report.failed[0].0, dir.join("cut.jpg"));
     assert!(

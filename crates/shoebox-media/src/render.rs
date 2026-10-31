@@ -14,21 +14,21 @@ pub const PREVIEW_LONG_EDGE: u32 = 2048;
 /// accept that. Walk the file's own structure and require that the first image ends with an
 /// end-of-image marker. Anything after it is fine: phones append gain maps, motion-photo videos
 /// and vendor trailers (so "the file ends with FFD9" is not the test).
-fn jpeg_is_complete(bytes: &[u8]) -> bool {
+pub(crate) fn jpeg_image_end(bytes: &[u8]) -> Option<usize> {
     let mut i = 2; // after SOI
     while i + 1 < bytes.len() {
         if bytes[i] != 0xFF {
             // Entropy-coded data between markers is handled below; here it means damage.
-            return false;
+            return None;
         }
         let m = bytes[i + 1];
         match m {
             0xFF => i += 1,
-            0xD9 => return true,
+            0xD9 => return Some(i + 2),
             0x01 | 0xD0..=0xD8 => i += 2,
             _ => {
                 if i + 3 >= bytes.len() {
-                    return false;
+                    return None;
                 }
                 let len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
                 i += 2 + len;
@@ -47,7 +47,40 @@ fn jpeg_is_complete(bytes: &[u8]) -> bool {
             }
         }
     }
-    false
+    None
+}
+
+/// System decoders accept a cut-off HEIC and return a partly grey picture, like JPEG decoders
+/// do. HEIC and AVIF are ISO box files: the top-level boxes must follow one another and end
+/// exactly at the end of the file (a cut lands inside `mdat`, whose size then points past it).
+fn bmff_is_complete(bytes: &[u8]) -> bool {
+    let mut pos = 0usize;
+    while pos < bytes.len() {
+        let Some(head) = bytes.get(pos..pos + 8) else {
+            return false;
+        };
+        let size = match u32::from_be_bytes([head[0], head[1], head[2], head[3]]) {
+            0 => return true, // runs to the end of the file
+            1 => match bytes.get(pos + 8..pos + 16) {
+                Some(b) => u64::from_be_bytes(b.try_into().expect("8 bytes")),
+                None => return false,
+            },
+            n => u64::from(n),
+        };
+        let Some(end) = usize::try_from(size)
+            .ok()
+            .and_then(|s| pos.checked_add(s))
+            .filter(|end| *end <= bytes.len() && size >= 8)
+        else {
+            return false;
+        };
+        pos = end;
+    }
+    true
+}
+
+fn jpeg_is_complete(bytes: &[u8]) -> bool {
+    jpeg_image_end(bytes).is_some()
 }
 
 pub fn decode(bytes: &[u8], format: ImageFormat) -> Result<DynamicImage, AnalyzeError> {
@@ -60,10 +93,48 @@ pub fn decode(bytes: &[u8], format: ImageFormat) -> Result<DynamicImage, Analyze
         .map_err(|e| AnalyzeError::Decode(e.to_string()))
 }
 
-#[cfg(feature = "heic")]
+/// A HEIC/AVIF decoder the platform provides (macOS ImageIO), registered by the app at start-up.
+/// It returns the picture upright, with the file's own rotation and mirroring applied (as libheif
+/// does), so the EXIF orientation is never applied on top.
+pub trait PlatformDecoder: Send + Sync {
+    fn decode(&self, bytes: &[u8]) -> Result<DynamicImage, AnalyzeError>;
+}
+
+static PLATFORM: std::sync::OnceLock<Box<dyn PlatformDecoder>> = std::sync::OnceLock::new();
+
+/// Use `decoder` for HEIC and AVIF from now on, ahead of libheif. Only the first call counts.
+pub fn set_platform_decoder(decoder: Box<dyn PlatformDecoder>) {
+    let _ = PLATFORM.set(decoder);
+}
+
+/// HEIC and AVIF: the platform's decoder when one is registered, else libheif (feature `heic`),
+/// else the file is reported as unsupported.
 pub fn decode_heic(bytes: &[u8]) -> Result<DynamicImage, AnalyzeError> {
+    if !bmff_is_complete(bytes) {
+        return Err(AnalyzeError::Decode(
+            "truncated HEIC/AVIF (a box runs past the end of the file)".into(),
+        ));
+    }
+    match PLATFORM.get() {
+        Some(platform) => platform.decode(bytes),
+        None => decode_libheif(bytes),
+    }
+}
+
+#[cfg(feature = "heic")]
+fn decode_libheif(bytes: &[u8]) -> Result<DynamicImage, AnalyzeError> {
+    use libheif_rs::HeifErrorCode;
     use libheif_rs::{ColorSpace, HeifContext, LibHeif, RgbChroma};
-    let err = |e: libheif_rs::HeifError| AnalyzeError::Decode(e.to_string());
+    // A codec this build lacks (AV1 in a static build) is a file to skip, not a broken one.
+    let err = |e: libheif_rs::HeifError| match e.code {
+        // Plugins are not loaded in our builds, so this one means "no decoder for this codec".
+        HeifErrorCode::UnsupportedFeature
+        | HeifErrorCode::UnsupportedFileType
+        | HeifErrorCode::PluginLoadingError => {
+            AnalyzeError::Unsupported(format!("this build cannot decode it ({})", e.message))
+        }
+        _ => AnalyzeError::Decode(e.to_string()),
+    };
     let lib = LibHeif::new();
     let ctx = HeifContext::read_from_bytes(bytes).map_err(err)?;
     let handle = ctx.primary_image_handle().map_err(err)?;
@@ -85,7 +156,7 @@ pub fn decode_heic(bytes: &[u8]) -> Result<DynamicImage, AnalyzeError> {
 }
 
 #[cfg(not(feature = "heic"))]
-pub fn decode_heic(_bytes: &[u8]) -> Result<DynamicImage, AnalyzeError> {
+fn decode_libheif(_bytes: &[u8]) -> Result<DynamicImage, AnalyzeError> {
     Err(AnalyzeError::Unsupported(
         "HEIC support is not compiled in (enable the `heic` feature)".into(),
     ))

@@ -11,9 +11,10 @@ use crate::config::NodeConfig;
 use crate::library_node::LibraryNode;
 use anyhow::{anyhow, bail, Result};
 use shoebox_core::ids::{Blake3Hash, EndpointId, Timestamp};
-use shoebox_core::model::{BlobKind, BlobRef, PhotoId, PhotoRecord};
+use shoebox_core::model::{BlobKind, BlobRef, MotionRecord, PhotoId, PhotoRecord};
 use shoebox_core::policy::{
-    fetch_plan, queue_order, rank_holders, Candidate, PathQuality, PlanContext, QueuedFetch,
+    fetch_plan, motion_plan, queue_order, rank_holders, Candidate, PathQuality, PlanContext,
+    QueuedFetch,
 };
 use shoebox_core::store::{LibraryStore, Page, TimeRange};
 use std::collections::{HashMap, HashSet};
@@ -194,6 +195,13 @@ impl<L: LibraryStore> LibraryNode<L> {
                 item,
             });
         }
+        let motions: std::collections::HashMap<PhotoId, MotionRecord> = self
+            .store()
+            .motions()
+            .await?
+            .into_iter()
+            .map(|m| (m.photo, m))
+            .collect();
         for rec in photos {
             let own_below = rec.imported_by == self.device()
                 && self
@@ -211,7 +219,11 @@ impl<L: LibraryStore> LibraryNode<L> {
                 kept_favorite: config.keep_favorites && rec.favorite.value,
                 holds_original: self.node().blobs().kept(&rec.original.hash).await?,
             };
-            for item in fetch_plan(role, &rec, &ctx) {
+            let video = motions
+                .get(&rec.id)
+                .map(|m| motion_plan(role, m, &ctx))
+                .unwrap_or_default();
+            for item in fetch_plan(role, &rec, &ctx).into_iter().chain(video) {
                 if !self.node().blobs().has(&item.blob.hash).await? {
                     queue.push(QueuedFetch {
                         photo: rec.id,
@@ -318,6 +330,13 @@ impl<L: LibraryStore> LibraryNode<L> {
             BlobKind::Original => rec.original.clone(),
             BlobKind::Preview => rec.preview.clone(),
             BlobKind::Thumb => rec.thumb.clone(),
+            BlobKind::Motion => {
+                self.store()
+                    .motion(photo)
+                    .await?
+                    .ok_or_else(|| anyhow!("photo {photo} has no video"))?
+                    .video
+            }
             BlobKind::Index => bail!("index shards are not blobs of a photo"),
         };
         let blob = blob_ref.hash;

@@ -171,6 +171,23 @@ DATA = [
 ]
 
 
+# C and C++ libraries built into the apps from vendored source (I1-02). Their notices sit in the
+# vendored trees, not at the top of a crate, so they are named here. Both are LGPL-3.0: the whole
+# source of the app (AGPL-3.0) and these libraries, unmodified, is public, and a build can relink them.
+BUNDLED = [
+    {
+        "name": "libheif 1.23.1 (vendor/libheif-sys/vendor/libheif), HEIC decoding",
+        "license": "LGPL-3.0-or-later",
+        "file": "vendor/libheif-sys/vendor/libheif/COPYING",
+    },
+    {
+        "name": "libde265 1.0.16 (vendor/libde265), HEVC decoding",
+        "license": "LGPL-3.0-or-later",
+        "file": "vendor/libde265/libde265/COPYING",
+    },
+]
+
+
 def render(app, rust, npm):
     lines = [
         f"Third-party software in Shoebox ({app})",
@@ -182,6 +199,10 @@ def render(app, rust, npm):
     lines += [f"== Data and models ({len(DATA)}) ==", ""]
     for d in DATA:
         lines += [f"{d['name']}: {d['license']}", "", d["notice"], ""]
+    lines += [f"== C and C++ libraries built in ({len(BUNDLED)}) ==", ""]
+    for b in BUNDLED:
+        lines += [f"{b['name']}: {b['license']}  (full text below, each source tree in this repository)"]
+    lines += [""]
     texts = {}  # hash -> (text, [packages])
     used_standard = set()
     for title, packages in (("Rust crates", rust), ("JavaScript packages (the user interface)", npm)):
@@ -220,6 +241,9 @@ def render(app, rust, npm):
     lines += ["== Licence and notice texts shipped with the packages ==", ""]
     for h, (text, users) in sorted(texts.items(), key=lambda kv: (kv[1][1][0], kv[0])):
         lines += [f"--- [{h}] used by: {', '.join(sorted(set(users)))}", "", text, ""]
+    lines += ["== Licence texts of the C and C++ libraries ==", ""]
+    for b in BUNDLED:
+        lines += [f"--- {b['name']}: {b['license']}", "", read(os.path.join(ROOT, b["file"])), ""]
     return "\n".join(lines) + "\n"
 
 

@@ -82,18 +82,14 @@ jobs:
           key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py') }}
       - name: Search models match the hashes compiled in (S1-08)
         run: cargo xtask models --check
-      - name: Install musl tools
-        if: matrix.os == 'ubuntu-latest' && !matrix.cross
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - name: Install cross
-        if: matrix.cross
-        run: cargo install cross --locked
-      - name: Build (Linux, native musl)
-        if: matrix.os == 'ubuntu-latest' && !matrix.cross
-        run: cargo build --release -p keeper --target ${{ matrix.target }}
-      - name: Build (Linux, cross)
-        if: matrix.cross
-        run: cross build --release -p keeper --target ${{ matrix.target }}
+      # zig is the C and C++ compiler for the musl targets: libheif and libde265 (HEIC, I1-02) are C++,
+      # and the machine's musl-gcc has no C++ counterpart. The binary stays static.
+      - name: Install cargo-zigbuild
+        if: matrix.os == 'ubuntu-latest'
+        run: uv tool install cargo-zigbuild
+      - name: Build (Linux, static musl)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo zigbuild --release -p keeper --target ${{ matrix.target }}
       - name: Build (macOS universal)
         if: matrix.target == 'universal-apple-darwin'
         run: |

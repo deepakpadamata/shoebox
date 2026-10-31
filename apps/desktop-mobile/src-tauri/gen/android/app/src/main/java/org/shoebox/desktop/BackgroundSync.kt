@@ -70,6 +70,7 @@ class BurstWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
         val last = prefs.getLong("last_notified_ms", 0L)
         val report = try {
             ModelAssets.install(ctx)
+            NativeBridge.registerImageDecoder(HeifDecoder)
             NativeBridge.runBurst(ctx.dataDir.absolutePath, BackgroundSync.budgetSecs(), PhotoBackend(ctx), last)
         } catch (e: Throwable) {
             Log.e("ShoeboxBurst", "burst failed", e)
@@ -124,6 +125,7 @@ class IndexWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
         }
         val report = try {
             ModelAssets.install(ctx)
+            NativeBridge.registerImageDecoder(HeifDecoder)
             NativeBridge.runIndex(ctx.dataDir.absolutePath, BackgroundSync.INDEX_BUDGET_SECS, PhotoBackend(ctx))
         } catch (e: Throwable) {
             Log.e("ShoeboxIndex", "indexing failed", e)

@@ -155,6 +155,7 @@ fn kind_of(s: &str) -> Result<BlobKind> {
         "thumb" => BlobKind::Thumb,
         "preview" => BlobKind::Preview,
         "original" => BlobKind::Original,
+        "motion" => BlobKind::Motion,
         other => bail!("unknown blob kind `{other}`"),
     })
 }
@@ -165,6 +166,7 @@ fn kind_name(k: BlobKind) -> &'static str {
         BlobKind::Preview => "preview",
         BlobKind::Original => "original",
         BlobKind::Index => "index",
+        BlobKind::Motion => "motion",
     }
 }
 
@@ -245,6 +247,9 @@ impl AppCore {
     /// already belongs to a library it is opened too.
     pub async fn open(dir: impl Into<PathBuf>, opts: AppOptions) -> Result<Arc<AppCore>> {
         let dir = dir.into();
+        // HEIC and AVIF are decoded by the system where it can (I1-02).
+        #[cfg(target_os = "macos")]
+        crate::heic_macos::register();
         std::fs::create_dir_all(&dir)?;
         // Older data is upgraded (after a copy), newer data is refused: see `shoebox_node::format`.
         shoebox_node::format::ensure_format(&dir)?;
@@ -1029,6 +1034,7 @@ impl AppCore {
                 taken_at: rec.taken_at.0 as f64,
                 favorite: rec.favorite.value,
                 is_video,
+                live: ln.store().motion(&rec.id).await?.is_some(),
                 copies: copies as u32,
                 // Safe once enough devices hold it, or once any keeper does.
                 backed_up: copies >= target || originals().any(|h| keepers.contains(&h.device)),
@@ -1254,12 +1260,20 @@ impl AppCore {
             (Some(a), None) => Some(a.clone()),
             _ => None,
         };
+        let motion = ln.store().motion(&id).await?;
+        let has_motion = match &motion {
+            Some(m) => self.node.blobs().kept(&m.video.hash).await?,
+            None => false,
+        };
         Ok(PhotoDetail {
             id: rec.id.to_string(),
             taken_at: rec.taken_at.0 as f64,
             favorite: rec.favorite.value,
             deleted: rec.deleted_at.value.is_some(),
             is_video: rec.original.mime.starts_with("video/"),
+            live: motion.is_some(),
+            has_motion,
+            motion_ms: motion.as_ref().map_or(0, |m| m.duration_ms),
             mime: rec.original.mime.clone(),
             size: rec.original.size as f64,
             width: rec.exif.width,
@@ -1567,8 +1581,8 @@ impl AppCore {
                 BlobKind::Thumb => thumbs += 1,
                 BlobKind::Preview => previews += 1,
                 BlobKind::Original => originals += 1,
-                // Search shards are small; counted in the bytes only.
-                BlobKind::Index => {}
+                // Search shards and the videos of Live Photos are small; counted in the bytes only.
+                BlobKind::Index | BlobKind::Motion => {}
             }
             bytes += size;
         }
@@ -2087,6 +2101,14 @@ impl AppCore {
 
     pub(crate) async fn record(&self, id: &Blake3Hash) -> Result<Option<PhotoRecord>> {
         Ok(self.ln().await?.store().photo(id).await?)
+    }
+
+    /// The video of a Live Photo or motion photo.
+    pub(crate) async fn motion(
+        &self,
+        id: &Blake3Hash,
+    ) -> Result<Option<shoebox_core::model::MotionRecord>> {
+        Ok(self.ln().await?.store().motion(id).await?)
     }
 
     pub(crate) fn blobs(&self) -> &shoebox_node::BlobStore {

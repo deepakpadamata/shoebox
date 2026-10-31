@@ -1,12 +1,15 @@
 //! Import pipeline (M1-04): `analyze(path)` hashes a file, reads its metadata and renders a
 //! thumbnail and a preview. It is a pure function of the file — no node, no store.
 //!
-//! Formats: JPEG and PNG (always), HEIC (feature `heic`), RAW via the embedded JPEG preview,
-//! and MP4/MOV as metadata only (poster frames are M3-10). Anything else is reported as
+//! Formats: JPEG, PNG, WebP, GIF, BMP and TIFF (always; GIF and animated WebP by their first
+//! frame), HEIC and AVIF (the platform's decoder, or libheif with feature `heic`), RAW via the embedded JPEG preview, and videos as metadata only
+//! (poster frames are M3-10): MP4, MOV, M4V and 3GP from the `moov` box; AVI, MPEG and Matroska
+//! from their headers. Anything else is reported as
 //! [`AnalyzeError::Unsupported`]; the pipeline never panics on bad input.
 
 mod detect;
 mod exif_data;
+mod motion;
 mod raw;
 mod render;
 mod strip;
@@ -18,7 +21,9 @@ use std::io::Read;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 
-pub use render::{PREVIEW_LONG_EDGE, THUMB_SIZE};
+pub use image::{DynamicImage, RgbImage};
+pub use motion::EmbeddedVideo;
+pub use render::{set_platform_decoder, PlatformDecoder, PREVIEW_LONG_EDGE, THUMB_SIZE};
 pub use strip::{strip_location, StripError, Stripped};
 
 /// The picture in an image file (a preview, or an original shown as it is), at most `max_edge`
@@ -37,19 +42,35 @@ pub fn face_crop(bytes: &[u8], rect: [f32; 4], size: u32) -> Result<Rendition, A
 }
 
 fn decode_with_orientation(bytes: &[u8]) -> Result<(image::DynamicImage, u16), AnalyzeError> {
-    Ok(match detect::sniff(bytes, None) {
-        detect::Format::Jpeg => (
-            render::decode(bytes, image::ImageFormat::Jpeg)?,
-            exif_data::read(bytes).orientation,
-        ),
-        detect::Format::Png => (render::decode(bytes, image::ImageFormat::Png)?, 1),
-        detect::Format::Heic => (render::decode_heic(bytes)?, 1),
+    let format = detect::sniff(bytes, None);
+    decode_picture(bytes, &format, || exif_data::read(bytes).orientation)
+}
+
+/// The pixels of a still picture as stored, and the EXIF orientation still to apply to them.
+fn decode_picture(
+    bytes: &[u8],
+    format: &detect::Format,
+    exif_orientation: impl FnOnce() -> u16,
+) -> Result<(image::DynamicImage, u16), AnalyzeError> {
+    use detect::Format;
+    // `true`: the stored pixels still need the EXIF orientation applied.
+    let (image, exif) = match format {
+        Format::Jpeg => (render::decode(bytes, image::ImageFormat::Jpeg)?, true),
+        Format::Png => (render::decode(bytes, image::ImageFormat::Png)?, true),
+        Format::Webp => (render::decode(bytes, image::ImageFormat::WebP)?, true),
+        Format::Tiff => (render::decode(bytes, image::ImageFormat::Tiff)?, true),
+        Format::Gif => (render::decode(bytes, image::ImageFormat::Gif)?, false),
+        Format::Bmp => (render::decode(bytes, image::ImageFormat::Bmp)?, false),
+        Format::Raw => (raw::embedded_preview(bytes)?, true),
+        // libheif applies the file's own transforms (irot/imir); EXIF orientation must not be applied twice.
+        Format::Heic | Format::Avif => (render::decode_heic(bytes)?, false),
         other => {
             return Err(AnalyzeError::Unsupported(format!(
                 "not a picture: {other:?}"
             )))
         }
-    })
+    };
+    Ok((image, if exif { exif_orientation() } else { 1 }))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,6 +110,10 @@ pub struct ImportResult {
     /// `None` for videos until poster frames exist.
     pub thumb: Option<Rendition>,
     pub preview: Option<Rendition>,
+    /// Length of a video, when its container says.
+    pub duration_ms: Option<u32>,
+    /// The video inside a Samsung or Google motion photo (F2.10); the file is still the original.
+    pub embedded_video: Option<EmbeddedVideo>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -141,18 +166,23 @@ fn analyze_inner(path: &Path) -> Result<ImportResult, AnalyzeError> {
     if path.is_dir() {
         return Err(AnalyzeError::Unsupported("is a directory".into()));
     }
-    let mut head = [0u8; 16];
-    let head_len = std::fs::File::open(path)?.read(&mut head)?;
+    let mut head = Vec::with_capacity(detect::HEAD_LEN);
+    std::fs::File::open(path)?
+        .take(detect::HEAD_LEN as u64)
+        .read_to_end(&mut head)?;
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase);
-    let format = detect::sniff(&head[..head_len], ext.as_deref());
+    let format = detect::sniff(&head, ext.as_deref());
 
     match format {
-        detect::Format::Mp4 | detect::Format::Mov => {
+        video if video.is_video() => {
             let (hash, size) = hash_file(path)?;
-            let meta = video::read_metadata(path)?;
+            let meta = match video {
+                detect::Format::Mp4 { .. } | detect::Format::Mov => video::read_metadata(path)?,
+                ref other => video::read_other_metadata(path, other)?,
+            };
             let (taken_at, source) = match meta.created_unix_secs {
                 Some(s) => (Timestamp(s * 1000), TakenAtSource::Exif),
                 None => (Timestamp(mtime_ms(path)?), TakenAtSource::FileMtime),
@@ -165,13 +195,15 @@ fn analyze_inner(path: &Path) -> Result<ImportResult, AnalyzeError> {
             Ok(ImportResult {
                 hash,
                 size,
-                mime: format.mime().into(),
+                mime: video.mime().into(),
                 kind: MediaKind::Video,
                 taken_at,
                 taken_at_source: source,
                 exif,
                 thumb: None,
                 preview: None,
+                duration_ms: meta.duration_ms,
+                embedded_video: None,
             })
         }
         detect::Format::Unknown(why) => Err(AnalyzeError::Unsupported(why)),
@@ -179,19 +211,7 @@ fn analyze_inner(path: &Path) -> Result<ImportResult, AnalyzeError> {
             let bytes = std::fs::read(path)?;
             let hash = Blake3Hash(*blake3::hash(&bytes).as_bytes());
             let meta = exif_data::read(&bytes);
-            let (image, orientation) = match photo {
-                detect::Format::Jpeg => (
-                    render::decode(&bytes, image::ImageFormat::Jpeg)?,
-                    meta.orientation,
-                ),
-                detect::Format::Png => (
-                    render::decode(&bytes, image::ImageFormat::Png)?,
-                    meta.orientation,
-                ),
-                detect::Format::Raw => (raw::embedded_preview(&bytes)?, meta.orientation),
-                detect::Format::Heic => (render::decode_heic(&bytes)?, 1),
-                _ => unreachable!("videos and unknown handled above"),
-            };
+            let (image, orientation) = decode_picture(&bytes, &photo, || meta.orientation)?;
             let (thumb, preview, (width, height)) = render::renditions(image, orientation)?;
             let (taken_at, source) = match meta.taken_at_ms {
                 Some(ms) => (Timestamp(ms), TakenAtSource::Exif),
@@ -216,6 +236,10 @@ fn analyze_inner(path: &Path) -> Result<ImportResult, AnalyzeError> {
                 exif,
                 thumb: Some(thumb),
                 preview: Some(preview),
+                duration_ms: None,
+                embedded_video: (photo == detect::Format::Jpeg)
+                    .then(|| motion::find_embedded(&bytes))
+                    .flatten(),
             })
         }
     }

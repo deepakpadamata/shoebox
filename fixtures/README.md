@@ -36,6 +36,9 @@ Total ≈ 0.3 MB (limit: 20 MB). All files were generated from scratch by `xtask
 | `screenshot.png` | PNG 390×844 | `xtask` (`png`) | CC0-1.0 | Phone-screenshot-like UI (no EXIF), as a screenshot would be |
 | `clip.mp4` | H.264 MP4, 2 s | `ffmpeg` `testsrc2` | CC0-1.0 | `creation_time` metadata |
 | `clip.mov` | H.264 MOV, 2 s | `ffmpeg` `testsrc2` | CC0-1.0 | `creation_time` + QuickTime `location` (Paris) |
+| `photo.webp`, `photo.tif`, `photo.bmp` | WebP 160×120 (EXIF kept), TIFF 160×120, BMP 64×48 | `cwebp` / `magick` from `photo-gps.jpg` | CC0-1.0 | I1-03; need `cwebp` and `magick` on `PATH` |
+| `anim.gif` | GIF 160×120, 3 frames | `ffmpeg` `testsrc2` | CC0-1.0 | I1-03 |
+| `clip.3gp`, `clip.m4v`, `clip.avi`, `clip.mpg`, `clip.mkv` | 1 s, 176×144 (H.263, H.264, MPEG-4, MPEG-1, H.264) | `ffmpeg` `testsrc2` | CC0-1.0 | I1-03; `creation_time` 2024-06-01 where the container has one (AVI: date only; MPEG: none) |
 
 `HEIC` and video generation need `heif-enc` and `ffmpeg` on `PATH`; without them `cargo xtask samples` skips those files
 with a warning and the corresponding tests are unaffected.

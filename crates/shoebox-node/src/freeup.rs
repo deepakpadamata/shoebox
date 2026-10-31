@@ -387,6 +387,39 @@ impl<L: LibraryStore> LibraryNode<L> {
             .collect())
     }
 
+    /// The videos of Live Photos that go with these originals and are safe to drop with them: held
+    /// here (not a gallery file, which freeing would not remove) and held by a keeper.
+    async fn freeable_videos(&self, photos: &[(PhotoId, u64)]) -> Result<Vec<(Blake3Hash, u64)>> {
+        let me = self.device();
+        let keepers = self.keepers().await?;
+        let mut out = vec![];
+        for (id, _) in photos {
+            let Some(motion) = self.store().motion(id).await? else {
+                continue;
+            };
+            let hash = motion.video.hash;
+            let Some(size) = self.node().blobs().size(&hash).await? else {
+                continue;
+            };
+            if self
+                .node()
+                .blobs()
+                .protections(&hash)
+                .await?
+                .contains(&Protection::InPlace)
+            {
+                continue;
+            }
+            let on_keeper = self.store().holders(&hash).await?.iter().any(|h| {
+                h.kind == BlobKind::Motion && h.device != me && keepers.contains(&h.device)
+            });
+            if on_keeper {
+                out.push((hash, size));
+            }
+        }
+        Ok(out)
+    }
+
     /// Free the originals that are safe to drop. With `dry_run` nothing changes; the report is
     /// what a real run would free. A real run first fetches the preview of each photo whose
     /// preview this device let go (it shows the photo from now on; a photo whose preview cannot
@@ -410,8 +443,11 @@ impl<L: LibraryStore> LibraryNode<L> {
             }
             freeable = kept;
         }
+        // A Live Photo's video goes with its original.
+        let videos = self.freeable_videos(&freeable).await?;
         let report = FreeReport {
-            bytes: freeable.iter().map(|(_, s)| s).sum(),
+            bytes: freeable.iter().map(|(_, s)| s).sum::<u64>()
+                + videos.iter().map(|(_, s)| s).sum::<u64>(),
             photos: freeable.iter().map(|(id, _)| *id).collect(),
         };
         if !dry_run && !report.photos.is_empty() {
@@ -419,11 +455,16 @@ impl<L: LibraryStore> LibraryNode<L> {
             for id in &report.photos {
                 self.node().blobs().remove(id).await?;
             }
+            for (hash, _) in &videos {
+                self.node().blobs().remove(hash).await?;
+            }
             let hexes: HashSet<String> = report.photos.iter().map(|h| h.to_string()).collect();
             self.node()
                 .update_config(|c| c.pinned_originals.retain(|p| !hexes.contains(p)))?;
             drop(_exclusive);
-            self.retract_holdings(report.photos.clone()).await?;
+            let mut released = report.photos.clone();
+            released.extend(videos.iter().map(|(hash, _)| *hash));
+            self.retract_holdings(released).await?;
         }
         Ok(report)
     }

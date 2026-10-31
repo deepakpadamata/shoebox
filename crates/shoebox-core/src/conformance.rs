@@ -73,6 +73,7 @@ scenario_table!(
     device_list_is_signed_and_order_independent,
     library_settings_are_last_writer_wins,
     index_records_replicate,
+    motion_records_replicate,
     people_records_merge,
     read_only_capability,
     shared_album_flow,
@@ -919,6 +920,61 @@ fn indexer(d: u8, per_min: u32) -> IndexerStatus {
     }
 }
 
+fn motion(photo_n: u8, video_n: u8) -> MotionRecord {
+    MotionRecord {
+        photo: hash(photo_n),
+        video: BlobRef {
+            hash: hash(video_n),
+            size: 2_000_000,
+            mime: "video/quicktime".into(),
+        },
+        duration_ms: 1_500,
+        source: MotionSource::Paired,
+        // Set by the store.
+        made_by: dev(99),
+        hlc: hlc(0, 99),
+    }
+}
+
+/// F2.10: a photo's video is one record per photo, replicates, and the later write wins everywhere.
+async fn motion_records_replicate<H: Harness>(h: &H) {
+    let (a, b) = pair(h).await;
+    a.store.upsert_photo(photo(1, 1_000, 1)).await.unwrap();
+    sync_both(h, &a, &b).await;
+    // Only for a photo that exists.
+    assert!(matches!(
+        a.store.put_motion(motion(9, 50)).await,
+        Err(StoreError::NotFound)
+    ));
+
+    let mut stream = a.store.subscribe();
+    a.store.put_motion(motion(1, 50)).await.unwrap();
+    assert_eq!(next(&mut stream).await, Change::MotionChanged(hash(1)));
+    let mine = a.store.motion(&hash(1)).await.unwrap().expect("recorded");
+    assert_eq!((mine.made_by, mine.video.hash), (dev(1), hash(50)));
+    // The same video again is no change; an unrelated photo has none.
+    a.store.put_motion(motion(1, 50)).await.unwrap();
+    assert_eq!(a.store.motion(&hash(1)).await.unwrap(), Some(mine));
+    assert_eq!(a.store.motion(&hash(2)).await.unwrap(), None);
+
+    // Another device, having seen the first, records another video: it wins on both.
+    sync_both(h, &a, &b).await;
+    assert_eq!(
+        b.store.motion(&hash(1)).await.unwrap().unwrap().video.hash,
+        hash(50)
+    );
+    b.store.put_motion(motion(1, 51)).await.unwrap();
+    sync_both(h, &a, &b).await;
+    sync_both(h, &a, &b).await;
+    let (ma, mb) = (
+        a.store.motions().await.unwrap(),
+        b.store.motions().await.unwrap(),
+    );
+    assert_eq!(ma, mb);
+    assert_eq!(ma.len(), 1);
+    assert_eq!((ma[0].video.hash, ma[0].made_by), (hash(51), dev(2)));
+}
+
 /// S1-06: shard records are immutable and replicate; indexer statuses are single-writer.
 async fn index_records_replicate<H: Harness>(h: &H) {
     let (a, b) = pair(h).await;
@@ -1133,6 +1189,10 @@ async fn read_only_capability<H: Harness>(h: &H) {
     );
     assert_eq!(
         ro.put_indexer_status(indexer(5, 1)).await,
+        Err(StoreError::ReadOnly)
+    );
+    assert_eq!(
+        ro.put_motion(motion(1, 50)).await,
         Err(StoreError::ReadOnly)
     );
     // It can still read what syncs in.

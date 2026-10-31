@@ -113,6 +113,8 @@ ts_type! {
         pub taken_at: f64,
         pub favorite: bool,
         pub is_video: bool,
+        /// A Live Photo or motion photo: it has a video (F2.10).
+        pub live: bool,
         /// Devices holding the original (this one included).
         pub copies: u32,
         /// Enough devices hold the original, or a keeper does.
@@ -270,6 +272,12 @@ ts_type! {
         pub favorite: bool,
         pub deleted: bool,
         pub is_video: bool,
+        /// A Live Photo or motion photo: it has a video (F2.10).
+        pub live: bool,
+        /// The video is on this device; if not, `fetch_now` with kind `motion` gets it.
+        pub has_motion: bool,
+        /// How long the video runs.
+        pub motion_ms: u32,
         pub mime: String,
         pub size: f64,
         pub width: u32,

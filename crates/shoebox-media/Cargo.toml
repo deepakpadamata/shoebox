@@ -11,15 +11,19 @@ publish = false
 default = []
 # HEIC decoding through the system libheif (needs libheif + pkg-config at build time).
 heic = ["dep:libheif-rs"]
+# libheif and libde265 built from source and linked statically: HEIC without a system library
+# (the Linux keeper, Windows). Needs cmake and a C++ compiler; no AVIF (no AV1 decoder).
+heic-static = ["heic", "libheif-sys/static-decoders"]
 
 [dependencies]
 shoebox-core.workspace = true
 blake3.workspace = true
 thiserror.workspace = true
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff"] }
 jpeg-encoder = { version = "0.7", features = ["simd"] }
 kamadak-exif = "0.6"
 libheif-rs = { version = "3", optional = true }
+libheif-sys = { version = "5", optional = true }
 
 [dev-dependencies]
 xtask = { path = "../../xtask" }

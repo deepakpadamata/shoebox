@@ -14,6 +14,7 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    NativeBridge.registerImageDecoder(HeifDecoder)
     BackgroundSync.schedule(applicationContext)
     Thread { ModelAssets.install(applicationContext) }.start()
   }

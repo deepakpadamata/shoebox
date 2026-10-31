@@ -16,6 +16,26 @@ Android is built and checked on an emulator; iOS is not built. iPhones shoot HEI
 - **A-031 · M1-04** · The `heic` feature (libheif-rs) is written but **not compiled or tested**: this machine has libheif
   but no `pkg-config`. Without the feature HEIC is reported as `Unsupported`. 1146 photos/s on the 10k `medium` corpus
   is for its tiny (48–80 px) images; real 12 MP photos will be far slower, so re-measure with real images.
+  **Update (I1-02, 2026-10-31):** HEIC and AVIF are decoded by the platform where it has a decoder, and by a
+  built-in one where it has not.
+  - **macOS:** ImageIO (`heic_macos.rs`, registered in `AppCore::open` through `shoebox_media::set_platform_decoder`).
+    HEIC and AVIF; tested on a plain and a rotated HEIC and an AVIF.
+  - **Linux keeper, Windows and Linux apps:** `heic-static`: libheif 1.23.1 and libde265 1.0.16 built from source
+    (`vendor/libheif-sys`, a copy of the crate whose `build.rs` has a `static-decoders` feature, and
+    `vendor/libde265`, the release tarball v1.0.16, SHA-256 `b92beb6b53c346db9a8fae968d686ab706240099cdd5aff87777362d668b0de7`,
+    docs, tools and autotools files left out) and linked statically. HEVC only: **no AVIF there** (no AV1 decoder;
+    the file is skipped with "this build cannot decode it"), and none of libheif's encoders or JPEG codecs. The crate's own
+    `embedded-libheif` is not used: it builds only libheif and links whatever decoders and encoders (x264 and x265 are
+    GPL) the machine has. Cost: +1.9 MB on the 60.3 MB x86_64 musl keeper. **Verified:** the x86_64 musl keeper is a
+    static ELF and its test binary ran the HEIC decode in a Linux container (13 of 13 `analyze` tests). **Not
+    verified:** Windows (MSVC), the aarch64 musl keeper, the Linux AppImage, and the release workflow's new zigbuild step.
+  - **Android:** the system `ImageDecoder` (`HeifDecoder.kt`, called from `heic_android.rs` over JNI and read back with
+    `AndroidBitmap_*`; sRGB, software bitmap, one decode at a time). HEIC needs Android 9, AVIF Android 12; on an older
+    one the file is skipped as unsupported. **Verified** on an Android emulator: HEIC and AVIF import and the viewer
+    shows the picture. **Not verified:** a physical phone (the S25), a rotated HEIC or Display P3 colour on Android, and
+    the background workers' registration path.
+  - Every HEIC/AVIF is first checked for a complete box structure, because ImageIO decodes a cut-off file into a partly
+    grey picture. To update libde265 or libheif: replace the folder, rebuild, and update `scripts/licences.py` and this entry.
 - **A-080 · M5-03 location** · `strip_location` zeroes the GPS IFD (and its values) and removes its pointer from IFD0 for JPEG, drops `eXIf` and GPS-bearing XMP chunks for PNG, blanks `exif:GPS*` XMP properties, and turns `©xyz`/`loci`/QuickTime location atoms of MP4/MOV into `free` boxes. Pixel/sample data is byte-identical (tests compare the bytes after the image data and the decoded pixels). *Not handled:* HEIC/HEIF/AVIF (refused, never shared with its location when "remove" is chosen), GPS inside an embedded EXIF thumbnail or a maker note, other containers. The stripped copy becomes the item: its id and `original`/`shared_hash` are the copy's hash, so members never learn the hash of the GPS original (they could otherwise fetch it from the contributor). Previews and thumbnails are re-rendered by the image pipeline and carry no metadata. The prompt counts only photos whose library record has a GPS fix; videos are stripped when "remove" is the album's setting even though their location is not in the record. Stripping reads the whole original into memory (fine for photos, heavy for long videos).
 - **A-072 · M3-07** · The recovery phrase exists only in the `create_library` result and the onboarding screen's memory: the root key is dropped on the Rust side and nothing is stored, so a reload
   before "Continue" loses it (the library exists; the kit was never saved). The reminder banner can only ask the user to confirm they saved it. Mockup 1d's import/role step is replaced by the
@@ -84,7 +104,7 @@ The 300 MB at 100k photos target for phones is not met (about 500–700 MB).
   starts in (southern summer 2019 is Dec 2019–Feb 2020). Holidays are fixed rules (Christmas 24–26 Dec, Easter
   Good Friday to Easter Monday, Thanksgiving the US one) and Diwali is a table for 2000–2030, matched a day either
   side. Screenshots are photos without a camera that are PNG or exactly a common screen size; selfies are photos
-  whose lens says "front"; live photos are not recorded yet. Label words are suggested but stay in the free text,
+  whose lens says "front"; live photos are recorded since F2.10 (see A-109). Label words are suggested but stay in the free text,
   so they rank rather than filter. A name that is several kinds at once is a person first, then an album, a place,
   a camera. Places come from GeoNames `cities5000` (70k places, 1.9 MB): the nearest town within 25 km, plus the
   biggest city (≥ 100k people) within 15 km, and the nearest town's region and country within 200 km; no borders,
@@ -728,3 +748,5 @@ Not open questions, but they must be honoured by any format or protocol change, 
   clustering (cosine ≥ 0.45), not constrained agglomerative clustering; "not Ana" is enforced at resolution.
   Desktop indexing on Linux and Windows assumes mains power and an idle user when it cannot tell (macOS asks
   `pmset` and `ioreg`).
+
+- **A-109 · F2.10** · **Live Photos and motion photos.** A photo has at most one video, in a `motion/<photo>` record (`MotionRecord`) that points at a blob of its own; the video is never an item of the timeline. *Pairs:* a `.MOV` or `.MP4` of at most 10 s next to a `.HEIC`, `.HEIF`, `.JPG` or `.JPEG` of the same name in the same folder (case aside). Decided from the folder, not the batch, so a watched folder that hands the two over separately still pairs them; both files are always imported together. Not checked against Apple's content identifier (in the MOV's metadata and the HEIC's MakerNote), so a 10-second clip that happens to share a name with a picture is taken for its video; a longer one is a video of its own. A picture that cannot be read leaves its clip a video like any other. *Motion photos* (Samsung, Google): the picture stays the whole file; the video is found by structure, as the first complete MP4 after the first image's end (not by the vendors' XMP, which differs), and copied out into a blob. *Keeping:* keepers hold every video; a companion holds it when it keeps the original; a viewer streams it (`fetch_now` kind `motion`). "Free up space" frees it with the original, once a keeper holds it. It is kept while its photo is (Recently Deleted included). *Not done:* a library imported before this has the `.MOV` of an earlier pair as a video of its own (not merged afterwards); shared albums share the still only; RAW+JPEG pairs (the other half of F2.10); hold-to-play on touch (the viewer has a LIVE button); whether a device can play the video is the platform's call (HEVC in a MOV is not played everywhere); the phone's own gallery assets (Android's `MediaStore`, iOS `PHAsset`) carry no pairing, so an iPhone's Live Photos come in through a folder or an iCloud export, or as the stills only (M4-03).

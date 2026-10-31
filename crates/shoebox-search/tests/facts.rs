@@ -159,6 +159,27 @@ fn run(ix: &FactsIndex, q: &str) -> String {
 }
 
 #[test]
+fn live_photos_are_the_ones_with_a_video() {
+    let mut ix = library();
+    assert_eq!(run(&ix, "live photos"), "", "none has a video yet");
+    let b = P {
+        fav: true,
+        ..p("b", (2019, 7, 14))
+    };
+    assert!(ix.upsert(PhotoFacts::of(&record(&b)).with_live(true)));
+    assert_eq!(run(&ix, "live photos"), "b");
+    assert_eq!(run(&ix, "live photos favourites"), "b");
+    assert_eq!(
+        run(&ix, "photos 2019"),
+        "b,a",
+        "a Live Photo is still a photo"
+    );
+    // It stops being one when the video goes.
+    assert!(ix.upsert(PhotoFacts::of(&record(&b))));
+    assert_eq!(run(&ix, "live photos"), "");
+}
+
+#[test]
 fn filters() {
     let ix = library();
     assert_eq!(run(&ix, ""), "i,h,g,f,e,d,c,b,a");

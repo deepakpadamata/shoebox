@@ -19,7 +19,7 @@
 
 use crate::ids::{EndpointId, Timestamp};
 use crate::model::{
-    BlobKind, BlobRef, IndexShard, PhotoId, PhotoRecord, Role, ShardKind, SharedItem,
+    BlobKind, BlobRef, IndexShard, MotionRecord, PhotoId, PhotoRecord, Role, ShardKind, SharedItem,
 };
 
 /// Above this many photos a Viewer keeps only the binary codes for search by meaning, not the
@@ -95,6 +95,21 @@ pub fn fetch_plan(role: Role, rec: &PhotoRecord, ctx: &PlanContext) -> Vec<Fetch
     }
     if want_original {
         push_unique(&mut plan, BlobKind::Original, &rec.original);
+    }
+    plan
+}
+
+/// The video of a Live Photo or motion photo, for devices that keep the photo's original: a few
+/// seconds of video that goes with it. Viewers hold none (they stream it when it is played).
+pub fn motion_plan(role: Role, motion: &MotionRecord, ctx: &PlanContext) -> Vec<FetchItem> {
+    let want = match role {
+        Role::Keeper => true,
+        Role::Companion => ctx.keeps_original(),
+        Role::Viewer => false,
+    };
+    let mut plan = vec![];
+    if want {
+        push_unique(&mut plan, BlobKind::Motion, &motion.video);
     }
     plan
 }
@@ -189,6 +204,8 @@ fn kind_rank(kind: BlobKind) -> u8 {
         BlobKind::Index => 1,
         BlobKind::Preview => 2,
         BlobKind::Original => 3,
+        // A few seconds of video: after the originals it belongs to, so it never delays a photo.
+        BlobKind::Motion => 4,
     }
 }
 

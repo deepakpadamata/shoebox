@@ -302,6 +302,19 @@ impl LibraryStore for DocsLibrary {
             .await
     }
 
+    async fn put_motion(&self, motion: MotionRecord) -> Result<()> {
+        let now = self.now();
+        self.write(|s| Ok(((), s.put_motion(&motion, now)?))).await
+    }
+
+    async fn motion(&self, photo: &PhotoId) -> Result<Option<MotionRecord>> {
+        Ok(self.read(|s| s.motion(photo)).await)
+    }
+
+    async fn motions(&self) -> Result<Vec<MotionRecord>> {
+        Ok(self.read(|s| s.motions()).await)
+    }
+
     async fn put_index_shard(&self, shard: IndexShard) -> Result<()> {
         let now = self.now();
         self.write(|s| Ok(((), s.put_index_shard(&shard, now)?)))

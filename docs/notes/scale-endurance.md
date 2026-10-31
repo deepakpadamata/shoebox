@@ -51,9 +51,47 @@ The real library (5,766 photos), on the devices:
   half its cores (the Mac: about 1,800); keeper RSS 0.86–1.0 GB while indexing with all models loaded. Search data
   4.7 MB under `search/`, 10.3 MB of shard blobs.
 
-Not measured: a Pi 5 (none at hand); the app's idle memory against a build without search (the "added idle RSS
-under 30 MB" criterion); search with every other device off (the S25 searched with the others online); the
-week-long endurance run.
+**The S25 alone (2026-10-30):** airplane mode, Wi-Fi, mobile data and Bluetooth off, the app restarted with no
+network. Every kind of search answered, from the data already on the phone:
+
+| Query | Understood as | Result |
+|---|---|---|
+| `waterfall` | words, by meaning | 53 photos, all waterfalls (the same 53 as online) |
+| `october 2026` | a date | 96 photos |
+| `india` | a place | 1,835 photos |
+| `samsung sm-s931b` | a camera | 2 photos (correct: the library's other S25 photos are named "samsung Galaxy S25") |
+| `gagana` | words | the photo of a sign reading GAGANA first, then chat screenshots with the name (text in photos) |
+| `mom waterfall` | a person and words | 16 photos of Mom at waterfalls |
+
+People (Albums → People) showed the named groups and their face crops. The app said "Syncing…" while it had no
+network to sync over. Not done: the Mac and nest alone (the Mac holds every shard and model, nest is the keeper).
+
+**What search holds while idle**, at 100k synthetic photos (`device_bench --idle`, a fresh process loading the
+index files as the app does at start), against a budget of 30 MB: **not met.**
+
+| | facts index | meaning index | total |
+|---|---|---|---|
+| S25 | 38 MB | 14 MB | **52 MB** |
+| Mac | 59 MB | 8 MB | **67 MB** |
+
+The 512-d int8 vectors stay on disk and are read for each search; the meaning index holds ids and sign bits. The
+facts index keeps every photo's facts as strings and the word postings of every field. At the real library's
+5,766 photos that scales to about 3–4 MB. No text or image model is loaded while idle.
+
+Not measured: a Pi 5 (none at hand); the Mac and nest with every other device off; the week-long endurance run.
+
+### For S2 (seen while measuring, not fixed in S1)
+
+* **Idle memory at 100k photos: 52 MB on the S25, 67 MB on the Mac (budget 30 MB), most of it the facts index.** Keep facts in compact columns (dates, flags, ids of
+  interned cameras, lenses and places) and the word postings as sorted integer arrays, or map `facts.idx` instead
+  of decoding it.
+* **Phone text encoding: 68 ms against 50 ms.** A smaller or more quantised text model, or tract's newer kernels.
+* **The text model (174 MB on the S25) stays loaded while the search screen is open:** refreshing the results
+  counts as a use even when the query's vector is cached. Count only encodings as use.
+* **Camera names are understood only whole:** "samsung", "galaxy" and "galaxy s25" are searched as words, not as
+  the camera "samsung Galaxy S25". Match a camera on its model or make alone, and treat "SAMSUNG"/"samsung" variants
+  as one name in suggestions.
+* **"Syncing…" with no network:** say "Offline" instead.
 
 ## Not met yet
 

@@ -197,6 +197,20 @@ impl LibraryStore for MemLibrary {
         self.with_state(|s| Ok(((), s.put_setting(key, value, now)?)))
     }
 
+    async fn put_motion(&self, motion: MotionRecord) -> Result<()> {
+        self.writable()?;
+        let now = self.now();
+        self.with_state(|s| Ok(((), s.put_motion(&motion, now)?)))
+    }
+
+    async fn motion(&self, photo: &PhotoId) -> Result<Option<MotionRecord>> {
+        Ok(self.read(|s| s.motion(photo)))
+    }
+
+    async fn motions(&self) -> Result<Vec<MotionRecord>> {
+        Ok(self.read(|s| s.motions()))
+    }
+
     async fn put_index_shard(&self, shard: IndexShard) -> Result<()> {
         self.writable()?;
         let now = self.now();

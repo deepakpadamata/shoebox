@@ -38,7 +38,7 @@ async fn has_all(n: &LibraryNode<Library>, kinds: &[BlobKind], expect_count: usi
                 BlobKind::Original => &r.original,
                 BlobKind::Preview => &r.preview,
                 BlobKind::Thumb => &r.thumb,
-                BlobKind::Index => unreachable!("not a photo blob"),
+                BlobKind::Index | BlobKind::Motion => unreachable!("not a photo blob"),
             };
             if !n.node().blobs().has(&blob.hash).await.unwrap() {
                 return false;
@@ -402,5 +402,76 @@ async fn phones_fetch_originals_only_for_pinned_photos() {
     assert_eq!(saved.pinned_originals, vec![a.to_string()]);
     nodes[1].unpin_original(&a).await.unwrap();
     assert!(!nodes[1].is_pinned(&a));
+    c.shutdown().await;
+}
+
+/// F2.10: the video of a Live Photo goes where the original goes: to keepers, not to viewers, who
+/// stream it when it is played.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_video_of_a_live_photo_goes_to_keepers_and_is_streamed_to_viewers() {
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Keeper, Role::Viewer])
+        .await
+        .unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    nodes[1].start_fetcher(fast());
+    nodes[2].start_fetcher(fast());
+
+    let tmp = tempfile::tempdir().unwrap();
+    let samples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/samples");
+    let dir = tmp.path().join("live");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(samples.join("photo-gps.jpg"), dir.join("IMG_0001.JPG")).unwrap();
+    std::fs::copy(samples.join("clip.mov"), dir.join("IMG_0001.MOV")).unwrap();
+    let report = nodes[0]
+        .import_paths(&[dir], ImportOptions::default())
+        .await
+        .unwrap();
+    assert_eq!((report.imported.len(), report.with_video.len()), (1, 1));
+    let photo = report.imported[0];
+    let video = nodes[0]
+        .store()
+        .motion(&photo)
+        .await
+        .unwrap()
+        .unwrap()
+        .video;
+
+    wait_until(Duration::from_secs(90), || async {
+        nodes[1].node().blobs().has(&video.hash).await.unwrap()
+    })
+    .await
+    .expect("the keeper fetches the video with the original");
+    // It says so: the video is held as a video blob, never counted as a copy of the original.
+    wait_until(Duration::from_secs(60), || async {
+        nodes[0]
+            .store()
+            .holders(&video.hash)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|h| h.kind == BlobKind::Motion)
+            .count()
+            == 2
+    })
+    .await
+    .expect("both keepers hold the video");
+    assert_eq!(nodes[0].copy_count(&photo).await.unwrap(), 2);
+
+    // The viewer knows the photo has a video, but holds neither it nor the original.
+    wait_until(Duration::from_secs(60), || async {
+        nodes[2].store().motion(&photo).await.unwrap().is_some()
+            && has_all(&nodes[2], &[BlobKind::Thumb, BlobKind::Preview], 1).await
+    })
+    .await
+    .expect("the viewer sees the photo and that it has a video");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(!nodes[2].node().blobs().has(&video.hash).await.unwrap());
+
+    // Playing it fetches it on the spot.
+    nodes[2]
+        .fetch_now(&photo, BlobKind::Motion)
+        .await
+        .expect("a viewer can stream the video");
+    assert!(nodes[2].node().blobs().has(&video.hash).await.unwrap());
     c.shutdown().await;
 }

@@ -210,10 +210,18 @@ impl<L: LibraryStore> LibraryNode<L> {
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?;
         let deleted = self.store().deleted_photos().await?;
+        let with_video: HashSet<PhotoId> = self
+            .store()
+            .motions()
+            .await?
+            .into_iter()
+            .map(|m| m.photo)
+            .collect();
         let mut present: HashSet<PhotoId> = HashSet::with_capacity(live.len() + deleted.len());
         for rec in live.iter().chain(deleted.iter()) {
             present.insert(rec.id);
-            changed |= self.index_photo(ix, PhotoFacts::of(rec));
+            let facts = PhotoFacts::of(rec).with_live(with_video.contains(&rec.id));
+            changed |= self.index_photo(ix, facts);
         }
         let gone: Vec<PhotoId> = ix
             .ids()
@@ -260,15 +268,16 @@ impl<L: LibraryStore> LibraryNode<L> {
             return Ok(());
         }
         match change {
-            Change::PhotoUpserted(id) | Change::PhotoDeleted(id) => {
+            Change::PhotoUpserted(id) | Change::PhotoDeleted(id) | Change::MotionChanged(id) => {
                 let rec = self.store().photo(id).await?;
+                let live = self.store().motion(id).await?.is_some();
                 let mut guard = self.inner.search.index.lock().unwrap();
                 let Some(ix) = guard.as_mut() else {
                     return Ok(());
                 };
                 match rec {
                     Some(rec) => {
-                        self.index_photo(ix, PhotoFacts::of(&rec));
+                        self.index_photo(ix, PhotoFacts::of(&rec).with_live(live));
                     }
                     None => {
                         ix.remove(id);

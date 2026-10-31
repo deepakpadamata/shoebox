@@ -31,8 +31,8 @@ Android is built and checked on an emulator; iOS is not built. iPhones shoot HEI
     verified:** Windows (MSVC), the aarch64 musl keeper, the Linux AppImage, and the release workflow's new zigbuild step.
   - **Android:** the system `ImageDecoder` (`HeifDecoder.kt`, called from `heic_android.rs` over JNI and read back with
     `AndroidBitmap_*`; sRGB, software bitmap, one decode at a time). HEIC needs Android 9, AVIF Android 12; on an older
-    one the file is skipped as unsupported. **Verified** on an Android emulator: HEIC and AVIF import and the viewer
-    shows the picture. **Not verified:** a physical phone (the S25), a rotated HEIC or Display P3 colour on Android, and
+    one the file is skipped as unsupported. **Verified** on an Android emulator and on a Samsung S25 (HEIC import and
+    viewing; the viewer shows the preview, as a web view cannot open a HEIC original). **Not verified:** AVIF on the S25, a rotated HEIC or Display P3 colour on Android, and
     the background workers' registration path.
   - Every HEIC/AVIF is first checked for a complete box structure, because ImageIO decodes a cut-off file into a partly
     grey picture. To update libde265 or libheif: replace the folder, rebuild, and update `scripts/licences.py` and this entry.

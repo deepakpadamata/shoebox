@@ -87,12 +87,14 @@
   // A video's preview and thumbnail are the video itself (no poster frames in the record yet):
   // an image of one only fails, slowly. Show this device's poster frame, or nothing.
   const poster = $derived(photo.is_video && photo.has_poster ? blobUrl(photo.id, 'poster') : null);
-  const src = $derived(photo.is_video ? poster : originalReady ? blobUrl(photo.id, 'original') : blobUrl(photo.id, detail?.has_preview === false ? 'thumb' : 'preview'));
+  // The web view shows these as they are; HEIC, AVIF, TIFF, BMP and RAW originals are kept, and the preview is what is shown.
+  const webFormat = $derived(['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(detail?.mime ?? ''));
+  const src = $derived(photo.is_video ? poster : originalReady && webFormat ? blobUrl(photo.id, 'original') : blobUrl(photo.id, detail?.has_preview === false ? 'thumb' : 'preview'));
 
   // Only the element showing the original can say the original is unreadable: a preview that
   // fails to load (or one still loading from before the original was ready) says nothing.
   function imageFailed() {
-    if (!photo.is_video && originalReady) originalFailed();
+    if (!photo.is_video && originalReady && webFormat) originalFailed();
   }
 
   // Play the video of a Live Photo, getting it from another device first if this one has not got it.

@@ -29,6 +29,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
+mod cloud_keeper;
+pub use cloud_keeper::{CloudBackupReport, CloudPolicy, CloudRestoreReport, CLOUD_BACKUP_KEY};
+
 pub const CLOUD_SECRET_KEY: &str = "cloud-secret";
 pub const CLOUD_URL_KEY: &str = "cloud-url";
 const CIDS_FILE: &str = "cloud-cids.bin";

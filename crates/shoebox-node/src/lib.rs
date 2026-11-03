@@ -71,4 +71,7 @@ pub use sync::{SyncConfig, SyncPhase};
 pub use ticket::{LibraryTicket, TicketError};
 pub use transfers::{Transfer, TransferSnapshot};
 pub use web_live::LiveReport;
-pub use web_share::{RefreshReport, WebShare, WebShareOptions, CLOUD_SECRET_KEY, CLOUD_URL_KEY};
+pub use web_share::{
+    CloudBackupReport, CloudPolicy, CloudRestoreReport, RefreshReport, WebShare, WebShareOptions,
+    CLOUD_SECRET_KEY, CLOUD_URL_KEY,
+};

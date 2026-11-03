@@ -117,7 +117,7 @@ fn parse_hex<const N: usize>(text: &str) -> Result<[u8; N], ApiError> {
 }
 
 fn is_name(name: &str) -> bool {
-    (1..=64).contains(&name.len())
+    (1..=80).contains(&name.len())
         && !name.starts_with('.')
         && name
             .bytes()
@@ -468,7 +468,7 @@ async fn put_object(
 ) -> Result<Response, ApiError> {
     if !is_name(&name) {
         return Err(ApiError::bad(
-            "an object name is 1 to 64 letters, digits, dots, dashes or underscores",
+            "an object name is 1 to 80 letters, digits, dots, dashes or underscores",
         ));
     }
     // The client says what the body hashes to (and signs it); the hash is checked as the body arrives.

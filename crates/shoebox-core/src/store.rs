@@ -440,6 +440,22 @@ pub trait LibraryStore: Send + Sync + 'static {
     /// Bidirectionally reconcile with `peer`. Idempotent; after it returns both replicas are equal.
     async fn sync_with(&self, peer: &PeerAddr) -> Result<()>;
 
+    /// The whole library state as one opaque snapshot (for the encrypted copy kept in Shoebox Cloud, W1-09).
+    /// Backends that cannot return `Backend`.
+    async fn export_state(&self) -> Result<Vec<u8>> {
+        Err(StoreError::Backend(
+            "this backend cannot export its state".into(),
+        ))
+    }
+
+    /// Fold a snapshot made by [`LibraryStore::export_state`] into this replica, with the checks any received
+    /// change gets. Merging is idempotent.
+    async fn import_state(&self, _snapshot: &[u8]) -> Result<()> {
+        Err(StoreError::Backend(
+            "this backend cannot import a state".into(),
+        ))
+    }
+
     fn capability(&self) -> Capability;
 
     /// Move this replica to a fresh library id (a new *epoch*), carrying every record that is

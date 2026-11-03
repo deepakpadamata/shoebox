@@ -168,6 +168,35 @@ pub(crate) async fn web(shared: &Shared, req: &Value) -> Result<Value> {
                 "failed": r.failed,
             }))
         }
+        "backup" => {
+            if let Some(on) = req["enabled"].as_bool() {
+                ln.set_cloud_backup(on).await?;
+            }
+            Ok(json!({ "enabled": ln.cloud_backup_enabled().await? }))
+        }
+        "backup-now" => {
+            let r = ln
+                .cloud_backup(&shoebox_node::CloudPolicy {
+                    originals: true,
+                    byte_budget: None,
+                })
+                .await?;
+            Ok(json!({
+                "uploaded": r.uploaded,
+                "bytes": r.uploaded_bytes,
+                "already": r.already,
+                "failed": r.failed,
+            }))
+        }
+        "restore" => {
+            let r = ln.cloud_restore().await?;
+            Ok(json!({
+                "restored": r.restored,
+                "already": r.already,
+                "state": r.state_imported,
+                "failed": r.failed,
+            }))
+        }
         "list" => {
             let mut rows = vec![];
             for a in ln.store().albums().await? {

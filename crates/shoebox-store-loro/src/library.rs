@@ -992,6 +992,14 @@ impl LibraryStore for LoroLibrary {
         Box::pin(rx)
     }
 
+    async fn export_state(&self) -> Result<Vec<u8>> {
+        Ok(self.export_snapshot())
+    }
+
+    async fn import_state(&self, snapshot: &[u8]) -> Result<()> {
+        self.import(snapshot)
+    }
+
     async fn sync_with(&self, peer: &PeerAddr) -> Result<()> {
         let epoch = self.shared.epoch();
         self.transport.sync(&self.shared, epoch, peer).await

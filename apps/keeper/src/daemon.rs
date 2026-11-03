@@ -296,6 +296,34 @@ impl Daemon {
             info!("not paired yet: run `shoebox-keeper pair <ticket>`");
         }
 
+        // Web links and the cloud copy are kept up to date by the keeper alone: a person who turned them on expects
+        // them to follow the library without opening anything (W1-05, W1-09).
+        {
+            let weak = Arc::downgrade(&shared);
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                loop {
+                    let Some(shared) = weak.upgrade() else { break };
+                    let ln = shared.library.lock().await.clone();
+                    drop(shared);
+                    if let Some(ln) = ln {
+                        match ln.cloud_upkeep().await {
+                            Ok(r) if r.uploaded > 0 => {
+                                info!(uploaded = r.uploaded, "uploaded to the cloud copy")
+                            }
+                            Ok(r) => {
+                                for f in &r.failed {
+                                    tracing::warn!("cloud upkeep: {f}");
+                                }
+                            }
+                            Err(e) => tracing::warn!("cloud upkeep: {e:#}"),
+                        }
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
+                }
+            });
+        }
+
         let control_path = opts.storage.join("control.sock");
         let server = control::serve(shared.clone(), &control_path).await?;
         info!(storage = %opts.storage.display(), "keeper running");

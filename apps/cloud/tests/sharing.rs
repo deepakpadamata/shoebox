@@ -13,10 +13,11 @@ use shoebox_core::model::*;
 use shoebox_core::share::{self, ShareKey, ShareLink};
 use shoebox_core::store::*;
 use shoebox_core::Hlc;
-use shoebox_node::{ImportOptions, LibraryNode, WebShareOptions, WEBVIEW_ALPN};
+use shoebox_node::{CloudPolicy, ImportOptions, LibraryNode, WebShareOptions, WEBVIEW_ALPN};
 use shoebox_store::{HybridBackend, Library};
-use shoebox_testkit::Cluster;
+use shoebox_testkit::{wait_until, Cluster};
 use std::sync::Arc;
+use std::time::Duration;
 use tower::ServiceExt;
 
 struct World {
@@ -38,7 +39,11 @@ fn hlc(ms: u64) -> Hlc {
 }
 
 async fn world(photos_in_album: usize) -> World {
-    let cluster = Cluster::new(2).await.unwrap();
+    world_as(photos_in_album, Role::Keeper).await
+}
+
+async fn world_as(photos_in_album: usize, role: Role) -> World {
+    let cluster = Cluster::with_roles(&[role, role]).await.unwrap();
     let root = KeyPair::generate();
     let backend = HybridBackend::for_node(cluster.node(0).clone(), cluster.clock().clone());
     let (lib, cap) = backend.create_library(&root.root_public()).await.unwrap();
@@ -48,9 +53,7 @@ async fn world(photos_in_album: usize) -> World {
         cluster.clock().clone(),
     )
     .with_capability(cap);
-    node.create_identity(&root, Role::Keeper, "home")
-        .await
-        .unwrap();
+    node.create_identity(&root, role, "home").await.unwrap();
 
     // Photos from the fixture corpus, imported the normal way (thumbnails and previews are made).
     let work = tempfile::tempdir().unwrap();
@@ -675,4 +678,133 @@ async fn a_device_without_the_folder_serves_a_live_link_only_when_asked_to() {
     let key = ShareKey(share.key);
     let (_, m) = share::open(&sealed, &key, &key.signer().public_bytes()).unwrap();
     assert_eq!(m.items.len(), 3);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_cloud_keeper_uploads_once_and_restores_every_blob_checked() {
+    let w = world(4).await;
+    let policy = CloudPolicy {
+        originals: true,
+        byte_budget: None,
+    };
+    let r = w.node.cloud_backup(&policy).await.unwrap();
+    assert!(r.failed.is_empty(), "{:?}", r.failed);
+    assert!(r.uploaded > 0 && r.left == 0);
+    let first = r.uploaded;
+
+    // Nothing changed: nothing is uploaded or sealed again.
+    let again = w.node.cloud_backup(&policy).await.unwrap();
+    assert_eq!((again.uploaded, again.already), (0, first), "{again:?}");
+
+    // The service holds the library state and catalog, and no photo.
+    let stored = std::fs::read_dir(w.cloud_dir.path()).unwrap().count();
+    assert!(stored > 0);
+    let p = &w.photos[0];
+    let original = w.node.node().blobs().get(&p.original.hash).await.unwrap();
+
+    // Lose a photo's blobs from this device, then restore.
+    let blobs = w.node.node().blobs();
+    let lost = [p.original.hash, p.thumb.hash, p.preview.hash];
+    for h in lost {
+        blobs.remove(&h).await.unwrap();
+    }
+    wait_until(Duration::from_secs(30), || async {
+        let mut gone = true;
+        for h in lost {
+            gone &= !blobs.has(&h).await.unwrap();
+        }
+        gone
+    })
+    .await
+    .expect("the store collects released blobs");
+    let r = w.node.cloud_restore().await.unwrap();
+    assert!(r.failed.is_empty(), "{:?}", r.failed);
+    assert!(r.state_imported);
+    assert!(r.restored >= 3, "{r:?}");
+    assert_eq!(blobs.get(&p.original.hash).await.unwrap(), original);
+    for h in [p.thumb.hash, p.preview.hash] {
+        assert!(blobs.has(&h).await.unwrap());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_small_budget_stops_and_the_next_run_carries_on() {
+    let w = world(4).await;
+    let first = w
+        .node
+        .cloud_backup(&CloudPolicy {
+            originals: false,
+            byte_budget: Some(1),
+        })
+        .await
+        .unwrap();
+    assert!(first.uploaded >= 1 && first.left > 0, "{first:?}");
+    let rest = w
+        .node
+        .cloud_backup(&CloudPolicy {
+            originals: false,
+            byte_budget: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(rest.left, 0);
+    assert!(rest.failed.is_empty(), "{:?}", rest.failed);
+    // Only thumbnails and previews went up without the originals option.
+    let all = w
+        .node
+        .store()
+        .photos_by_time(TimeRange::ALL, Page::all())
+        .await
+        .unwrap()
+        .len() as u32;
+    assert!(
+        first.uploaded + rest.uploaded <= all * 2,
+        "no originals went up"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_encrypted_copy_lets_a_phone_free_space_and_says_it_was_the_only_one() {
+    let w = world_as(2, Role::Companion).await;
+    w.node.set_keep_rules(0, false).unwrap();
+    // No other device and nothing in the cloud yet: nothing may go.
+    let none = w.node.free_up_space(true).await.unwrap();
+    assert!(none.photos.is_empty(), "{none:?}");
+
+    let r = w
+        .node
+        .cloud_backup(&CloudPolicy {
+            originals: true,
+            byte_budget: None,
+        })
+        .await
+        .unwrap();
+    assert!(r.failed.is_empty(), "{:?}", r.failed);
+    let dry = w.node.free_up_space(true).await.unwrap();
+    assert!(!dry.photos.is_empty());
+    assert_eq!(
+        dry.cloud_only, dry.photos,
+        "the cloud was the only other copy"
+    );
+
+    let done = w.node.free_up_space(false).await.unwrap();
+    assert_eq!(done.photos, dry.photos);
+    // The original is gone from this device (collection reclaims it shortly after) and the restore brings it back.
+    let id = done.photos[0];
+    assert!(w
+        .node
+        .node()
+        .blobs()
+        .protections(&id)
+        .await
+        .unwrap()
+        .is_empty());
+    wait_until(Duration::from_secs(30), || async {
+        !w.node.node().blobs().has(&id).await.unwrap()
+    })
+    .await
+    .expect("the store collects it");
+    let r = w.node.cloud_restore().await.unwrap();
+    assert!(r.failed.is_empty(), "{:?}", r.failed);
+    assert!(w.node.node().blobs().has(&id).await.unwrap());
 }

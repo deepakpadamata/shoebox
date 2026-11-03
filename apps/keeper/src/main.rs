@@ -181,6 +181,16 @@ enum WebCmd {
     /// Hold and answer for every Live web link of the library, and bring the ones whose album changed up to date.
     /// A Live link works only while a device that holds it is online; a keeper is usually always on.
     Serve,
+    /// Keep an encrypted copy of the whole library in Shoebox Cloud: `on`, `off`, or no word to show the setting.
+    Backup {
+        #[arg(value_parser = ["on", "off"])]
+        state: Option<String>,
+        /// Upload now instead of waiting for the next round.
+        #[arg(long)]
+        now: bool,
+    },
+    /// Download and check what this keeper lacks from the encrypted copy (after a disk was lost).
+    Restore,
 }
 
 #[derive(Subcommand)]
@@ -529,6 +539,44 @@ async fn main() -> Result<()> {
                                 ""
                             }
                         );
+                    }
+                }
+                WebCmd::Backup { state, now } => {
+                    let enabled = state.as_deref().map(|s| s == "on");
+                    let d = c
+                        .call_raw(json!({"cmd":"web","action":"backup","enabled":enabled}))
+                        .await?;
+                    println!(
+                        "Cloud copy is {}.",
+                        if d["enabled"] == true { "on" } else { "off" }
+                    );
+                    if now {
+                        let d = c
+                            .call_raw(json!({"cmd":"web","action":"backup-now"}))
+                            .await?;
+                        println!(
+                            "Uploaded {} blobs ({} bytes); {} were already there.",
+                            d["uploaded"], d["bytes"], d["already"]
+                        );
+                        for f in d["failed"].as_array().into_iter().flatten() {
+                            eprintln!("failed: {}", f.as_str().unwrap_or("?"));
+                        }
+                    }
+                }
+                WebCmd::Restore => {
+                    let d = c.call_raw(json!({"cmd":"web","action":"restore"})).await?;
+                    println!(
+                        "Restored {} blobs ({} already here); library state {}.",
+                        d["restored"],
+                        d["already"],
+                        if d["state"] == true {
+                            "folded in"
+                        } else {
+                            "not found"
+                        }
+                    );
+                    for f in d["failed"].as_array().into_iter().flatten() {
+                        eprintln!("failed: {}", f.as_str().unwrap_or("?"));
                     }
                 }
                 WebCmd::Serve => {

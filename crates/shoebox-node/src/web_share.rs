@@ -549,6 +549,15 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(report)
     }
 
+    /// Has the album changed since this version of the share was made?
+    pub async fn web_share_is_stale(&self, share: &WebShare) -> Result<bool> {
+        let opts = WebShareOptions {
+            full_size: share.full_size,
+            expires_ms: share.expires_ms,
+        };
+        Ok(self.album_fingerprint(&share.album, &opts).await? != share.content)
+    }
+
     /// What an album holds, as far as a share cares: its photos and which of them are deleted, and the options.
     async fn album_fingerprint(&self, album: &AlbumId, opts: &WebShareOptions) -> Result<[u8; 32]> {
         let mut ids = self.store().album_items(album, Page::all()).await?;

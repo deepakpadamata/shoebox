@@ -123,6 +123,13 @@ pub const COMMANDS: &[&str] = &[
     "album_share",
     "diagnostics",
     "device_link",
+    "web_links",
+    "web_link_check",
+    "web_link_create",
+    "web_link_revoke",
+    "web_link_rotate",
+    "web_links_refresh",
+    "cloud_setup",
 ];
 
 pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Value> {
@@ -388,6 +395,43 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
         "set_profile_name" => {
             core.set_profile_name(&arg::<String>(&args, "name")?)
                 .await?;
+            Ok(json!({}))
+        }
+        "web_links" => out(core.web_links(&arg::<String>(&args, "album")?).await?),
+        "web_link_check" => out(core
+            .web_link_check(
+                &arg::<String>(&args, "album")?,
+                opt::<bool>(&args, "full_size")?.unwrap_or(false),
+            )
+            .await?),
+        "web_link_create" => out(core
+            .web_link_create(
+                &arg::<String>(&args, "album")?,
+                opt::<bool>(&args, "full_size")?.unwrap_or(false),
+                opt::<u32>(&args, "days")?,
+            )
+            .await?),
+        "web_link_revoke" => {
+            core.web_link_revoke(
+                &arg::<String>(&args, "album")?,
+                &arg::<String>(&args, "share")?,
+            )
+            .await?;
+            Ok(json!({}))
+        }
+        "web_link_rotate" => out(core
+            .web_link_rotate(
+                &arg::<String>(&args, "album")?,
+                &arg::<String>(&args, "share")?,
+            )
+            .await?),
+        "web_links_refresh" => out(core.web_links_refresh().await?),
+        "cloud_setup" => {
+            core.cloud_setup(
+                opt::<String>(&args, "url")?,
+                opt::<String>(&args, "phrase")?,
+            )
+            .await?;
             Ok(json!({}))
         }
         "album_share_check" => out(core

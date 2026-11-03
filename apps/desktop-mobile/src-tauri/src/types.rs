@@ -664,3 +664,48 @@ ts_type! {
         pub is_set: bool,
     }
 }
+
+ts_type! {
+    /// One web link to an album (W1-07).
+    pub struct WebLinkInfo {
+        pub share_id: String,
+        /// The whole link, key included.
+        pub text: String,
+        pub qr_svg: String,
+        pub full_size: bool,
+        pub expires_at: Option<f64>,
+        pub created_at: f64,
+        pub items: u32,
+        /// Photos left out because their previews are not on this device yet.
+        pub skipped: u32,
+        /// Originals left out because their location could not be removed.
+        pub withheld: u32,
+        /// The album has changed since this version was made.
+        pub stale: bool,
+    }
+}
+
+ts_type! {
+    /// An album's web links, and whether the cloud is set up for this library.
+    pub struct WebLinksInfo {
+        /// The library has its cloud secret.
+        pub enabled: bool,
+        /// The service's address, if one is set.
+        pub url: Option<String>,
+        pub links: Vec<WebLinkInfo>,
+    }
+}
+
+ts_type! {
+    /// What making a link would upload, so the person can decide before anything is sent.
+    pub struct WebLinkCheck {
+        pub photos: u32,
+        pub videos: u32,
+        /// Ciphertext to upload, at most (what the service already holds is not sent again).
+        pub bytes: f64,
+        /// Photos with a place, whose original would go up with it removed (only with full size).
+        pub with_location: u32,
+        /// Of those, ones in a format whose location cannot be removed: left out.
+        pub unremovable: u32,
+    }
+}

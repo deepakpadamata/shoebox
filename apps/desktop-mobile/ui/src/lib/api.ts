@@ -44,11 +44,14 @@ import type { PersonCard } from '../bindings/PersonCard';
 import type { PeopleList } from '../bindings/PeopleList';
 import type { SearchIndexer } from '../bindings/SearchIndexer';
 import type { SearchSuggestion } from '../bindings/SearchSuggestion';
+import type { WebLinkCheck } from '../bindings/WebLinkCheck';
+import type { WebLinkInfo } from '../bindings/WebLinkInfo';
+import type { WebLinksInfo } from '../bindings/WebLinksInfo';
 
 export type {
   AboutInfo, AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
   AlbumInfo, AppEvent, BackupFolder, BackupPolicy, BackupScope, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, Health, ImportSummary,
-  LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, FaceOut, PeopleList, PersonCard, SearchChip, SearchIndexer, SearchPage, SearchStatus, SearchSuggestion, Settings, TransferItem, Transfers,
+  LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, FaceOut, PeopleList, PersonCard, SearchChip, SearchIndexer, SearchPage, SearchStatus, SearchSuggestion, Settings, TransferItem, Transfers, WebLinkCheck, WebLinkInfo, WebLinksInfo,
 };
 
 export type BlobKind = 'thumb' | 'preview' | 'original' | 'poster' | 'motion';
@@ -231,6 +234,13 @@ export const api = {
   sharedRemoveMember: (album: string, member: string) => call<{}>('shared_remove_member', { album, member }),
   profile: () => call<Profile>('profile'),
   setProfileName: (name: string) => call<{}>('set_profile_name', { name }),
+  webLinks: (album: string) => call<WebLinksInfo>('web_links', { album }),
+  webLinkCheck: (album: string, full_size: boolean) => call<WebLinkCheck>('web_link_check', { album, full_size }),
+  webLinkCreate: (album: string, full_size: boolean, days: number | null) => call<WebLinkInfo>('web_link_create', { album, full_size, days }),
+  webLinkRevoke: (album: string, share: string) => call<{}>('web_link_revoke', { album, share }),
+  webLinkRotate: (album: string, share: string) => call<WebLinkInfo>('web_link_rotate', { album, share }),
+  webLinksRefresh: () => call<number>('web_links_refresh'),
+  cloudSetup: (url: string | null, phrase: string | null) => call<{}>('cloud_setup', { url, phrase }),
   albumShareCheck: (album: string) => call<AddCheck>('album_share_check', { album }),
   albumShare: (album: string, location: string | null) => call<SharedAlbumInfo>('album_share', { album, location }),
   syncBurst: (seconds = 10) => call<import('../bindings/BurstReport').BurstReport>('sync_burst', { seconds }),

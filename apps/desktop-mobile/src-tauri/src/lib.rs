@@ -20,6 +20,7 @@ pub mod photos_source;
 mod search_models;
 mod shared;
 pub mod types;
+mod web_links;
 
 #[cfg(feature = "http")]
 pub mod http;

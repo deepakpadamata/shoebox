@@ -17,6 +17,7 @@
   import Button from '../components/Button.svelte';
   import Sheet from '../components/Sheet.svelte';
   import ShareSheet from '../components/ShareSheet.svelte';
+  import WebLinkSheet from '../components/WebLinkSheet.svelte';
   import Viewer from './Viewer.svelte';
 
   interface Props {
@@ -36,6 +37,7 @@
   let sharedAs = $state<string | null>(null);
   let shareAsk = $state(0);
   let sharing = $state(false);
+  let linkSheet = $state(false);
   $effect(() => {
     if (source !== 'album' || !album) return;
     app.version;
@@ -373,9 +375,11 @@
       {#if sharedAs}
         <span class="grow small">Shared with others. Photos you add here are shared too.</span>
         <Button size="sm" onclick={() => go(`shared/${sharedAs}`)}>Open shared album</Button>
+        <Button size="sm" onclick={() => (linkSheet = true)}>Share a link</Button>
       {:else}
         <span class="grow small muted">Only on your devices.</span>
         <Button size="sm" disabled={sharing} onclick={startShare}>{sharing ? 'Sharing…' : 'Share this album'}</Button>
+        <Button size="sm" onclick={() => (linkSheet = true)}>Share a link</Button>
       {/if}
     </div>
   {/if}
@@ -483,6 +487,10 @@
 
 <ShareSheet open={shareSheet} ids={selected} anchor={() => shareButton?.getBoundingClientRect()} onclose={() => (shareSheet = false)}
   ondone={() => { shareSheet = false; selected = []; }} />
+
+{#if source === 'album' && album}
+  <WebLinkSheet open={linkSheet} {album} onclose={() => (linkSheet = false)} />
+{/if}
 
 <Sheet open={albumSheet} title="Add to album" onclose={() => (albumSheet = false)} width={380}>
   <div class="stack">

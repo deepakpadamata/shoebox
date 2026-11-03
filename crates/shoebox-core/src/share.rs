@@ -216,3 +216,12 @@ pub fn open(
     let manifest = postcard::from_bytes(&body).map_err(|_| ShareError::Malformed)?;
     Ok((header, manifest))
 }
+
+/// What an owner uploads to put a share on Shoebox Cloud (`PUT /v1/shares/{share_id}`): the sealed manifest, the
+/// blob ids the share may serve (the service serves nothing else through it), and when it stops.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct ShareUpload {
+    pub manifest: Vec<u8>,
+    pub cids: Vec<[u8; 32]>,
+    pub expires_ms: Option<i64>,
+}

@@ -6,6 +6,7 @@
 pub mod album_state;
 pub mod clock;
 pub mod cloud;
+pub mod cloud_auth;
 pub mod codec;
 #[cfg(feature = "testing")]
 pub mod conformance;

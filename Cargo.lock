@@ -7012,6 +7012,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "shoebox-cloud"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "blake3",
+ "bytes",
+ "clap",
+ "futures",
+ "getrandom 0.3.4",
+ "hex",
+ "http-body-util",
+ "postcard",
+ "serde",
+ "serde_json",
+ "shoebox-core",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "shoebox-core"
 version = "0.1.0"
 dependencies = [

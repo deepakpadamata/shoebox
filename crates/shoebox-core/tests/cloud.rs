@@ -229,3 +229,103 @@ fn a_stream_of_64_mib_round_trips_through_a_file() {
 fn a_stream_of_1_gib_round_trips() {
     stream_round_trip(1024 * 1024 * 1024);
 }
+
+mod auth {
+    use shoebox_core::cloud_auth::{AuthError, CloudAuth};
+    use shoebox_core::identity::{issue_device_cert, KeyPair};
+    use shoebox_core::model::Role;
+    use shoebox_core::store::LibraryId;
+    use shoebox_core::Hlc;
+
+    const LIB: LibraryId = LibraryId([3; 16]);
+
+    fn hlc() -> Hlc {
+        Hlc {
+            physical_ms: 1,
+            counter: 0,
+            device: shoebox_core::EndpointId([0; 32]),
+        }
+    }
+
+    fn signed(method: &str, path: &str, body: &[u8], now: i64) -> (CloudAuth, KeyPair) {
+        let root = KeyPair::from_seed([1; 32]);
+        let device = KeyPair::from_seed([2; 32]);
+        let cert = issue_device_cert(
+            &root,
+            LIB,
+            device.endpoint_id(),
+            Role::Keeper,
+            "nest",
+            hlc(),
+            false,
+        );
+        (
+            CloudAuth::sign(
+                &device,
+                LIB,
+                root.root_public(),
+                None,
+                cert,
+                method,
+                path,
+                now,
+                body,
+            ),
+            device,
+        )
+    }
+
+    #[test]
+    fn a_signed_request_verifies_and_survives_the_header() {
+        let (a, _) = signed("PUT", "/v1/blobs/ab", b"body", 1_000_000);
+        let back = CloudAuth::from_header(&a.to_header()).unwrap();
+        assert_eq!(back, a);
+        assert!(back
+            .verify("PUT", "/v1/blobs/ab", b"body", 1_000_500, 60_000)
+            .is_ok());
+    }
+
+    #[test]
+    fn another_method_path_body_or_time_does_not_verify() {
+        let (a, _) = signed("PUT", "/v1/blobs/ab", b"body", 1_000_000);
+        let now = 1_000_000;
+        assert_eq!(
+            a.verify("DELETE", "/v1/blobs/ab", b"body", now, 60_000),
+            Err(AuthError::BadSignature)
+        );
+        assert_eq!(
+            a.verify("PUT", "/v1/blobs/ac", b"body", now, 60_000),
+            Err(AuthError::BadSignature)
+        );
+        assert_eq!(
+            a.verify("PUT", "/v1/blobs/ab", b"BODY", now, 60_000),
+            Err(AuthError::BadSignature)
+        );
+        assert_eq!(
+            a.verify("PUT", "/v1/blobs/ab", b"body", now + 120_000, 60_000),
+            Err(AuthError::Stale)
+        );
+        assert_eq!(
+            a.verify("PUT", "/v1/blobs/ab", b"body", now - 120_000, 60_000),
+            Err(AuthError::Stale)
+        );
+    }
+
+    #[test]
+    fn a_signature_by_another_key_than_the_certified_device_fails() {
+        let (mut a, _) = signed("GET", "/v1/usage", b"", 5);
+        let other = KeyPair::from_seed([9; 32]);
+        a.signature = other.sign(b"anything");
+        assert_eq!(
+            a.verify("GET", "/v1/usage", b"", 5, 1),
+            Err(AuthError::BadSignature)
+        );
+    }
+
+    #[test]
+    fn garbage_headers_are_malformed() {
+        assert_eq!(CloudAuth::from_header("zz"), Err(AuthError::Malformed));
+        assert_eq!(CloudAuth::from_header("00ff"), Err(AuthError::Malformed));
+        assert_eq!(CloudAuth::from_header(""), Err(AuthError::Malformed));
+    }
+}

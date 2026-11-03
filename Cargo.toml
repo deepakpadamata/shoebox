@@ -13,6 +13,7 @@ members = [
     "crates/shoebox-web",
     "crates/shoebox-testkit",
     "apps/keeper",
+    "apps/cloud",
     "apps/desktop-mobile/src-tauri",
     "tools/store-bench",
     "tools/shoebox-dev",

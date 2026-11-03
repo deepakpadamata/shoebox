@@ -1,0 +1,83 @@
+//! `shoebox-cloud`: run the service.
+
+use clap::Parser;
+use shoebox_cloud::{router, Config, Service};
+use std::net::SocketAddr;
+use std::path::PathBuf;
+
+#[derive(Parser)]
+#[command(
+    name = "shoebox-cloud",
+    about = "Shoebox Cloud: a store for ciphertext, serving web links and holding libraries."
+)]
+struct Args {
+    /// Where blobs, manifests and library records live.
+    #[arg(long, env = "SHOEBOX_CLOUD_DATA", default_value = "./cloud-data")]
+    data_dir: PathBuf,
+    #[arg(long, env = "SHOEBOX_CLOUD_LISTEN", default_value = "127.0.0.1:8080")]
+    listen: SocketAddr,
+    /// A built viewer page (`apps/web-viewer`), served at `/`.
+    #[arg(long, env = "SHOEBOX_CLOUD_VIEWER")]
+    viewer_dir: Option<PathBuf>,
+    /// Storage a library may use, in GiB.
+    #[arg(long, default_value_t = 2)]
+    quota_gib: u64,
+    /// Bytes a share may serve a day, in GiB.
+    #[arg(long, default_value_t = 1)]
+    share_daily_gib: u64,
+    /// Refuse libraries that have not registered (a subscription is needed first).
+    #[arg(long)]
+    closed: bool,
+    /// Behind a proxy we run: take the client address from `X-Forwarded-For`.
+    #[arg(long)]
+    trust_proxy: bool,
+    /// A host the viewer page may connect to (a relay, for Live links). Repeatable.
+    #[arg(long = "csp-connect")]
+    csp_connect: Vec<String>,
+}
+
+const GIB: u64 = 1024 * 1024 * 1024;
+const WEEK_MS: i64 = 7 * 24 * 3600 * 1000;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+    let args = Args::parse();
+    let mut config = Config::new(args.data_dir);
+    config.viewer_dir = args.viewer_dir;
+    config.library_quota = args.quota_gib * GIB;
+    config.share_daily_bytes = args.share_daily_gib * GIB;
+    config.open_registration = !args.closed;
+    config.trust_proxy = args.trust_proxy;
+    config.csp_connect = args.csp_connect;
+    let service = Service::open(config)?;
+
+    // Expired shares answer "expired" for a week, then are deleted.
+    let janitor = service.clone();
+    tokio::spawn(async move {
+        loop {
+            let n = janitor.store.sweep_expired(janitor.now() - WEEK_MS);
+            if n > 0 {
+                tracing::info!(deleted = n, "expired shares removed");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        }
+    });
+
+    let listener = tokio::net::TcpListener::bind(args.listen).await?;
+    println!(
+        "shoebox-cloud listening on http://{}",
+        listener.local_addr()?
+    );
+    axum::serve(
+        listener,
+        router(service).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+    .await?;
+    Ok(())
+}

@@ -62,6 +62,9 @@ impl<L: LibraryStore> LibraryNode<L> {
     ) -> Result<RecoveryKit> {
         let cap = self.capability()?;
         self.certify_self(root, role, name).await?;
+        // The cloud secret (W1-02) comes from the root, which is not kept: hand it to the library now.
+        self.set_cloud_secret(&shoebox_core::cloud::CloudSecret::from_root(root))
+            .await?;
         // The first device has seen everything there is: alert on any admin from now on.
         self.arm_admin_watch().await?;
         Ok(RecoveryKit::new(
@@ -77,7 +80,10 @@ impl<L: LibraryStore> LibraryNode<L> {
     pub async fn restore_from_kit(&self, phrase: &str, role: Role, name: &str) -> Result<()> {
         let cap = self.capability()?;
         let root = RecoveryKit::key_from_phrase(phrase, &cap.root)?;
-        self.certify_self(&root, role, name).await
+        self.certify_self(&root, role, name).await?;
+        self.set_cloud_secret(&shoebox_core::cloud::CloudSecret::from_root(&root))
+            .await?;
+        Ok(())
     }
 
     async fn certify_self(&self, root: &KeyPair, role: Role, name: &str) -> Result<()> {
@@ -282,6 +288,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         self.store()
             .apply_device_change(SignedDeviceChange::Device(cert))
             .await?;
+        self.push_cloud_certs_in_background();
         Ok(())
     }
 
@@ -353,6 +360,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         store
             .apply_device_change(SignedDeviceChange::Device(revocation))
             .await?;
+        self.push_cloud_certs_in_background();
         Ok(())
     }
 

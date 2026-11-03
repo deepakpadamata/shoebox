@@ -50,6 +50,8 @@ Each signature or keyed hash starts with its domain, so one can never be replaye
 | `shoebox/cloud-blob-key/v1` | a blob's cloud key, from the cloud secret and the plaintext hash |
 | `shoebox/cloud-nonce/v1` | a piece's nonce (keyed BLAKE3 by the blob key, piece number, last flag) |
 | `shoebox/share-manifest-key/v1` | the key that opens a share manifest, derived from the link's share key (W1-03) |
+| `shoebox/cloud-request/v1` | a signed request to Shoebox Cloud (`CloudAuth`): method, path and query, time, body hash (W1-04) |
+| `shoebox/share-signer/v1` | the key a share manifest is signed with, derived from the share key (W1-05) |
 | `SBXS` (the magic) | a sealed share manifest's signature covers every byte from the magic on |
 
 Sealed cloud blobs are 4 MiB pieces of XChaCha20-Poly1305 (16-byte tags, no header); locked by golden bytes in

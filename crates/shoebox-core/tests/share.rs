@@ -209,3 +209,59 @@ fn fifty_thousand_items_stay_small_and_fast() {
     // Generous in a debug build; the release numbers are far under the issue's 1 s and 500 ms.
     assert!(encode.as_secs_f32() < 5.0 && decode.as_secs_f32() < 5.0);
 }
+
+mod link {
+    use shoebox_core::share::{LinkMode, ShareKey, ShareLink};
+
+    #[test]
+    fn a_cloud_link_round_trips_through_its_fragment() {
+        let link = ShareLink::cloud([0xAB; 16], ShareKey([0x5C; 32]));
+        let text = link.to_fragment();
+        assert!(text.starts_with("c."));
+        assert!(text.len() < 80, "{text}");
+        assert!(text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b".-_".contains(&b)));
+        let back = ShareLink::parse(&format!("#{text}")).unwrap();
+        assert_eq!(back, link);
+        assert_eq!(back.mode, LinkMode::Cloud);
+        assert_eq!(back.share_id(), Some([0xAB; 16]));
+    }
+
+    #[test]
+    fn every_length_of_bytes_round_trips_and_garbage_is_refused() {
+        for n in 1..=40usize {
+            let mut l = ShareLink::cloud([1; 16], ShareKey([2; 32]));
+            l.mode = LinkMode::Live;
+            l.locator = (0..n as u8).collect();
+            assert_eq!(ShareLink::parse(&l.to_fragment()).unwrap(), l, "{n} bytes");
+        }
+        let good = ShareLink::cloud([9; 16], ShareKey([8; 32])).to_fragment();
+        for bad in [
+            "".to_string(),
+            "x.AAAA.AAAA".to_string(),
+            "c.AAAA".to_string(),
+            format!("{good}.extra"),
+            good.replace('.', "!"),
+            "c.AAAA.AAAA".to_string(), // locator too short for a cloud link
+            good.replace("c.", "c.====").to_string(),
+            format!("{}B", &good[..good.len() - 1]), // non-canonical trailing bits
+        ] {
+            assert!(ShareLink::parse(&bad).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_signing_key_comes_from_the_share_key_alone() {
+        let k = ShareKey([3; 32]);
+        assert_eq!(
+            k.signer().public_bytes(),
+            ShareKey([3; 32]).signer().public_bytes()
+        );
+        assert_ne!(
+            k.signer().public_bytes(),
+            ShareKey([4; 32]).signer().public_bytes()
+        );
+        assert_ne!(k.signer().seed(), k.0);
+    }
+}

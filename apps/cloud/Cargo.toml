@@ -35,6 +35,11 @@ clap = { version = "4", features = ["derive", "env"] }
 getrandom = "0.3"
 
 [dev-dependencies]
+shoebox-node.workspace = true
+shoebox-store.workspace = true
+shoebox-testkit.workspace = true
+shoebox-media.workspace = true
+xtask = { path = "../../xtask" }
 tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

@@ -58,6 +58,16 @@ impl ShareKey {
     }
 }
 
+/// The key a share's manifest is signed with, derived from the share key, so that any member device can sign a
+/// refreshed manifest and anyone with the link can check it. (A device key could not do both: the link would name
+/// one device, and a keeper's refresh would fail the check.) Since the same link opens the manifest, this signature
+/// is an integrity check, not proof of who made the share.
+impl ShareKey {
+    pub fn signer(&self) -> KeyPair {
+        KeyPair::from_seed(blake3::derive_key("shoebox/share-signer/v1", &self.0))
+    }
+}
+
 impl fmt::Debug for ShareKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("ShareKey(..)")
@@ -224,4 +234,102 @@ pub struct ShareUpload {
     pub manifest: Vec<u8>,
     pub cids: Vec<[u8; 32]>,
     pub expires_ms: Option<i64>,
+}
+
+/// How a link opens a share. The fragment is `<mode>.<locator>.<key>`, the last two in unpadded URL-safe base64;
+/// a browser never sends it to any server.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ShareLink {
+    pub mode: LinkMode,
+    /// Cloud: the 16-byte share id. (Live links carry their ticket here; W1-08.)
+    pub locator: Vec<u8>,
+    pub key: ShareKey,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LinkMode {
+    Cloud,
+    Live,
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+fn b64_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (u32::from(c[0]) << 16)
+            | (u32::from(*c.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*c.get(2).unwrap_or(&0));
+        for i in 0..=c.len() {
+            out.push(B64[(n >> (18 - 6 * i) & 63) as usize] as char);
+        }
+    }
+    out
+}
+
+fn b64_decode(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0);
+    for ch in text.bytes() {
+        let v = B64.iter().position(|&b| b == ch)? as u32;
+        acc = (acc << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    // Unused low bits must be zero, so one value has one spelling.
+    (acc == 0).then_some(out)
+}
+
+impl ShareLink {
+    pub fn cloud(share_id: [u8; 16], key: ShareKey) -> Self {
+        Self {
+            mode: LinkMode::Cloud,
+            locator: share_id.to_vec(),
+            key,
+        }
+    }
+
+    /// The text after the `#`.
+    pub fn to_fragment(&self) -> String {
+        let mode = match self.mode {
+            LinkMode::Cloud => "c",
+            LinkMode::Live => "l",
+        };
+        format!(
+            "{mode}.{}.{}",
+            b64_encode(&self.locator),
+            b64_encode(&self.key.0)
+        )
+    }
+
+    /// Read the text after the `#` (a leading `#` is fine).
+    pub fn parse(fragment: &str) -> Option<Self> {
+        let mut parts = fragment.trim_start_matches('#').split('.');
+        let mode = match parts.next()? {
+            "c" => LinkMode::Cloud,
+            "l" => LinkMode::Live,
+            _ => return None,
+        };
+        let locator = b64_decode(parts.next()?)?;
+        let key: [u8; 32] = b64_decode(parts.next()?)?.try_into().ok()?;
+        if parts.next().is_some() || locator.is_empty() {
+            return None;
+        }
+        if mode == LinkMode::Cloud && locator.len() != 16 {
+            return None;
+        }
+        Some(Self {
+            mode,
+            locator,
+            key: ShareKey(key),
+        })
+    }
+
+    pub fn share_id(&self) -> Option<[u8; 16]> {
+        (self.mode == LinkMode::Cloud).then(|| self.locator.clone().try_into().ok())?
+    }
 }

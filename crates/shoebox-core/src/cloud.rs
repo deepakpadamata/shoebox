@@ -80,6 +80,15 @@ impl BlobKey {
     fn cipher(&self) -> XChaCha20Poly1305 {
         XChaCha20Poly1305::new((&self.0).into())
     }
+    /// Seal one piece of a blob: `index` counts from zero, `last` is true for the final piece (which may be short,
+    /// and is the only piece of a blob of `CHUNK` bytes or fewer). [`encrypt_stream`] is this in a loop; an async
+    /// caller reading a blob piece by piece uses it directly.
+    pub fn seal_piece(&self, index: u64, last: bool, plain: &[u8]) -> Vec<u8> {
+        self.cipher()
+            .encrypt(&self.nonce(index, last), plain)
+            .expect("sealing a piece cannot fail")
+    }
+
     /// Open one sealed piece (`CHUNK` bytes plus a 16-byte tag, or fewer for the last piece). A viewer that plays
     /// a video seeks to a piece, fetches it by byte range and opens it alone.
     pub fn open_piece(
@@ -151,7 +160,6 @@ pub fn encrypt_stream(
     mut plain: impl Read,
     mut out: impl Write,
 ) -> io::Result<(Cid, u64)> {
-    let cipher = key.cipher();
     let mut hasher = blake3::Hasher::new();
     let mut written = 0u64;
     let mut buf = vec![0u8; CHUNK + 1];
@@ -160,9 +168,7 @@ pub fn encrypt_stream(
     loop {
         let last = have <= CHUNK;
         let take = have.min(CHUNK);
-        let sealed = cipher
-            .encrypt(&key.nonce(index, last), &buf[..take])
-            .expect("sealing a piece cannot fail");
+        let sealed = key.seal_piece(index, last, &buf[..take]);
         hasher.update(&sealed);
         out.write_all(&sealed)?;
         written += sealed.len() as u64;

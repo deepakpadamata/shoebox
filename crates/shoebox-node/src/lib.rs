@@ -34,6 +34,7 @@ mod sync;
 mod ticket;
 mod transfers;
 pub mod update;
+pub mod web_share;
 
 pub use activity::Activity;
 pub use addr::{from_endpoint_addr, from_iroh_id, to_endpoint_addr, to_iroh_id};
@@ -68,3 +69,4 @@ pub use shards::{winning_rows, ShardView, PEOPLE_SNAPSHOT_KEY, SHARD_MIME};
 pub use sync::{SyncConfig, SyncPhase};
 pub use ticket::{LibraryTicket, TicketError};
 pub use transfers::{Transfer, TransferSnapshot};
+pub use web_share::{RefreshReport, WebShare, WebShareOptions, CLOUD_SECRET_KEY, CLOUD_URL_KEY};

@@ -99,6 +99,12 @@
     } catch (e) { fail(e); } finally { busy = ''; }
   }
 
+  // Full size and the end date change the link in place, so they apply as soon as they are set. Only a change of
+  // where the photos are kept makes a new address, and that waits for the button.
+  function autoApply() {
+    if (link && changed && !newAddress && busy === '') void apply();
+  }
+
   async function copy() {
     if (!link) return;
     try { await navigator.clipboard.writeText(link.text); toast('The link was copied'); } catch { toast('Select the link and copy it'); }
@@ -173,9 +179,9 @@
         <label class:on={!live}><input type="radio" name="where" checked={!live} disabled={busy !== ''} onchange={() => (live = false)} /><b>Kept online</b><span class="small muted">Works even when all your devices are off. Uses storage with the service.</span></label>
         <label class:on={live}><input type="radio" name="where" checked={live} disabled={busy !== ''} onchange={() => (live = true)} /><b>From my devices</b><span class="small muted">Free, and nothing is stored online, but it works only while a device of yours is on.</span></label>
       </div>
-      <div class="row-flex"><span class="grow">Allow full-size downloads</span><Toggle checked={fullSize} label="Allow full-size downloads" onchange={(v) => { fullSize = v; void loadCheck(); }} /></div>
+      <div class="row-flex"><span class="grow">Allow full-size downloads</span><Toggle checked={fullSize} label="Allow full-size downloads" onchange={(v) => { fullSize = v; void loadCheck(); autoApply(); }} /></div>
       <label class="row-flex">Link works for
-        <select class="input grow" bind:value={expiry} disabled={busy !== ''}>
+        <select class="input grow" value={expiry} disabled={busy !== ''} onchange={(e) => { expiry = e.currentTarget.value; autoApply(); }}>
           {#if link?.expires_at}<option value="current">Until {dateTime(link.expires_at)}</option>{/if}
           <option value="never">As long as I keep it</option>
           <option value="7">7 days from now</option>
@@ -199,9 +205,9 @@
 
       {#if !link}
         <Button kind="primary" block disabled={busy !== '' || (check !== null && check.photos + check.videos === 0)} onclick={make}>{busy === 'make' ? (live ? 'Preparing…' : 'Uploading…') : 'Make a link'}</Button>
-      {:else if changed}
-        {#if newAddress}<p class="small muted">Changing where the photos are kept makes a new link. The one above stops working, so anyone who has it needs the new one.</p>{/if}
-        <Button kind="primary" block disabled={busy !== ''} onclick={apply}>{busy === 'apply' ? 'Applying…' : newAddress ? 'Make the new link' : 'Apply changes'}</Button>
+      {:else if newAddress}
+        <p class="small muted">Changing where the photos are kept makes a new link. The one above stops working, so anyone who has it needs the new one.</p>
+        <Button kind="primary" block disabled={busy !== ''} onclick={apply}>{busy === 'apply' ? 'Making the new link…' : 'Make the new link'}</Button>
       {/if}
 
       {#if link}

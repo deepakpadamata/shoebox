@@ -1,0 +1,27 @@
+[package]
+name = "shoebox-web"
+description = "The browser side of a Shoebox web link: opens a share manifest and decrypts blobs. Built to WebAssembly for the viewer page."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+shoebox-core.workspace = true
+serde.workspace = true
+serde_json = "1"
+hex.workspace = true
+blake3.workspace = true
+wasm-bindgen = "=0.2.129"
+
+# Browsers have no operating-system randomness call; these pick the `crypto.getRandomValues` backend.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+
+[lints]
+workspace = true

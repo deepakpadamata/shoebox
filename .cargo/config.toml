@@ -4,3 +4,7 @@ xtask = "run --package xtask --release --"
 [env]
 # `cargo test -p desktop-mobile` writes the TypeScript bindings of the app's shared types here.
 TS_RS_EXPORT_DIR = { value = "apps/desktop-mobile/ui/src/bindings", relative = true }
+
+# The browser build of the web-link viewer (W1-01): getrandom 0.3 picks its backend by cfg.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

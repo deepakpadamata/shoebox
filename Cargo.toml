@@ -10,6 +10,7 @@ members = [
     "crates/shoebox-search",
     "crates/shoebox-ml",
     "crates/shoebox-node",
+    "crates/shoebox-web",
     "crates/shoebox-testkit",
     "apps/keeper",
     "apps/desktop-mobile/src-tauri",
@@ -59,6 +60,7 @@ shoebox-media = { path = "crates/shoebox-media" }
 shoebox-search = { path = "crates/shoebox-search" }
 shoebox-ml = { path = "crates/shoebox-ml" }
 shoebox-node = { path = "crates/shoebox-node" }
+shoebox-web = { path = "crates/shoebox-web" }
 shoebox-testkit = { path = "crates/shoebox-testkit" }
 
 # Keep build artifacts small: full debuginfo for the iroh dependency tree made `target/` 13 GB.

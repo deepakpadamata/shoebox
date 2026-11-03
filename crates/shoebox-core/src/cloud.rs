@@ -18,7 +18,8 @@ use std::io::{self, Read, Write};
 
 /// Plaintext bytes per sealed piece (matches the fetcher's 4 MiB pieces).
 pub const CHUNK: usize = 4 * 1024 * 1024;
-const TAG: usize = 16;
+/// Bytes a seal adds to each piece.
+pub const TAG: usize = 16;
 
 const SECRET_CONTEXT: &str = "shoebox/cloud-secret/v1";
 const BLOB_KEY_CONTEXT: &str = "shoebox/cloud-blob-key/v1";
@@ -78,6 +79,18 @@ impl fmt::Debug for BlobKey {
 impl BlobKey {
     fn cipher(&self) -> XChaCha20Poly1305 {
         XChaCha20Poly1305::new((&self.0).into())
+    }
+    /// Open one sealed piece (`CHUNK` bytes plus a 16-byte tag, or fewer for the last piece). A viewer that plays
+    /// a video seeks to a piece, fetches it by byte range and opens it alone.
+    pub fn open_piece(
+        &self,
+        index: u64,
+        last: bool,
+        sealed: &[u8],
+    ) -> Result<Vec<u8>, CloudCryptoError> {
+        self.cipher()
+            .decrypt(&self.nonce(index, last), sealed)
+            .map_err(|_| CloudCryptoError::BadCiphertext)
     }
     fn nonce(&self, index: u64, last: bool) -> XNonce {
         let mut h = blake3::Hasher::new_keyed(&self.0);
@@ -170,7 +183,6 @@ pub fn decrypt_stream(
     mut sealed: impl Read,
     mut out: impl Write,
 ) -> Result<Blake3Hash, CloudCryptoError> {
-    let cipher = key.cipher();
     let mut hasher = blake3::Hasher::new();
     let piece = CHUNK + TAG;
     let mut buf = vec![0u8; piece + 1];
@@ -182,9 +194,7 @@ pub fn decrypt_stream(
         if take < TAG {
             return Err(CloudCryptoError::BadCiphertext);
         }
-        let plain = cipher
-            .decrypt(&key.nonce(index, last), &buf[..take])
-            .map_err(|_| CloudCryptoError::BadCiphertext)?;
+        let plain = key.open_piece(index, last, &buf[..take])?;
         hasher.update(&plain);
         out.write_all(&plain)?;
         if last {

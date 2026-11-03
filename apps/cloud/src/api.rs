@@ -93,7 +93,7 @@ impl From<StoreError> for ApiError {
             StoreError::QuotaExceeded { used, quota } => Self::new(
                 StatusCode::INSUFFICIENT_STORAGE,
                 "quota-exceeded",
-                "the library is over its storage quota",
+                "this library is over its storage quota: stop a web link or remove something from the cloud copy, then try again",
             )
             .with(json!({ "used": used, "quota": quota })),
             StoreError::Conflict(why) => Self::new(StatusCode::CONFLICT, "conflict", why),
@@ -622,6 +622,7 @@ async fn list_shares(
         StatusCode::OK,
         json!({ "shares": s.store.shares_of(lib).iter().map(|(id, v, e, n)| json!({
             "shareId": hex::encode(id), "version": v, "expiresMs": e, "manifestBytes": n,
+            "reported": s.store.report_of(id).map(|(at, why)| json!({ "atMs": at, "reason": why })),
         })).collect::<Vec<_>>() }),
     ))
 }
@@ -658,6 +659,13 @@ async fn post_certs(
 
 fn public_share(s: &Service, id: &ShareId) -> Result<(), ApiError> {
     let (_, _, expires, _) = s.store.share_info(id).ok_or_else(ApiError::not_found)?;
+    if s.store.report_of(id).is_some() {
+        return Err(ApiError::new(
+            StatusCode::GONE,
+            "reported",
+            "this link was reported and is switched off while it is looked at",
+        ));
+    }
     if expires.is_some_and(|e| s.now() >= e) {
         return Err(ApiError::new(
             StatusCode::GONE,
@@ -727,6 +735,40 @@ async fn get_share_blob(
         },
     )
     .await
+}
+
+/// `POST /report/{share}`: anyone who has a link can switch it off. The service knows nothing about what is in it,
+/// so it takes the share's word-free id and a few words of why. A share is taken down at once and the owner sees
+/// the reason in the app; the operator reviews and either deletes the share or deletes `reports/<id>` to reinstate it.
+async fn report(
+    State(s): Svc,
+    Path(id_hex): Path<String>,
+    body: Body,
+) -> Result<Response, ApiError> {
+    let id: ShareId = parse_hex(&id_hex).map_err(|_| ApiError::not_found())?;
+    // Few reports per share and per service a minute: a person reporting is rare, a script is not.
+    if !s.limiter.hit(&format!("report:{id_hex}"), s.now(), 5)
+        || !s.limiter.hit("report:all", s.now(), 120)
+    {
+        return Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate-limited",
+            "slow down",
+        ));
+    }
+    let (bytes, _) = small_body(body, 2048).await?;
+    let reason: String = String::from_utf8_lossy(&bytes)
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(200)
+        .collect();
+    if !s.store.report_share(&id, s.now(), reason.trim()) {
+        return Err(ApiError::not_found());
+    }
+    Ok(json_response(
+        StatusCode::ACCEPTED,
+        json!({ "reported": true }),
+    ))
 }
 
 async fn preflight() -> Response {
@@ -862,6 +904,7 @@ pub(crate) fn router(service: Arc<Service>) -> Router {
     let public = Router::new()
         .route("/s/{share}/m", get(get_manifest).options(preflight))
         .route("/s/{share}/b/{cid}", get(get_share_blob).options(preflight))
+        .route("/report/{share}", post(report).options(preflight))
         .layer(middleware::from_fn(public_cors));
     let owner = Router::new()
         .route("/v1/blobs", get(list_blobs))

@@ -60,6 +60,7 @@ impl AppCore {
             skipped: share.skipped,
             withheld: share.withheld,
             stale,
+            reported: None,
         })
     }
 
@@ -71,9 +72,15 @@ impl AppCore {
         let url = ln.cloud_url().await?;
         let mut links = vec![];
         if let Some(base) = &url {
+            let reported = ln.reported_web_shares().await;
             for s in ln.web_shares(&album).await? {
                 let stale = ln.web_share_is_stale(&s).await.unwrap_or(false);
-                links.push(Self::web_link_info(&s, s.link(base), stale, None)?);
+                let mut info = Self::web_link_info(&s, s.link(base), stale, None)?;
+                info.reported = reported
+                    .iter()
+                    .find(|(id, _)| *id == s.share_id)
+                    .map(|(_, why)| why.clone());
+                links.push(info);
             }
             for s in ln.web_live_shares(&album).await? {
                 let stale = ln.web_share_is_stale(&s).await.unwrap_or(false);

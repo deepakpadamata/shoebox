@@ -572,6 +572,34 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(report)
     }
 
+    /// Links the service switched off because someone reported them (W1-10): share id and the reporter's words.
+    /// Empty when the service cannot be reached; the sheet then simply shows nothing.
+    pub async fn reported_web_shares(&self) -> Vec<([u8; 16], String)> {
+        let Ok(s) = self.session().await else {
+            return vec![];
+        };
+        let Ok(res) = s
+            .call("GET", "/v1/shares", vec![], now_i64(self.now_ms()))
+            .await
+        else {
+            return vec![];
+        };
+        let Ok(bytes) = res.bytes().await else {
+            return vec![];
+        };
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+        v["shares"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|x| {
+                let id: [u8; 16] = hex::decode(x["shareId"].as_str()?).ok()?.try_into().ok()?;
+                let why = x["reported"]["reason"].as_str()?.to_string();
+                Some((id, why))
+            })
+            .collect()
+    }
+
     /// Has the album changed since this version of the share was made?
     pub async fn web_share_is_stale(&self, share: &WebShare) -> Result<bool> {
         let opts = WebShareOptions {

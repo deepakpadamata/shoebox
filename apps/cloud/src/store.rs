@@ -192,6 +192,33 @@ impl Store {
     fn share_dir(&self, id: &ShareId) -> PathBuf {
         self.dir.join("shares").join(hex::encode(id))
     }
+    fn report_path(&self, id: &ShareId) -> PathBuf {
+        self.dir.join("reports").join(hex::encode(id))
+    }
+
+    /// Take a share down because someone reported it (W1-10). The ciphertext stays, as does the share's record, so
+    /// the owner can be told and the operator can review; the share just stops being served. Returns `false` for a
+    /// share that does not exist. The first report's time and words are kept.
+    pub fn report_share(&self, id: &ShareId, now_ms: i64, reason: &str) -> bool {
+        if !lock(&self.inner).shares.contains_key(id) {
+            return false;
+        }
+        let path = self.report_path(id);
+        if path.exists() {
+            return true;
+        }
+        let _ = std::fs::create_dir_all(self.dir.join("reports"));
+        let _ = write_atomic(&path, format!("{now_ms}\n{reason}").as_bytes());
+        true
+    }
+
+    /// When and why a share was reported, if it was. Reinstating is deleting the file in `reports/`.
+    pub fn report_of(&self, id: &ShareId) -> Option<(i64, String)> {
+        let text = std::fs::read_to_string(self.report_path(id)).ok()?;
+        let (at, reason) = text.split_once('\n')?;
+        Some((at.parse().ok()?, reason.to_string()))
+    }
+
     pub fn manifest_path(&self, id: &ShareId) -> PathBuf {
         self.share_dir(id).join("manifest")
     }

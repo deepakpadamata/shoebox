@@ -125,6 +125,9 @@
               {#if l.live}<span class="pill small">{l.online ? 'From this device' : 'From another device'}</span>{/if}
               {#if l.stale}<span class="pill small">Album changed</span>{/if}
             </div>
+            {#if l.reported !== null}
+              <p class="small warn"><b>Switched off.</b> Someone who opened this link reported it{l.reported ? `: “${l.reported}”` : ''}. It stays off until the service has looked at it. You can stop sharing it, or make a new link.</p>
+            {/if}
             {#if l.skipped || l.withheld}
               <p class="small muted">{#if l.skipped}{plural(l.skipped, 'photo')} not on this device yet, left out. {/if}{#if l.withheld}{plural(l.withheld, 'original')} left out because their location cannot be removed.{/if}</p>
             {/if}
@@ -194,6 +197,7 @@
   .field { display: flex; flex-direction: column; gap: 6px; font-weight: 600; font-size: 13px; }
   .field .muted { font-weight: 400; }
   .wrap { flex-wrap: wrap; }
+  .warn { color: var(--danger, #c0392b); }
   .choice { display: flex; flex-direction: column; gap: 8px; }
   .choice label { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
   .choice label.on { border-color: var(--accent); }

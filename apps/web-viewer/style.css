@@ -108,3 +108,6 @@ main { padding: 0 var(--gutter) 24px; flex: 1; }
 @media (prefers-reduced-motion: no-preference) {
   .tile img { transition: opacity .2s; }
 }
+
+.linkish { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+#report-note { margin-left: .5rem; }

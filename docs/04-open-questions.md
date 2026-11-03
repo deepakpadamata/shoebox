@@ -55,7 +55,7 @@ Decisions from the first review pass (2026-10-22). Each one notes where it shows
 
 ## Still open
 
-- **Hosted services business model** (#6). Decided in shape by W1 (a free quota for web shares, a paid cloud keeper; viewers need only the link). Still to set: the domain, the free quota, the price and the payment provider (W1-10).
+- **Hosted services business model** (#6). **Decided 2026-11-03: run Shoebox Cloud free and open for now; subscriptions, payment and a free-tier/paid-tier split are deferred** (W1-10, the subscription part). Until then every library gets the same quota and anyone's library can register. Still to set before that changes: the domain, the free quota, the price and the payment provider.
 - **Background sync on iOS** (#10). Validate what Tauri 2 can reach of BGTaskScheduler / BGProcessingTask, or whether a small native plugin is needed.
 - **iroh-docs status** (#7). In 2025 n0 said it wasn't ready for 1.0. Check the current repo/changelog before the spike.
 - **Shared album limits** (part of old #5). Max members/items for v1 are not decided yet.

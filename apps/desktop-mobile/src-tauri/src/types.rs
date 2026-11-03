@@ -686,6 +686,8 @@ ts_type! {
         pub withheld: u32,
         /// The album has changed since this version was made.
         pub stale: bool,
+        /// Someone reported this link and the service switched it off; their words.
+        pub reported: Option<String>,
     }
 }
 

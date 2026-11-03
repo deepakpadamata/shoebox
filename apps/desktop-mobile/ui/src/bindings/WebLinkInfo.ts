@@ -27,4 +27,8 @@ withheld: number,
 /**
  * The album has changed since this version was made.
  */
-stale: boolean, };
+stale: boolean, 
+/**
+ * Someone reported this link and the service switched it off; their words.
+ */
+reported: string | null, };

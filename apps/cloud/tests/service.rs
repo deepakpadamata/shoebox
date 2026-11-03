@@ -764,3 +764,60 @@ async fn the_viewer_page_is_served_with_a_strict_policy() {
     );
     assert_eq!(r.public("/missing.js", None).await.0, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn a_reported_share_is_switched_off_at_once_and_the_owner_sees_why() {
+    let r = rig();
+    let d = r.device(2, "nest");
+    let (_, cid) = r.put_blob(&d, &sealed_photo(1, 500)).await;
+    let share = [9u8; 16];
+    let id = hex::encode(share);
+    let body = share_upload(share, 1, vec![hex_cid(&cid)], None);
+    r.owner(&d, "PUT", &format!("/v1/shares/{id}"), body.clone())
+        .await;
+    assert_eq!(
+        r.public(&format!("/s/{id}/m"), None).await.0,
+        StatusCode::OK
+    );
+
+    // Anyone with the link reports it, with a few words.
+    let report = |reason: &'static str| {
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/report/{id}"))
+            .body(Body::from(reason))
+            .unwrap();
+        r.send(req)
+    };
+    assert_eq!(report("not mine\u{7}").await.0, StatusCode::ACCEPTED);
+    for path in [format!("/s/{id}/m"), format!("/s/{id}/b/{cid}")] {
+        let (s, body, _) = r.public(&path, None).await;
+        assert_eq!(s, StatusCode::GONE);
+        assert!(String::from_utf8_lossy(&body).contains("reported"));
+    }
+
+    // The owner's list says so, with the reason (control characters removed), and refreshing the share does not
+    // switch it back on.
+    let (s, list) = r.owner(&d, "GET", "/v1/shares", vec![]).await;
+    assert_eq!(s, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(&list).unwrap();
+    assert_eq!(v["shares"][0]["reported"]["reason"], "not mine");
+    r.owner(&d, "PUT", &format!("/v1/shares/{id}"), body).await;
+    assert_eq!(
+        r.public(&format!("/s/{id}/m"), None).await.0,
+        StatusCode::GONE
+    );
+
+    // Reinstating is the operator deleting the report; a share that does not exist cannot be reported.
+    std::fs::remove_file(r.dir.path().join("reports").join(&id)).unwrap();
+    assert_eq!(
+        r.public(&format!("/s/{id}/m"), None).await.0,
+        StatusCode::OK
+    );
+    let nowhere = Request::builder()
+        .method("POST")
+        .uri(format!("/report/{}", hex::encode([1u8; 16])))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(r.send(nowhere).await.0, StatusCode::NOT_FOUND);
+}

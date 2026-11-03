@@ -484,6 +484,20 @@ async function main() {
   }
   say('', '', false);
   statusEl.hidden = true;
+  if (link.mode === 'cloud') {
+    // The service knows only the share's id, so that is all a report carries, with a few words of why.
+    $('report-row').hidden = false;
+    $('report').addEventListener('click', async () => {
+      const why = window.prompt('This switches the album off while it is looked at. What is wrong with it? (a few words)');
+      if (why === null) return;
+      try {
+        const res = await fetch(`/report/${share.id}`, { method: 'POST', body: why, credentials: 'omit', referrerPolicy: 'no-referrer' });
+        $('report-note').textContent = res.ok ? 'Thank you. The album has been switched off.' : 'That did not go through. Try again later.';
+      } catch {
+        $('report-note').textContent = 'That did not go through. Try again later.';
+      }
+    });
+  }
   $('download-all').hidden = false;
   $('download-all').textContent = items.some((i) => i.original) ? 'Download all (full size)' : 'Download all';
   renderGrid();

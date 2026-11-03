@@ -126,6 +126,7 @@ pub const COMMANDS: &[&str] = &[
     "web_links",
     "web_link_check",
     "web_link_create",
+    "web_link_update",
     "web_link_revoke",
     "web_link_rotate",
     "web_links_refresh",
@@ -410,6 +411,14 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
                 opt::<bool>(&args, "full_size")?.unwrap_or(false),
                 opt::<u32>(&args, "days")?,
                 opt::<bool>(&args, "live")?.unwrap_or(false),
+            )
+            .await?),
+        "web_link_update" => out(core
+            .web_link_update(
+                &arg::<String>(&args, "album")?,
+                &arg::<String>(&args, "share")?,
+                opt::<bool>(&args, "full_size")?.unwrap_or(false),
+                opt::<u32>(&args, "days")?,
             )
             .await?),
         "web_link_revoke" => {

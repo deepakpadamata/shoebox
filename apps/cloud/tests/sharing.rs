@@ -808,3 +808,44 @@ async fn the_encrypted_copy_lets_a_phone_free_space_and_says_it_was_the_only_one
     assert!(r.failed.is_empty(), "{:?}", r.failed);
     assert!(w.node.node().blobs().has(&id).await.unwrap());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_link_changes_what_it_offers_and_keeps_its_address() {
+    let w = world(3).await;
+    let share = w
+        .node
+        .create_web_share(&w.album, WebShareOptions::default())
+        .await
+        .unwrap();
+    let link = w.node.web_share_link(&share).await.unwrap();
+    assert!(open_share(&w, &link).await.1.items[0].original.is_none());
+
+    let new = w
+        .node
+        .update_web_share(
+            &w.album,
+            &share.share_id,
+            WebShareOptions {
+                full_size: true,
+                expires_ms: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        (new.share_id, new.key, new.version),
+        (share.share_id, share.key, 1)
+    );
+    assert_eq!(
+        w.node.web_share_link(&new).await.unwrap(),
+        link,
+        "same address"
+    );
+    let (h, m) = open_share(&w, &link).await;
+    assert_eq!(h.manifest_version, 1);
+    assert!(
+        m.items.iter().any(|i| i.original.is_some()),
+        "full size is offered now"
+    );
+    assert_eq!(w.node.web_shares(&w.album).await.unwrap(), vec![new]);
+}

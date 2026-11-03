@@ -476,6 +476,37 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(share)
     }
 
+    /// Change what an existing link offers (full-size downloads, its end date) without changing the link: the same
+    /// address and key keep working, with a new manifest version.
+    pub async fn update_web_share(
+        &self,
+        album: &AlbumId,
+        share_id: &[u8; 16],
+        options: WebShareOptions,
+    ) -> Result<WebShare> {
+        let mut shares = self.web_shares(album).await?;
+        let i = shares
+            .iter()
+            .position(|x| &x.share_id == share_id)
+            .context("no such link")?;
+        let old = shares[i].clone();
+        let s = self.session().await?;
+        let new = self
+            .build_share(
+                &s,
+                album,
+                old.share_id,
+                ShareKey(old.key),
+                &options,
+                old.version + 1,
+                old.created_ms,
+            )
+            .await?;
+        shares[i] = new.clone();
+        self.save_web_shares(album, &shares).await?;
+        Ok(new)
+    }
+
     /// Stop a link now: the service deletes it, and the library forgets it.
     pub async fn revoke_web_share(&self, album: &AlbumId, share_id: &[u8; 16]) -> Result<()> {
         let s = self.session().await?;

@@ -237,6 +237,7 @@ export const api = {
   webLinks: (album: string) => call<WebLinksInfo>('web_links', { album }),
   webLinkCheck: (album: string, full_size: boolean) => call<WebLinkCheck>('web_link_check', { album, full_size }),
   webLinkCreate: (album: string, full_size: boolean, days: number | null, live = false) => call<WebLinkInfo>('web_link_create', { album, full_size, days, live }),
+  webLinkUpdate: (album: string, share: string, full_size: boolean, days: number | null) => call<WebLinkInfo>('web_link_update', { album, share, full_size, days }),
   webLinkRevoke: (album: string, share: string) => call<{}>('web_link_revoke', { album, share }),
   webLinkRotate: (album: string, share: string) => call<WebLinkInfo>('web_link_rotate', { album, share }),
   webLinksRefresh: () => call<number>('web_links_refresh'),

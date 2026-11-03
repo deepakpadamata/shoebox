@@ -41,7 +41,9 @@ fn open(inbox_secret: &[u8; 32], sealed: &[u8]) -> Option<Vec<u8>> {
     let (eph_pub, ct) = sealed.split_at_checked(32)?;
     let eph_pub: [u8; 32] = eph_pub.try_into().ok()?;
     let inbox_pub = public_of(inbox_secret);
-    let shared = MontgomeryPoint(eph_pub).mul_clamped(*inbox_secret).to_bytes();
+    let shared = MontgomeryPoint(eph_pub)
+        .mul_clamped(*inbox_secret)
+        .to_bytes();
     let k = key(&shared, &eph_pub, &inbox_pub);
     XChaCha20Poly1305::new((&k).into())
         .decrypt(&XNonce::from([0u8; 24]), ct)

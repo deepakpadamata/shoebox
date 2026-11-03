@@ -310,6 +310,38 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(share)
     }
 
+    /// Change what a Live link offers without changing the link: this device seals the album again under the same
+    /// share id and key.
+    pub async fn update_live_share(
+        &self,
+        album: &AlbumId,
+        share_id: &[u8; 16],
+        options: WebShareOptions,
+    ) -> Result<WebShare> {
+        let mut shares = self.web_live_shares(album).await?;
+        let i = shares
+            .iter()
+            .position(|x| &x.share_id == share_id)
+            .context("no such link")?;
+        let old = shares[i].clone();
+        let dir = live_dir(&self.node().config().data_dir, share_id);
+        let s = self.live_session(dir).await?;
+        let new = self
+            .build_share(
+                &s,
+                album,
+                old.share_id,
+                ShareKey(old.key),
+                &options,
+                old.version + 1,
+                old.created_ms,
+            )
+            .await?;
+        shares[i] = new.clone();
+        self.save_live_shares(album, &shares).await?;
+        Ok(new)
+    }
+
     /// The text to give someone for a Live share. It opens on the service's viewer page, which holds nothing.
     pub async fn live_share_link(&self, share: &WebShare) -> Result<String> {
         let base = self

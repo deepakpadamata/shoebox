@@ -181,6 +181,41 @@ impl AppCore {
         Self::web_link_info(&share, share.link(&base), false, None)
     }
 
+    /// Change the options of a link that exists, keeping its address.
+    pub async fn web_link_update(
+        &self,
+        album: &str,
+        share: &str,
+        full_size: bool,
+        days: Option<u32>,
+    ) -> Result<WebLinkInfo> {
+        if let Some(d) = days {
+            ensure!((1..=365).contains(&d), "a link lasts 1 to 365 days");
+        }
+        let ln = self.ln().await?;
+        let (album, share) = (album_id(album)?, share_id(share)?);
+        let options = WebShareOptions {
+            full_size,
+            expires_ms: days.map(|d| (now_ms() + u64::from(d) * 86_400_000) as i64),
+        };
+        if ln
+            .web_live_shares(&album)
+            .await?
+            .iter()
+            .any(|s| s.share_id == share)
+        {
+            let new = ln.update_live_share(&album, &share, options).await?;
+            let text = ln.live_share_link(&new).await?;
+            return Self::web_link_info(&new, text, false, Some(true));
+        }
+        let new = ln.update_web_share(&album, &share, options).await?;
+        let base = ln
+            .cloud_url()
+            .await?
+            .ok_or_else(|| anyhow!("no cloud address is set"))?;
+        Self::web_link_info(&new, new.link(&base), false, None)
+    }
+
     pub async fn web_link_revoke(&self, album: &str, share: &str) -> Result<()> {
         let ln = self.ln().await?;
         let (album, share) = (album_id(album)?, share_id(share)?);

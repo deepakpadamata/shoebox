@@ -20,6 +20,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceExt;
 
+mod common;
+use common::FakeS3;
+
 struct World {
     _cluster: Cluster,
     node: LibraryNode<Library>,
@@ -28,6 +31,8 @@ struct World {
     work: tempfile::TempDir,
     album: AlbumId,
     photos: Vec<PhotoRecord>,
+    /// Where the bytes are, when the service keeps them in a bucket.
+    bucket: Option<FakeS3>,
 }
 
 fn hlc(ms: u64) -> Hlc {
@@ -43,7 +48,70 @@ async fn world(photos_in_album: usize) -> World {
 }
 
 async fn world_as(photos_in_album: usize, role: Role) -> World {
+    world_with(photos_in_album, role, Bytes::OnDisk).await
+}
+
+/// The service keeps the bytes in a bucket; the library uploads to it and readers are sent to it.
+async fn world_in_bucket(photos_in_album: usize) -> World {
+    world_with(photos_in_album, Role::Keeper, Bytes::FakeBucket).await
+}
+
+/// Where the service keeps the bytes.
+enum Bytes {
+    OnDisk,
+    FakeBucket,
+    /// A real S3-compatible bucket (see [`real_bucket`]).
+    Bucket(shoebox_cloud::s3::S3Config),
+}
+
+/// A real bucket named by `SHOEBOX_TEST_S3_ENDPOINT`, `_BUCKET`, `_REGION` (default `us-east-1`),
+/// `_ACCESS_KEY_ID` and `_SECRET_ACCESS_KEY`, made if it is not there.
+async fn real_bucket() -> Option<shoebox_cloud::s3::S3Config> {
+    let var = |n: &str| std::env::var(format!("SHOEBOX_TEST_S3_{n}")).ok();
+    let config = shoebox_cloud::s3::S3Config {
+        endpoint: var("ENDPOINT")?.parse().unwrap(),
+        bucket: var("BUCKET").unwrap_or_else(|| "shoebox-test".into()),
+        region: var("REGION").unwrap_or_else(|| "us-east-1".into()),
+        access_key: var("ACCESS_KEY_ID")?,
+        secret_key: var("SECRET_ACCESS_KEY")?,
+        path_style: var("VIRTUAL_HOST").is_none(),
+    };
+    use rusty_s3::S3Action;
+    let style = if config.path_style {
+        rusty_s3::UrlStyle::Path
+    } else {
+        rusty_s3::UrlStyle::VirtualHost
+    };
+    let bucket = rusty_s3::Bucket::new(
+        config.endpoint.clone(),
+        style,
+        config.bucket.clone(),
+        config.region.clone(),
+    )
+    .unwrap();
+    let creds = rusty_s3::Credentials::new(config.access_key.clone(), config.secret_key.clone());
+    let url = rusty_s3::actions::CreateBucket::new(&bucket, &creds).sign(Duration::from_secs(60));
+    let res = common::http()
+        .put(url)
+        .header("content-length", 0)
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        res.status().is_success() || res.status().as_u16() == 409,
+        "making the bucket: {}",
+        res.status()
+    );
+    Some(config)
+}
+
+async fn world_with(photos_in_album: usize, role: Role, bytes: Bytes) -> World {
     let cluster = Cluster::with_roles(&[role, role]).await.unwrap();
+    if matches!(bytes, Bytes::Bucket(_)) {
+        // A real bucket checks presigned times against real time.
+        let now = shoebox_cloud::system_clock()() as u64;
+        cluster.clock().advance(now - cluster.clock().now_ms());
+    }
     let root = KeyPair::generate();
     let backend = HybridBackend::for_node(cluster.node(0).clone(), cluster.clock().clone());
     let (lib, cap) = backend.create_library(&root.root_public()).await.unwrap();
@@ -101,6 +169,19 @@ async fn world_as(photos_in_album: usize, role: Role) -> World {
     let mut config = Config::new(cloud_dir.path().to_path_buf());
     let clock = cluster.clock().clone();
     config.clock = Arc::new(move || clock.now_ms() as i64);
+    let bucket = match bytes {
+        Bytes::OnDisk => None,
+        Bytes::FakeBucket => {
+            let clock = cluster.clock().clone();
+            let b = common::start(Arc::new(move || clock.now_ms() as i64)).await;
+            config.s3 = Some(b.config.clone());
+            Some(b)
+        }
+        Bytes::Bucket(c) => {
+            config.s3 = Some(c);
+            None
+        }
+    };
     // For the by-hand run below: serve the built viewer page and listen on a known port.
     config.viewer_dir = std::env::var("SHOEBOX_DEMO_VIEWER").ok().map(Into::into);
     let port = std::env::var("SHOEBOX_DEMO_PORT").unwrap_or_else(|_| "0".into());
@@ -123,15 +204,23 @@ async fn world_as(photos_in_album: usize, role: Role) -> World {
         work,
         album,
         photos,
+        bucket,
     }
 }
 
+/// A GET as the viewer makes it, following a redirect to the bucket.
 async fn get(svc: &Arc<Service>, path: &str) -> (StatusCode, Vec<u8>) {
     let res = router(svc.clone())
         .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
         .await
         .unwrap();
     let status = res.status();
+    if status == StatusCode::FOUND {
+        let to = res.headers()["location"].to_str().unwrap().to_string();
+        let res = common::http().get(to).send().await.unwrap();
+        let status = StatusCode::from_u16(res.status().as_u16()).unwrap();
+        return (status, res.bytes().await.unwrap().to_vec());
+    }
     (
         status,
         res.into_body().collect().await.unwrap().to_bytes().to_vec(),
@@ -425,7 +514,11 @@ async fn a_library_without_the_cloud_enabled_says_so() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "runs until stopped"]
 async fn demo_serve_a_share() {
-    let w = world(10).await;
+    // With SHOEBOX_TEST_S3_* set, the bytes go to that bucket and the page is sent there for them.
+    let w = match real_bucket().await {
+        Some(c) => world_with(10, Role::Keeper, Bytes::Bucket(c)).await,
+        None => world(10).await,
+    };
     let share = w
         .node
         .create_web_share(
@@ -848,4 +941,210 @@ async fn a_link_changes_what_it_offers_and_keeps_its_address() {
         "full size is offered now"
     );
     assert_eq!(w.node.web_shares(&w.album).await.unwrap(), vec![new]);
+}
+
+// ---- the service keeps the bytes in a bucket ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn from_a_bucket_an_album_opens_from_the_link_alone_and_stops_when_revoked() {
+    let w = world_in_bucket(4).await;
+    let bucket = w.bucket.clone().unwrap();
+    let share = w
+        .node
+        .create_web_share(
+            &w.album,
+            WebShareOptions {
+                full_size: true,
+                expires_ms: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!((share.items, share.skipped), (4, 0));
+    let link = w.node.web_share_link(&share).await.unwrap();
+    let (_, manifest) = open_share(&w, &link).await;
+    let blobs = w.node.node().blobs();
+    for item in &manifest.items {
+        let p = w
+            .photos
+            .iter()
+            .find(|p| p.taken_at == item.taken && p.exif.width == item.width)
+            .unwrap();
+        assert_eq!(
+            blob(&w, &share.share_id, &item.preview).await,
+            blobs.get(&p.preview.hash).await.unwrap().to_vec()
+        );
+        assert!(item.original.is_some());
+    }
+
+    // The bytes are in the bucket, sealed; the data directory holds no blob at all.
+    let keys = bucket.keys();
+    let lib = hex::encode(w.node.person_id().0);
+    let in_bucket = keys
+        .iter()
+        .filter(|k| k.starts_with(&format!("libs/{lib}/blobs/")))
+        .count();
+    assert!(in_bucket >= 8, "{keys:?}");
+    let mut needles = vec![];
+    for p in w.photos.iter().take(4) {
+        for hash in [&p.original.hash, &p.preview.hash, &p.thumb.hash] {
+            let b = blobs.get(hash).await.unwrap();
+            if b.len() > 600 {
+                needles.push(b[b.len() / 2..b.len() / 2 + 256].to_vec());
+            }
+        }
+    }
+    for k in &keys {
+        let bytes = bucket.get(k).unwrap();
+        for n in &needles {
+            assert!(
+                !bytes.windows(n.len()).any(|x| x == n.as_slice()),
+                "plaintext in {k}"
+            );
+        }
+    }
+    let mut stack = vec![w.cloud_dir.path().to_path_buf()];
+    while let Some(p) = stack.pop() {
+        for e in std::fs::read_dir(&p).unwrap() {
+            let path = e.unwrap().path();
+            if path.is_dir() {
+                assert!(
+                    !path.ends_with("blobs") || std::fs::read_dir(&path).unwrap().next().is_none()
+                );
+                stack.push(path);
+            } else {
+                assert!(
+                    std::fs::metadata(&path).unwrap().len() < 64 * 1024,
+                    "{}",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    // Revoked: the manifest leaves the bucket and the link answers "gone".
+    let id = hex::encode(share.share_id);
+    w.node
+        .revoke_web_share(&w.album, &share.share_id)
+        .await
+        .unwrap();
+    assert!(bucket.get(&format!("shares/{id}/manifest")).is_none());
+    assert_eq!(
+        get(&w.svc, &format!("/s/{id}/m")).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert!(bucket.refused().is_empty(), "{:?}", bucket.refused());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn from_a_bucket_the_cloud_keeper_uploads_once_and_restores_every_blob_checked() {
+    let w = world_in_bucket(4).await;
+    let bucket = w.bucket.clone().unwrap();
+    let policy = CloudPolicy {
+        originals: true,
+        byte_budget: None,
+    };
+    let r = w.node.cloud_backup(&policy).await.unwrap();
+    assert!(r.failed.is_empty(), "{:?}", r.failed);
+    assert!(r.uploaded > 0 && r.left == 0);
+    let again = w.node.cloud_backup(&policy).await.unwrap();
+    assert_eq!(
+        (again.uploaded, again.already),
+        (0, r.uploaded),
+        "{again:?}"
+    );
+    let lib = hex::encode(w.node.person_id().0);
+    let objects: Vec<String> = bucket
+        .keys()
+        .into_iter()
+        .filter(|k| k.starts_with(&format!("libs/{lib}/objects/")))
+        .collect();
+    assert_eq!(objects.len(), 2, "the catalog and the state: {objects:?}");
+
+    let p = &w.photos[0];
+    let blobs = w.node.node().blobs();
+    let original = blobs.get(&p.original.hash).await.unwrap();
+    let lost = [p.original.hash, p.thumb.hash, p.preview.hash];
+    for h in lost {
+        blobs.remove(&h).await.unwrap();
+    }
+    wait_until(Duration::from_secs(30), || async {
+        let mut gone = true;
+        for h in lost {
+            gone &= !blobs.has(&h).await.unwrap();
+        }
+        gone
+    })
+    .await
+    .expect("the store collects released blobs");
+    let r = w.node.cloud_restore().await.unwrap();
+    assert!(r.failed.is_empty(), "{:?}", r.failed);
+    assert!(r.state_imported && r.restored >= 3, "{r:?}");
+    assert_eq!(blobs.get(&p.original.hash).await.unwrap(), original);
+    assert!(bucket.refused().is_empty(), "{:?}", bucket.refused());
+}
+
+/// The same against a real S3-compatible bucket (MinIO, R2, B2...): signatures checked by someone else's code.
+/// `SHOEBOX_TEST_S3_ENDPOINT=http://127.0.0.1:9000 SHOEBOX_TEST_S3_ACCESS_KEY_ID=... SHOEBOX_TEST_S3_SECRET_ACCESS_KEY=...
+/// cargo test -p shoebox-cloud --test sharing real_bucket -- --ignored`
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a real bucket"]
+async fn with_a_real_bucket_a_link_opens_and_the_library_restores() {
+    let Some(config) = real_bucket().await else {
+        panic!("set SHOEBOX_TEST_S3_ENDPOINT, _ACCESS_KEY_ID and _SECRET_ACCESS_KEY");
+    };
+    let w = world_with(4, Role::Keeper, Bytes::Bucket(config)).await;
+    let share = w
+        .node
+        .create_web_share(
+            &w.album,
+            WebShareOptions {
+                full_size: true,
+                expires_ms: None,
+            },
+        )
+        .await
+        .unwrap();
+    let link = w.node.web_share_link(&share).await.unwrap();
+    let (_, manifest) = open_share(&w, &link).await;
+    let blobs = w.node.node().blobs();
+    for item in &manifest.items {
+        let p = w
+            .photos
+            .iter()
+            .find(|p| p.taken_at == item.taken && p.exif.width == item.width)
+            .unwrap();
+        assert_eq!(
+            blob(&w, &share.share_id, &item.thumb).await,
+            blobs.get(&p.thumb.hash).await.unwrap().to_vec()
+        );
+    }
+
+    let policy = CloudPolicy {
+        originals: true,
+        byte_budget: None,
+    };
+    let r = w.node.cloud_backup(&policy).await.unwrap();
+    assert!(r.failed.is_empty(), "{:?}", r.failed);
+    let p = &w.photos[1];
+    let original = blobs.get(&p.original.hash).await.unwrap();
+    blobs.remove(&p.original.hash).await.unwrap();
+    wait_until(Duration::from_secs(30), || async {
+        !blobs.has(&p.original.hash).await.unwrap()
+    })
+    .await
+    .expect("the store collects released blobs");
+    let r = w.node.cloud_restore().await.unwrap();
+    assert!(r.failed.is_empty(), "{:?}", r.failed);
+    assert_eq!(blobs.get(&p.original.hash).await.unwrap(), original);
+
+    let id = hex::encode(share.share_id);
+    w.node
+        .revoke_web_share(&w.album, &share.share_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        get(&w.svc, &format!("/s/{id}/m")).await.0,
+        StatusCode::NOT_FOUND
+    );
 }

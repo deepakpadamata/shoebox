@@ -110,22 +110,19 @@ impl Session {
     async fn put_sealed_object(&self, prefix: &str, plain: &[u8], now_ms: i64) -> Result<()> {
         let sealed = encrypt_blob(&self.secret, plain);
         let name = format!("{prefix}.{}", hex::encode(blake3::hash(plain).as_bytes()));
-        let path = format!("/v1/objects/{name}");
-        let res = self
-            .http
-            .put(self.url(&path))
-            .header(
-                AUTHORIZATION,
-                self.auth("PUT", &path, &sealed.cid.0, now_ms),
-            )
-            .header("x-content-blake3", hex::encode(sealed.cid.0))
-            .header(CONTENT_LENGTH, sealed.ciphertext.len())
-            .body(sealed.ciphertext)
-            .send()
+        let len = sealed.ciphertext.len() as u64;
+        let slots = self
+            .begin(&[], &[(name.clone(), len, sealed.cid.0)], now_ms)
+            .await?;
+        let slot = &slots[0];
+        self.put_to(slot, sealed.ciphertext.into(), len)
             .await
             .context("uploading library state")?;
-        if !res.status().is_success() {
-            return Err(Self::fail(res, "uploading library state").await);
+        let refused = self
+            .commit(&[slot.token.clone().unwrap_or_default()], now_ms)
+            .await?;
+        if let Some((_, why)) = refused.first() {
+            bail!("the service refused the library state: {why}");
         }
         let old = format!("{prefix}.");
         for other in self.objects(now_ms).await? {
@@ -296,19 +293,22 @@ impl<L: LibraryStore> LibraryNode<L> {
                     }
                 }
             }
-            let cids: Vec<[u8; 32]> = staged.iter().map(|(st, _, _)| st.cid).collect();
-            let result: Result<()> = async {
-                let present = s.has(&cids, now_i64(self.now_ms())).await?;
+            let up = self
+                .upload_all(&s, &staged.iter().map(|(st, _, _)| st).collect::<Vec<_>>())
+                .await;
+            let result: Result<()> = {
                 for (st, k, h) in &staged {
-                    if !present.contains(&st.cid) {
-                        self.upload(&s, st).await?;
+                    if up.went.contains(&st.cid) {
                         report.uploaded += 1;
                         report.uploaded_bytes += st.size;
                         if let Some(b) = budget.as_mut() {
                             *b = b.saturating_sub(st.size);
                         }
-                    } else {
+                    } else if up.held.contains(&st.cid) {
                         report.already += 1;
+                    } else {
+                        // Not reached before the upload stopped.
+                        continue;
                     }
                     catalog.0.insert(
                         h.0,
@@ -320,9 +320,8 @@ impl<L: LibraryStore> LibraryNode<L> {
                         },
                     );
                 }
-                Ok(())
-            }
-            .await;
+                up.error.map_or(Ok(()), Err)
+            };
             for (st, _, _) in &staged {
                 if let Some(f) = &st.file {
                     let _ = std::fs::remove_file(f);

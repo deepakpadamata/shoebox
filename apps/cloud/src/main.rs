@@ -1,6 +1,7 @@
 //! `shoebox-cloud`: run the service.
 
 use clap::Parser;
+use shoebox_cloud::s3::S3Config;
 use shoebox_cloud::{router, Config, Service};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -34,10 +35,26 @@ struct Args {
     /// A host the viewer page may connect to (a relay, for Live links). Repeatable.
     #[arg(long = "csp-connect")]
     csp_connect: Vec<String>,
+    /// Keep the bytes in an S3-compatible bucket at this endpoint (the data directory then holds only
+    /// bookkeeping). Browsers are sent to it, so it must be reachable from the internet and allow the viewer's
+    /// origin in its CORS rules.
+    #[arg(long, env = "SHOEBOX_S3_ENDPOINT")]
+    s3_endpoint: Option<url::Url>,
+    #[arg(long, env = "SHOEBOX_S3_BUCKET", requires = "s3_endpoint")]
+    s3_bucket: Option<String>,
+    /// `auto` for Cloudflare R2.
+    #[arg(long, env = "SHOEBOX_S3_REGION", default_value = "auto")]
+    s3_region: String,
+    #[arg(long, env = "SHOEBOX_S3_ACCESS_KEY_ID", hide_env_values = true)]
+    s3_access_key_id: Option<String>,
+    #[arg(long, env = "SHOEBOX_S3_SECRET_ACCESS_KEY", hide_env_values = true)]
+    s3_secret_access_key: Option<String>,
+    /// Address the bucket as `https://bucket.endpoint/` instead of `https://endpoint/bucket/`.
+    #[arg(long)]
+    s3_virtual_host: bool,
 }
 
 const GIB: u64 = 1024 * 1024 * 1024;
-const WEEK_MS: i64 = 7 * 24 * 3600 * 1000;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -52,17 +69,30 @@ async fn main() -> anyhow::Result<()> {
     config.open_registration = !args.closed;
     config.trust_proxy = args.trust_proxy;
     config.csp_connect = args.csp_connect;
+    if let Some(endpoint) = args.s3_endpoint {
+        let need = |v: Option<String>, what: &str| {
+            v.ok_or_else(|| anyhow::anyhow!("--s3-endpoint needs {what}"))
+        };
+        config.s3 = Some(S3Config {
+            endpoint,
+            bucket: need(args.s3_bucket, "--s3-bucket")?,
+            region: args.s3_region,
+            access_key: need(args.s3_access_key_id, "SHOEBOX_S3_ACCESS_KEY_ID")?,
+            secret_key: need(args.s3_secret_access_key, "SHOEBOX_S3_SECRET_ACCESS_KEY")?,
+            path_style: !args.s3_virtual_host,
+        });
+    }
     let service = Service::open(config)?;
 
-    // Expired shares answer "expired" for a week, then are deleted.
+    // Expired shares answer "expired" for a week, then are deleted; unfinished uploads give their quota back.
     let janitor = service.clone();
     tokio::spawn(async move {
         loop {
-            let n = janitor.store.sweep_expired(janitor.now() - WEEK_MS);
+            let n = janitor.sweep().await;
             if n > 0 {
                 tracing::info!(deleted = n, "expired shares removed");
             }
-            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(600)).await;
         }
     });
 

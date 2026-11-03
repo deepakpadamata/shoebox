@@ -5,10 +5,17 @@
 //! <data>/libs/<library hex>/lib.postcard      root key + certificates
 //! <data>/libs/<library hex>/blobs/<cid hex>   ciphertext
 //! <data>/libs/<library hex>/objects/<name>    named encrypted objects (snapshots)
+//! <data>/libs/<library hex>/index.log         with a bucket: which blobs and objects it holds, and their sizes
 //! <data>/shares/<share id hex>/meta.postcard  who owns it, version, expiry, the cids it lists
 //! <data>/shares/<share id hex>/manifest       the sealed manifest
+//! <data>/reports/<share id hex>               a share taken down by a report
 //! <data>/tmp/                                 uploads in progress
 //! ```
+//!
+//! With an S3 bucket (`crate::s3`) the bytes (`blobs/`, `objects/`, `manifest`) live in the bucket under the same
+//! names and this directory keeps only the bookkeeping. The bucket cannot be listed cheaply, so what it holds is
+//! written to `index.log`, one line per change (`+b <cid> <size>`, `-b <cid>`, `+o <name> <size>`, `-o <name>`),
+//! and rewritten without the history when the service starts.
 //!
 //! Nothing here is plaintext: blobs and manifests arrive encrypted and stay that way.
 
@@ -68,6 +75,8 @@ struct Inner {
 pub struct Store {
     dir: PathBuf,
     inner: Mutex<Inner>,
+    /// The bytes are in a bucket: keep `index.log` (and write no manifest files).
+    in_bucket: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -96,8 +105,9 @@ fn hex_name<const N: usize>(name: &str) -> Option<[u8; N]> {
 }
 
 impl Store {
-    /// Open (and create) a data directory, reading every library and share into memory.
-    pub fn open(dir: &Path) -> io::Result<Self> {
+    /// Open (and create) a data directory, reading every library and share into memory. `in_bucket` when the
+    /// bytes are kept in an S3 bucket.
+    pub fn open(dir: &Path, in_bucket: bool) -> io::Result<Self> {
         for sub in ["libs", "shares", "tmp"] {
             std::fs::create_dir_all(dir.join(sub))?;
         }
@@ -123,6 +133,11 @@ impl Store {
                 objects: BTreeMap::new(),
                 usage: 0,
             };
+            if in_bucket {
+                read_index(&e.path().join("index.log"), &mut lib)?;
+                inner.libs.insert(id, lib);
+                continue;
+            }
             for (sub, is_blob) in [("blobs", true), ("objects", false)] {
                 let Ok(rd) = std::fs::read_dir(e.path().join(sub)) else {
                     continue;
@@ -172,7 +187,30 @@ impl Store {
         Ok(Self {
             dir: dir.to_path_buf(),
             inner: Mutex::new(inner),
+            in_bucket,
         })
+    }
+
+    pub fn in_bucket(&self) -> bool {
+        self.in_bucket
+    }
+
+    /// Note a change in what a library's bucket holds. A line lost to a crash leaves a blob the service does not
+    /// know about: the client is told it is missing and uploads it again under the same name.
+    fn log(&self, lib: LibraryId, line: std::fmt::Arguments<'_>) {
+        if !self.in_bucket {
+            return;
+        }
+        use std::io::Write;
+        let path = self.lib_dir(lib).join("index.log");
+        let written = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .and_then(|mut f| writeln!(f, "{line}"));
+        if let Err(e) = written {
+            tracing::error!(path = %path.display(), "could not note a change in the bucket: {e}");
+        }
     }
 
     pub fn tmp_path(&self) -> PathBuf {
@@ -383,7 +421,9 @@ impl Store {
             if l.blobs.insert(cid, len).is_some() {
                 // Raced with another upload of the same blob: the reservation was a double count.
                 l.usage = l.usage.saturating_sub(len);
+                return;
             }
+            self.log(lib, format_args!("+b {} {len}", hex::encode(cid)));
         }
     }
 
@@ -412,8 +452,8 @@ impl Store {
             .collect()
     }
 
-    /// Forget a blob. Refused while a share lists it.
-    pub fn remove_blob(&self, lib: LibraryId, cid: &Cid) -> Result<Option<PathBuf>, StoreError> {
+    /// Forget a blob (false when it was not there). Refused while a share lists it. The caller deletes the bytes.
+    pub fn remove_blob(&self, lib: LibraryId, cid: &Cid) -> Result<bool, StoreError> {
         let mut inner = lock(&self.inner);
         let using: Vec<ShareId> = inner
             .shares
@@ -428,10 +468,12 @@ impl Store {
             .libs
             .get_mut(&lib.0)
             .ok_or(StoreError::UnknownLibrary)?;
-        Ok(l.blobs.remove(cid).map(|n| {
-            l.usage = l.usage.saturating_sub(n);
-            self.blob_path(lib, cid)
-        }))
+        let Some(n) = l.blobs.remove(cid) else {
+            return Ok(false);
+        };
+        l.usage = l.usage.saturating_sub(n);
+        self.log(lib, format_args!("-b {}", hex::encode(cid)));
+        Ok(true)
     }
 
     // ---- objects ----
@@ -449,6 +491,7 @@ impl Store {
             let old = l.objects.insert(name.to_string(), len).unwrap_or(0);
             l.usage = l.usage.saturating_sub(old);
             l.usage = l.usage.saturating_sub(reserved) + len;
+            self.log(lib, format_args!("+o {name} {len}"));
         }
     }
 
@@ -460,13 +503,18 @@ impl Store {
             .unwrap_or_default()
     }
 
-    pub fn remove_object(&self, lib: LibraryId, name: &str) -> Option<PathBuf> {
+    /// Forget an object (false when it was not there). The caller deletes the bytes.
+    pub fn remove_object(&self, lib: LibraryId, name: &str) -> bool {
         let mut inner = lock(&self.inner);
-        let l = inner.libs.get_mut(&lib.0)?;
-        l.objects.remove(name).map(|n| {
-            l.usage = l.usage.saturating_sub(n);
-            self.object_path(lib, name)
-        })
+        let Some(l) = inner.libs.get_mut(&lib.0) else {
+            return false;
+        };
+        let Some(n) = l.objects.remove(name) else {
+            return false;
+        };
+        l.usage = l.usage.saturating_sub(n);
+        self.log(lib, format_args!("-o {name}"));
+        true
     }
 
     // ---- shares ----
@@ -498,8 +546,58 @@ impl Store {
             .map(|s| s.library)
     }
 
-    /// Create or replace a share. Every cid must already be among the library's blobs; a lower version than the
-    /// stored one is refused (so a late, stale upload cannot roll a share back).
+    /// May this share be created or replaced like this? Every cid must already be among the library's blobs and a
+    /// lower version than the stored one is refused (so a late, stale upload cannot roll a share back).
+    pub fn check_share(
+        &self,
+        lib: LibraryId,
+        id: &ShareId,
+        version: u32,
+        cids: &[Cid],
+        manifest_len: u64,
+        quota: u64,
+    ) -> Result<(), StoreError> {
+        let inner = lock(&self.inner);
+        Self::check_share_locked(&inner, lib, id, version, cids, manifest_len, quota).map(|_| ())
+    }
+
+    fn check_share_locked(
+        inner: &Inner,
+        lib: LibraryId,
+        id: &ShareId,
+        version: u32,
+        cids: &[Cid],
+        manifest_len: u64,
+        quota: u64,
+    ) -> Result<u64, StoreError> {
+        let l = inner.libs.get(&lib.0).ok_or(StoreError::UnknownLibrary)?;
+        let missing: Vec<Cid> = cids
+            .iter()
+            .filter(|c| !l.blobs.contains_key(*c))
+            .take(50)
+            .copied()
+            .collect();
+        if !missing.is_empty() {
+            return Err(StoreError::Missing(missing));
+        }
+        let old_len = match inner.shares.get(id) {
+            Some(s) if s.library != lib => return Err(StoreError::Conflict("share id in use")),
+            Some(s) if version < s.version => return Err(StoreError::Conflict("older version")),
+            Some(s) => s.manifest_len,
+            None => 0,
+        };
+        let after = l.usage.saturating_sub(old_len) + manifest_len;
+        if after > quota {
+            return Err(StoreError::QuotaExceeded {
+                used: l.usage,
+                quota,
+            });
+        }
+        Ok(after)
+    }
+
+    /// Create or replace a share (see [`Store::check_share`]). `manifest` is written beside the record, unless the
+    /// bytes are in a bucket, where the caller has put the `manifest_len` bytes already.
     #[allow(clippy::too_many_arguments)]
     pub fn put_share(
         &self,
@@ -508,37 +606,15 @@ impl Store {
         version: u32,
         expires_ms: Option<i64>,
         cids: Vec<Cid>,
-        manifest: &[u8],
+        manifest: Option<&[u8]>,
+        manifest_len: u64,
         quota: u64,
     ) -> Result<(), StoreError> {
         let mut inner = lock(&self.inner);
-        {
-            let l = inner.libs.get(&lib.0).ok_or(StoreError::UnknownLibrary)?;
-            let missing: Vec<Cid> = cids
-                .iter()
-                .filter(|c| !l.blobs.contains_key(*c))
-                .take(50)
-                .copied()
-                .collect();
-            if !missing.is_empty() {
-                return Err(StoreError::Missing(missing));
-            }
-        }
-        let old_len = match inner.shares.get(&id) {
-            Some(s) if s.library != lib => return Err(StoreError::Conflict("share id in use")),
-            Some(s) if version < s.version => return Err(StoreError::Conflict("older version")),
-            Some(s) => s.manifest_len,
-            None => 0,
-        };
-        let new_len = manifest.len() as u64;
+        let after =
+            Self::check_share_locked(&inner, lib, &id, version, &cids, manifest_len, quota)?;
+        let new_len = manifest_len;
         let l = inner.libs.get_mut(&lib.0).expect("checked above");
-        let after = l.usage.saturating_sub(old_len) + new_len;
-        if after > quota {
-            return Err(StoreError::QuotaExceeded {
-                used: l.usage,
-                quota,
-            });
-        }
         let dir = self.share_dir(&id);
         std::fs::create_dir_all(&dir).map_err(|_| StoreError::Conflict("could not save"))?;
         let meta = ShareMeta {
@@ -548,7 +624,8 @@ impl Store {
             cids: cids.clone(),
             manifest_len: new_len,
         };
-        write_atomic(&dir.join("manifest"), manifest)
+        manifest
+            .map_or(Ok(()), |m| write_atomic(&dir.join("manifest"), m))
             .and_then(|_| {
                 write_atomic(
                     &dir.join("meta.postcard"),
@@ -585,8 +662,8 @@ impl Store {
         true
     }
 
-    /// Delete expired shares (a janitor run).
-    pub fn sweep_expired(&self, now_ms: i64) -> usize {
+    /// Delete expired shares (a janitor run), returning which. With a bucket the caller deletes their manifests.
+    pub fn sweep_expired(&self, now_ms: i64) -> Vec<ShareId> {
         let expired: Vec<(LibraryId, ShareId)> = lock(&self.inner)
             .shares
             .iter()
@@ -594,8 +671,51 @@ impl Store {
             .map(|(id, s)| (s.library, *id))
             .collect();
         expired
-            .iter()
+            .into_iter()
             .filter(|(lib, id)| self.delete_share(*lib, id))
-            .count()
+            .map(|(_, id)| id)
+            .collect()
     }
+}
+
+/// Read a library's `index.log` into it, then write it back with only what is there now.
+fn read_index(path: &Path, lib: &mut Library) -> io::Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    for line in text.lines() {
+        let mut parts = line.split(' ');
+        match (parts.next(), parts.next(), parts.next()) {
+            (Some("+b"), Some(cid), Some(n)) => {
+                if let (Some(cid), Ok(n)) = (hex_name::<32>(cid), n.parse()) {
+                    lib.blobs.insert(cid, n);
+                }
+            }
+            (Some("-b"), Some(cid), None) => {
+                if let Some(cid) = hex_name::<32>(cid) {
+                    lib.blobs.remove(&cid);
+                }
+            }
+            (Some("+o"), Some(name), Some(n)) => {
+                if let Ok(n) = n.parse() {
+                    lib.objects.insert(name.to_string(), n);
+                }
+            }
+            (Some("-o"), Some(name), None) => {
+                lib.objects.remove(name);
+            }
+            _ => tracing::warn!(path = %path.display(), "skipping a line it cannot read: {line}"),
+        }
+    }
+    lib.usage = lib.blobs.values().chain(lib.objects.values()).sum();
+    let mut out = String::new();
+    for (cid, n) in &lib.blobs {
+        out.push_str(&format!("+b {} {n}\n", hex::encode(cid)));
+    }
+    for (name, n) in &lib.objects {
+        out.push_str(&format!("+o {name} {n}\n"));
+    }
+    write_atomic(path, out.as_bytes())
 }

@@ -10,7 +10,8 @@ cargo run -p shoebox-cloud -- --data-dir ./cloud-data --listen 127.0.0.1:8080 --
 Flags (each also an environment variable where marked): `--data-dir` (`SHOEBOX_CLOUD_DATA`), `--listen`
 (`SHOEBOX_CLOUD_LISTEN`), `--viewer-dir` (`SHOEBOX_CLOUD_VIEWER`), `--quota-gib` (2), `--share-daily-gib` (1),
 `--closed` (refuse libraries that have not registered), `--trust-proxy` (client address from the last
-`X-Forwarded-For`), `--csp-connect` (a host the viewer may connect to; relays, for Live links).
+`X-Forwarded-For`), `--csp-connect` (a host the viewer may connect to; relays, for Live links). With
+`--s3-endpoint` the bytes go to a bucket instead (below).
 
 ## Owner calls (signed)
 
@@ -24,12 +25,14 @@ revocation (`POST /v1/library/certs`); until then it still has the old certifica
 
 | Call | What |
 |---|---|
-| `PUT /v1/blobs/{cid}` | upload ciphertext; the signature commits to `cid`, so it is checked before the body is read; the bytes must hash to `cid` (422 if not); needs `Content-Length`; 507 over quota |
-| `GET /v1/blobs/{cid}` | read it back (ranges) |
+| `POST /v1/uploads` | `{"blobs":[{cid,size}],"objects":[{name,size,hash}]}`, at most 1,000; answers per entry either `stored:true` (already held) or a `token` and a `url` to `PUT` the bytes to; reserves the quota (507 over it). A slot lasts two hours |
+| `PUT <url>` | the bytes, with exactly the announced `Content-Length`. Without a bucket the url is `/u/{token}` on the service (unsigned: the token is the permission), which checks the hash at once (422); with a bucket it is a presigned PUT straight to the bucket, which refuses any other length |
+| `POST /v1/uploads/commit` | `{"tokens":[...]}`: records what was put; per token `ok` or an error (`not-uploaded`, `unknown-upload` when the slot ran out, `bad-request` for a wrong size). With a bucket the service checks the size with a HEAD and deletes a wrong-sized object. A slot never committed is released and its bytes deleted by the janitor |
+| `GET /v1/blobs/{cid}` | read it back (ranges); with a bucket, a 302 to a presigned GET good for 60 s |
 | `DELETE /v1/blobs/{cid}` | 409 `in-use` while a share lists it |
 | `GET /v1/blobs?after=&limit=` | list, with sizes, 1,000 a page |
 | `POST /v1/blobs/has` | JSON list of ids in, the ones held out |
-| `PUT/GET/DELETE /v1/objects/{name}`, `GET /v1/objects` | named encrypted objects (library snapshots), up to 512 MiB; `X-Content-Blake3` carries the body hash |
+| `GET/DELETE /v1/objects/{name}`, `GET /v1/objects` | named encrypted objects (library snapshots), up to 512 MiB, uploaded through `/v1/uploads` with their BLAKE3 hash |
 | `PUT /v1/shares/{share_id}` | a `ShareUpload` (sealed manifest, the ids it may serve, expiry); every id must be uploaded already (400 `missing-blobs`); a lower version is 409 |
 | `DELETE /v1/shares/{share_id}`, `GET /v1/shares` | revoke; list |
 | `GET /v1/usage` | `{used, quota}` |
@@ -43,6 +46,38 @@ share is 410 for a week and then deleted. Per share: 600 requests a minute and 1
 Responses carry `Referrer-Policy: no-referrer` and CORS for these two routes. The viewer page is served at `/` and `/a` with a
 strict CSP.
 
+## With a bucket (S3-compatible)
+
+```bash
+SHOEBOX_S3_ACCESS_KEY_ID=… SHOEBOX_S3_SECRET_ACCESS_KEY=… \
+cargo run -p shoebox-cloud -- --data-dir ./cloud-data --viewer-dir ./viewer \
+  --s3-endpoint https://<account>.r2.cloudflarestorage.com --s3-bucket shoebox --s3-region auto
+```
+
+`--s3-region` defaults to `auto` (R2); `--s3-virtual-host` for providers that want `bucket.host` addressing. The service
+then never carries a photo's bytes: owners `PUT` straight to presigned URLs, and every read (`/s/{id}/m`, `/s/{id}/b/{cid}`,
+the owner's GETs) answers `302` to a presigned GET (manifest and owner reads `no-store`; a share's blob `private,
+max-age=300`). Presigned reads last 10 minutes, writes an hour. The service's own clock signs them, so it must keep good time.
+The viewer page's CSP adds the bucket's origin to `connect-src` by itself. Keys in the bucket follow the disk layout:
+`libs/<library>/blobs/<cid>`, `libs/<library>/objects/<name>`, `shares/<share_id>/manifest`.
+
+The bucket needs a CORS rule so the viewer can read it, for example (R2/S3 JSON):
+
+```json
+[{ "AllowedOrigins": ["https://view.example.org"], "AllowedMethods": ["GET", "HEAD"],
+   "AllowedHeaders": ["range"], "ExposeHeaders": ["content-length", "content-range"], "MaxAgeSeconds": 3600 }]
+```
+
+Uploads come from the apps, not a browser, so `PUT` needs no CORS rule. The bucket should be private (no public
+listing or reads); everything public goes through the service's check that a share lists the blob.
+
+The data directory still holds the bookkeeping: `lib.postcard`, the share records and reports, and per library an
+`index.log` of what the bucket holds (`+b <cid> <size>`, `-b <cid>`, `+o <name> <size>`, `-o <name>`, compacted at
+start). **Back the data directory up**: without it the bucket is ciphertext nobody can be served (the apps can upload
+again; nothing is lost that a device still has). The bucket does not check BLAKE3 hashes, only sizes; a wrong blob is
+caught by whoever reads it (the viewer and `cloud_restore` both check the ciphertext against its id) and spoils only the
+uploader's own share. One service instance per data directory.
+
 ## Where things are
 
 ```text
@@ -50,8 +85,8 @@ strict CSP.
 <data>/shares/<share_id>/{meta.postcard, manifest}
 ```
 
-Everything is read into memory at start. That is fine into the low millions of blobs; an object store (S3) behind the same
-`Store` calls is the next step if one machine is not enough. The service writes no access log; a deployment's proxy must not
+Everything is read into memory at start. That is fine into the low millions of blobs. With a bucket the machine needs
+only a small disk for the bookkeeping. The service writes no access log; a deployment's proxy must not
 log paths either (a share id in a log is not a key, but it is a link's address).
 
 ## Not done here

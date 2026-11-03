@@ -118,6 +118,11 @@ the two issues with real consequences and are fixed. F4 is the one a user should
   another album, and limits itself to 16 streams at once and 1,500 requests per share per minute. A link names up to
   four devices, so it also shows their endpoint ids to whoever holds the link. Revoking removes the record and the
   folder; another serving device stops at its next request after the library's settings reach it.
+- **On a bucket (A-119)**: reads are redirects to presigned URLs that name the bucket key (library id, blob id) and
+  stay valid for 10 minutes, so revoking a link stops new reads at once but not an address a page already has, for
+  that long. The bucket's provider holds the same ciphertext and sees the same metadata as the service (sizes, times,
+  addresses of readers), and the bucket should be private so it serves nothing the service did not sign. Uploads are
+  checked for size, not hash; a wrong blob fails every reader's check against its id.
 - **Not covered**: a malicious or compromised service operator serving a different viewer page (the page is the trust
   anchor; subresource integrity and a published build hash reduce it, they do not remove it); abuse content we cannot
   see (takedown is by report, W1-10).

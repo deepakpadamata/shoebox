@@ -33,6 +33,13 @@ tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive", "env"] }
 getrandom = "0.3"
+# Bytes may live in an S3-compatible bucket: requests are presigned here (sans-IO) and sent with reqwest.
+rusty-s3 = { version = "0.11", default-features = false, features = ["rustcrypto"] }
+jiff = { version = "0.2", default-features = false, features = ["std"] }
+url = "2"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
 
 [dev-dependencies]
 shoebox-node.workspace = true

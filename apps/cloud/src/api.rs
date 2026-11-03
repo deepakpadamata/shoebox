@@ -1,9 +1,15 @@
 //! The HTTP interface. Owner calls (`/v1/...`) are signed by a device of the library (see
 //! `shoebox_core::cloud_auth`); public calls (`/s/{share}/...`) need only the share id, which opens nothing
 //! without the key in the link's fragment. Errors are JSON: `{"error": "<code>", "message": "..."}`.
+//!
+//! Uploads take three steps, so the bytes can go straight to a bucket: `POST /v1/uploads` reserves quota and
+//! answers with a URL per blob or object, the client `PUT`s the bytes there, and `POST /v1/uploads/commit` records
+//! them. Without a bucket the URL is the service's own `/u/{token}`. With a bucket, reads answer with a redirect
+//! to a presigned URL that lasts [`crate::s3::READ_TTL`].
 
+use crate::s3::{self, S3};
 use crate::store::{Cid, ShareId, StoreError};
-use crate::Service;
+use crate::{Pending, Service, Target};
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Path, Query, Request, State};
 use axum::http::header::{
@@ -33,6 +39,9 @@ const MAX_SHARE_UPLOAD: usize = 64 * 1024 * 1024;
 const MAX_CIDS: usize = 1_000_000;
 const MAX_OBJECT: u64 = 512 * 1024 * 1024;
 const MAX_HAS: usize = 10_000;
+const MAX_UPLOADS: usize = 1_000;
+/// An upload not committed by then gives its quota back (a little longer than its URL lasts).
+const UPLOAD_LIFE_MS: i64 = 2 * 3600 * 1000;
 
 pub(crate) struct ApiError {
     status: StatusCode,
@@ -321,54 +330,317 @@ async fn serve_file(
     Ok(res)
 }
 
-// ---- owner: blobs ----
+// ---- owner: uploads ----
 
-async fn put_blob(
+#[derive(Deserialize)]
+struct BlobWanted {
+    cid: String,
+    size: u64,
+}
+
+#[derive(Deserialize)]
+struct ObjectWanted {
+    name: String,
+    size: u64,
+    hash: String,
+}
+
+#[derive(Deserialize)]
+struct UploadRequest {
+    #[serde(default)]
+    blobs: Vec<BlobWanted>,
+    #[serde(default)]
+    objects: Vec<ObjectWanted>,
+}
+
+fn new_token() -> [u8; 16] {
+    let mut t = [0u8; 16];
+    getrandom::fill(&mut t).expect("operating system randomness");
+    t
+}
+
+fn uploads(s: &Service) -> std::sync::MutexGuard<'_, std::collections::HashMap<[u8; 16], Pending>> {
+    s.uploads.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// `POST /v1/uploads`: reserve quota for blobs and objects and say where to put each. A blob already held answers
+/// `stored`; nothing is reserved for it.
+async fn begin_uploads(
     State(s): Svc,
-    Path(cid_hex): Path<String>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
     body: Body,
 ) -> Result<Response, ApiError> {
-    let cid: Cid = parse_hex(&cid_hex)?;
-    // The body of a blob is its own id, so the signature can be checked before a byte is read.
-    let lib = authorize(&s, &headers, &method, &uri, &cid)?;
-    if s.store.has_blob(lib, &cid).is_some() {
-        return Ok(json_response(StatusCode::OK, json!({ "stored": false })));
+    let (bytes, hash) = small_body(body, 1024 * 1024).await?;
+    let lib = authorize(&s, &headers, &method, &uri, &hash)?;
+    let req: UploadRequest =
+        serde_json::from_slice(&bytes).map_err(|_| ApiError::bad("not an upload request"))?;
+    if req.blobs.len() + req.objects.len() > MAX_UPLOADS {
+        return Err(ApiError::bad("too many uploads in one request"));
     }
-    let len = content_length(&headers)?;
-    if len > s.config.max_blob {
-        return Err(ApiError::new(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "too-large",
-            "that blob is too large",
+    let mut wanted: Vec<(Target, u64, [u8; 32])> = vec![];
+    for b in &req.blobs {
+        let cid: Cid = parse_hex(&b.cid)?;
+        if b.size > s.config.max_blob {
+            return Err(ApiError::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "too-large",
+                "that blob is too large",
+            ));
+        }
+        wanted.push((Target::Blob(cid), b.size, cid));
+    }
+    for o in &req.objects {
+        if !is_name(&o.name) {
+            return Err(ApiError::bad(
+                "an object name is 1 to 80 letters, digits, dots, dashes or underscores",
+            ));
+        }
+        if o.size > MAX_OBJECT {
+            return Err(ApiError::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "too-large",
+                "that object is too large",
+            ));
+        }
+        wanted.push((Target::Object(o.name.clone()), o.size, parse_hex(&o.hash)?));
+    }
+
+    let now = s.now();
+    let mut reserved: Vec<[u8; 16]> = vec![];
+    let mut out = vec![];
+    for (target, size, hash) in wanted {
+        let label = match &target {
+            Target::Blob(cid) => json!({ "cid": hex::encode(cid) }),
+            Target::Object(name) => json!({ "name": name }),
+        };
+        if let Target::Blob(cid) = &target {
+            if s.store.has_blob(lib, cid).is_some() {
+                out.push(merge(label, json!({ "stored": true })));
+                continue;
+            }
+        }
+        if let Err(e) = s.store.reserve(lib, size, s.config.library_quota) {
+            // Give back what this request reserved: the client gets nothing to upload.
+            let mut u = uploads(&s);
+            for t in &reserved {
+                if let Some(p) = u.remove(t) {
+                    s.store.release(p.lib, p.size);
+                }
+            }
+            return Err(e.into());
+        }
+        let token = new_token();
+        let url = match &s.s3 {
+            Some(b) => {
+                let key = match &target {
+                    Target::Blob(cid) => s3::blob_key(&lib.0, cid),
+                    Target::Object(name) => s3::object_key(&lib.0, name),
+                };
+                b.put_url(&key, size, now).to_string()
+            }
+            None => format!("/u/{}", hex::encode(token)),
+        };
+        uploads(&s).insert(
+            token,
+            Pending {
+                lib,
+                target,
+                size,
+                hash,
+                expires_ms: now + UPLOAD_LIFE_MS,
+                done: false,
+            },
+        );
+        reserved.push(token);
+        out.push(merge(
+            label,
+            json!({ "token": hex::encode(token), "url": url }),
         ));
     }
-    s.store.reserve(lib, len, s.config.library_quota)?;
-    let tmp = match receive(&s, body, len, &cid).await {
-        Ok(t) => t,
-        Err(e) => {
-            s.store.release(lib, len);
-            return Err(e);
-        }
+    Ok(json_response(StatusCode::OK, json!({ "uploads": out })))
+}
+
+fn merge(mut a: Value, b: Value) -> Value {
+    if let (Some(a), Value::Object(b)) = (a.as_object_mut(), b) {
+        a.extend(b);
+    }
+    a
+}
+
+/// `PUT /u/{token}`: the bytes of an upload, when they go through the service (no bucket). The token is the
+/// permission: it was handed to a signed request, is random, and lasts two hours.
+async fn put_upload(
+    State(s): Svc,
+    Path(token_hex): Path<String>,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Response, ApiError> {
+    if s.s3.is_some() {
+        return Err(ApiError::not_found());
+    }
+    let token: [u8; 16] = parse_hex(&token_hex).map_err(|_| ApiError::not_found())?;
+    let (lib, target, size, hash) = {
+        let u = uploads(&s);
+        let p = u
+            .get(&token)
+            .filter(|p| !p.done && p.expires_ms > s.now())
+            .ok_or_else(ApiError::not_found)?;
+        (p.lib, p.target.clone(), p.size, p.hash)
     };
-    let dest = s.store.blob_path(lib, &cid);
+    // A failed upload ends it and gives the quota back; the client asks again.
+    let give_up = |e: ApiError| {
+        if uploads(&s).remove(&token).is_some() {
+            s.store.release(lib, size);
+        }
+        e
+    };
+    if content_length(&headers)? != size {
+        return Err(give_up(ApiError::bad(
+            "send the size the upload was asked for",
+        )));
+    }
+    let tmp = receive(&s, body, size, &hash).await.map_err(give_up)?;
+    let dest = match &target {
+        Target::Blob(cid) => s.store.blob_path(lib, cid),
+        Target::Object(name) => s.store.object_path(lib, name),
+    };
     if tokio::fs::rename(&tmp, &dest).await.is_err() {
         let _ = tokio::fs::remove_file(&tmp).await;
-        s.store.release(lib, len);
-        return Err(ApiError::new(
+        return Err(give_up(ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "io",
             "could not store",
-        ));
+        )));
     }
-    s.store.blob_stored(lib, cid, len);
+    match &target {
+        Target::Blob(cid) => s.store.blob_stored(lib, *cid, size),
+        Target::Object(name) => s.store.object_stored(lib, name, size, size),
+    }
+    if let Some(p) = uploads(&s).get_mut(&token) {
+        p.done = true;
+    }
     Ok(json_response(
         StatusCode::CREATED,
         json!({ "stored": true }),
     ))
 }
+
+#[derive(Deserialize)]
+struct CommitRequest {
+    tokens: Vec<String>,
+}
+
+/// `POST /v1/uploads/commit`: record uploads whose bytes are in place. With a bucket, the service checks the size
+/// there; a different size is deleted. Each token gets `ok` or an error of its own.
+async fn commit_uploads(
+    State(s): Svc,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Response, ApiError> {
+    let (bytes, hash) = small_body(body, 256 * 1024).await?;
+    let lib = authorize(&s, &headers, &method, &uri, &hash)?;
+    let req: CommitRequest =
+        serde_json::from_slice(&bytes).map_err(|_| ApiError::bad("not a commit request"))?;
+    if req.tokens.len() > MAX_UPLOADS {
+        return Err(ApiError::bad("too many uploads in one request"));
+    }
+    let mut results = vec![];
+    for t in &req.tokens {
+        let r = commit_one(&s, lib, t).await;
+        results.push(match r {
+            Ok(()) => json!({ "token": t, "ok": true }),
+            Err(e) => json!({ "token": t, "error": e.code, "message": e.message }),
+        });
+    }
+    Ok(json_response(StatusCode::OK, json!({ "results": results })))
+}
+
+async fn commit_one(
+    s: &Service,
+    lib: shoebox_core::store::LibraryId,
+    token_hex: &str,
+) -> Result<(), ApiError> {
+    let token: [u8; 16] = parse_hex(token_hex)?;
+    let (target, size, done) = {
+        let u = uploads(s);
+        let p = u.get(&token).filter(|p| p.lib == lib).ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "unknown-upload",
+                "no such upload, or it ran out",
+            )
+        })?;
+        (p.target.clone(), p.size, p.done)
+    };
+    let Some(b) = &s.s3 else {
+        if !done {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "not-uploaded",
+                "the bytes have not arrived",
+            ));
+        }
+        uploads(s).remove(&token);
+        return Ok(());
+    };
+    let key = match &target {
+        Target::Blob(cid) => s3::blob_key(&lib.0, cid),
+        Target::Object(name) => s3::object_key(&lib.0, name),
+    };
+    let found = b.head(&key, s.now()).await.map_err(bucket_error)?;
+    match found {
+        None => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "not-uploaded",
+            "the bytes have not arrived",
+        )),
+        Some(n) if n != size => {
+            let _ = b.delete(&key, s.now()).await;
+            if uploads(s).remove(&token).is_some() {
+                s.store.release(lib, size);
+            }
+            Err(ApiError::bad(
+                "the bucket holds a different size than was asked for",
+            ))
+        }
+        Some(_) => {
+            // Only the request that takes the pending upload out records it (two commits of one token count once).
+            if uploads(s).remove(&token).is_some() {
+                match &target {
+                    Target::Blob(cid) => s.store.blob_stored(lib, *cid, size),
+                    Target::Object(name) => s.store.object_stored(lib, name, size, size),
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn bucket_error(e: anyhow::Error) -> ApiError {
+    tracing::error!("bucket: {e:#}");
+    ApiError::new(
+        StatusCode::BAD_GATEWAY,
+        "storage",
+        "the storage behind the service did not answer; try again",
+    )
+}
+
+/// A redirect to a presigned URL in the bucket.
+fn redirect(url: &url::Url, cache: &'static str) -> Response {
+    let mut res = StatusCode::FOUND.into_response();
+    let h = res.headers_mut();
+    if let Ok(v) = HeaderValue::from_str(url.as_str()) {
+        h.insert(axum::http::header::LOCATION, v);
+    }
+    h.insert(CACHE_CONTROL, HeaderValue::from_static(cache));
+    res
+}
+
+// ---- owner: blobs ----
 
 async fn get_blob(
     State(s): Svc,
@@ -382,7 +654,24 @@ async fn get_blob(
     s.store
         .has_blob(lib, &cid)
         .ok_or_else(ApiError::not_found)?;
+    if let Some(b) = &s.s3 {
+        return Ok(redirect(
+            &b.get_url(&s3::blob_key(&lib.0, &cid), s.now()),
+            "no-store",
+        ));
+    }
     serve_file(&s.store.blob_path(lib, &cid), &headers, &[], |_| true).await
+}
+
+/// Delete the bytes of a blob or object the store has just forgotten.
+async fn delete_bytes(s: &Service, path: std::path::PathBuf, key: String) -> Result<(), ApiError> {
+    match &s.s3 {
+        Some(b) => b.delete(&key, s.now()).await.map_err(bucket_error),
+        None => {
+            let _ = tokio::fs::remove_file(path).await;
+            Ok(())
+        }
+    }
 }
 
 async fn delete_blob(
@@ -394,13 +683,11 @@ async fn delete_blob(
 ) -> Result<Response, ApiError> {
     let cid: Cid = parse_hex(&cid_hex)?;
     let lib = authorize(&s, &headers, &method, &uri, blake3::hash(b"").as_bytes())?;
-    match s.store.remove_blob(lib, &cid)? {
-        Some(path) => {
-            let _ = tokio::fs::remove_file(path).await;
-            Ok(StatusCode::NO_CONTENT.into_response())
-        }
-        None => Err(ApiError::not_found()),
+    if !s.store.remove_blob(lib, &cid)? {
+        return Err(ApiError::not_found());
     }
+    delete_bytes(&s, s.store.blob_path(lib, &cid), s3::blob_key(&lib.0, &cid)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn has_blobs(
@@ -458,59 +745,6 @@ async fn list_blobs(
 
 // ---- owner: objects (encrypted library state) ----
 
-async fn put_object(
-    State(s): Svc,
-    Path(name): Path<String>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Body,
-) -> Result<Response, ApiError> {
-    if !is_name(&name) {
-        return Err(ApiError::bad(
-            "an object name is 1 to 80 letters, digits, dots, dashes or underscores",
-        ));
-    }
-    // The client says what the body hashes to (and signs it); the hash is checked as the body arrives.
-    let expect: [u8; 32] = headers
-        .get("x-content-blake3")
-        .and_then(|v| v.to_str().ok())
-        .map(parse_hex::<32>)
-        .transpose()?
-        .ok_or_else(|| ApiError::bad("send X-Content-Blake3"))?;
-    let lib = authorize(&s, &headers, &method, &uri, &expect)?;
-    let len = content_length(&headers)?;
-    if len > MAX_OBJECT {
-        return Err(ApiError::new(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "too-large",
-            "that object is too large",
-        ));
-    }
-    s.store.reserve(lib, len, s.config.library_quota)?;
-    let tmp = match receive(&s, body, len, &expect).await {
-        Ok(t) => t,
-        Err(e) => {
-            s.store.release(lib, len);
-            return Err(e);
-        }
-    };
-    if tokio::fs::rename(&tmp, s.store.object_path(lib, &name))
-        .await
-        .is_err()
-    {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        s.store.release(lib, len);
-        return Err(ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "io",
-            "could not store",
-        ));
-    }
-    s.store.object_stored(lib, &name, len, len);
-    Ok(json_response(StatusCode::CREATED, json!({ "size": len })))
-}
-
 async fn get_object(
     State(s): Svc,
     Path(name): Path<String>,
@@ -521,6 +755,12 @@ async fn get_object(
     let lib = authorize(&s, &headers, &method, &uri, blake3::hash(b"").as_bytes())?;
     if !is_name(&name) || s.store.object_len(lib, &name).is_none() {
         return Err(ApiError::not_found());
+    }
+    if let Some(b) = &s.s3 {
+        return Ok(redirect(
+            &b.get_url(&s3::object_key(&lib.0, &name), s.now()),
+            "no-store",
+        ));
     }
     serve_file(&s.store.object_path(lib, &name), &headers, &[], |_| true).await
 }
@@ -536,13 +776,16 @@ async fn delete_object(
     if !is_name(&name) {
         return Err(ApiError::not_found());
     }
-    match s.store.remove_object(lib, &name) {
-        Some(p) => {
-            let _ = tokio::fs::remove_file(p).await;
-            Ok(StatusCode::NO_CONTENT.into_response())
-        }
-        None => Err(ApiError::not_found()),
+    if !s.store.remove_object(lib, &name) {
+        return Err(ApiError::not_found());
     }
+    delete_bytes(
+        &s,
+        s.store.object_path(lib, &name),
+        s3::object_key(&lib.0, &name),
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn list_objects(
@@ -580,15 +823,31 @@ async fn put_share(
     if header.share_id != id {
         return Err(ApiError::bad("the manifest is for another share id"));
     }
-    s.store.put_share(
-        lib,
-        id,
-        header.manifest_version,
-        up.expires_ms,
-        up.cids,
-        &up.manifest,
-        s.config.library_quota,
-    )?;
+    let len = up.manifest.len() as u64;
+    let quota = s.config.library_quota;
+    let version = header.manifest_version;
+    match &s.s3 {
+        Some(b) => {
+            // Checked before the manifest goes to the bucket, so a refused share never replaces a served one.
+            s.store
+                .check_share(lib, &id, version, &up.cids, len, quota)?;
+            b.put(&s3::manifest_key(&id), up.manifest, s.now())
+                .await
+                .map_err(bucket_error)?;
+            s.store
+                .put_share(lib, id, version, up.expires_ms, up.cids, None, len, quota)?;
+        }
+        None => s.store.put_share(
+            lib,
+            id,
+            version,
+            up.expires_ms,
+            up.cids,
+            Some(&up.manifest),
+            len,
+            quota,
+        )?,
+    }
     Ok(json_response(
         StatusCode::OK,
         json!({ "version": header.manifest_version }),
@@ -604,11 +863,15 @@ async fn delete_share(
 ) -> Result<Response, ApiError> {
     let id: ShareId = parse_hex(&id_hex)?;
     let lib = authorize(&s, &headers, &method, &uri, blake3::hash(b"").as_bytes())?;
-    if s.store.delete_share(lib, &id) {
-        Ok(StatusCode::NO_CONTENT.into_response())
-    } else {
-        Err(ApiError::not_found())
+    if !s.store.delete_share(lib, &id) {
+        return Err(ApiError::not_found());
     }
+    if let Some(b) = &s.s3 {
+        b.delete(&s3::manifest_key(&id), s.now())
+            .await
+            .map_err(bucket_error)?;
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn list_shares(
@@ -694,8 +957,15 @@ async fn get_manifest(
 ) -> Result<Response, ApiError> {
     let id: ShareId = parse_hex(&id_hex).map_err(|_| ApiError::not_found())?;
     public_share(&s, &id)?;
-    let (_, version, _, _) = s.store.share_info(&id).ok_or_else(ApiError::not_found)?;
+    let (_, version, _, len) = s.store.share_info(&id).ok_or_else(ApiError::not_found)?;
     let key = format!("share:{}", hex::encode(id));
+    if let Some(b) = &s.s3 {
+        charge_or_refuse(&s, &key, len)?;
+        return Ok(redirect(
+            &b.get_url(&s3::manifest_key(&id), s.now()),
+            "no-store",
+        ));
+    }
     serve_file(
         &s.store.manifest_path(&id),
         &headers,
@@ -725,6 +995,18 @@ async fn get_share_blob(
         .share_serves(&id, &cid)
         .ok_or_else(ApiError::not_found)?;
     let key = format!("share:{}", hex::encode(id));
+    if let Some(b) = &s.s3 {
+        // The whole blob counts against the day, whatever part of it the reader then fetches.
+        let len = s
+            .store
+            .has_blob(lib, &cid)
+            .ok_or_else(ApiError::not_found)?;
+        charge_or_refuse(&s, &key, len)?;
+        return Ok(redirect(
+            &b.get_url(&s3::blob_key(&lib.0, &cid), s.now()),
+            "private, max-age=300",
+        ));
+    }
     serve_file(
         &s.store.blob_path(lib, &cid),
         &headers,
@@ -735,6 +1017,20 @@ async fn get_share_blob(
         },
     )
     .await
+}
+
+fn charge_or_refuse(s: &Service, key: &str, n: u64) -> Result<(), ApiError> {
+    if s.limiter
+        .charge(key, s.now(), n, s.config.share_daily_bytes)
+    {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "daily-limit",
+            "this link has served all it may today",
+        ))
+    }
 }
 
 /// `POST /report/{share}`: anyone who has a link can switch it off. The service knows nothing about what is in it,
@@ -793,7 +1089,9 @@ fn content_type(path: &str) -> &'static str {
 }
 
 fn csp(s: &Service) -> String {
+    // With a bucket, reads are redirected there, and `connect-src` applies to where a redirect leads.
     let connect = std::iter::once("'self'".to_string())
+        .chain(s.s3.as_ref().map(S3::origin))
         .chain(s.config.csp_connect.iter().cloned())
         .collect::<Vec<_>>()
         .join(" ");
@@ -905,19 +1203,16 @@ pub(crate) fn router(service: Arc<Service>) -> Router {
         .route("/s/{share}/m", get(get_manifest).options(preflight))
         .route("/s/{share}/b/{cid}", get(get_share_blob).options(preflight))
         .route("/report/{share}", post(report).options(preflight))
+        .route("/u/{token}", put(put_upload))
         .layer(middleware::from_fn(public_cors));
     let owner = Router::new()
         .route("/v1/blobs", get(list_blobs))
         .route("/v1/blobs/has", post(has_blobs))
-        .route(
-            "/v1/blobs/{cid}",
-            put(put_blob).get(get_blob).delete(delete_blob),
-        )
+        .route("/v1/blobs/{cid}", get(get_blob).delete(delete_blob))
+        .route("/v1/uploads", post(begin_uploads))
+        .route("/v1/uploads/commit", post(commit_uploads))
         .route("/v1/objects", get(list_objects))
-        .route(
-            "/v1/objects/{name}",
-            put(put_object).get(get_object).delete(delete_object),
-        )
+        .route("/v1/objects/{name}", get(get_object).delete(delete_object))
         .route("/v1/shares", get(list_shares))
         .route("/v1/shares/{share}", put(put_share).delete(delete_share))
         .route("/v1/usage", get(usage))

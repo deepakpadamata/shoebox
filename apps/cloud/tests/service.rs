@@ -15,6 +15,9 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use tower::ServiceExt;
 
+mod common;
+use common::FakeS3;
+
 const LIB: LibraryId = LibraryId([0x5B; 16]);
 const T0: i64 = 1_800_000_000_000;
 
@@ -35,8 +38,11 @@ fn hlc(ms: u64) -> Hlc {
 }
 
 fn rig_with(edit: impl FnOnce(&mut Config)) -> Rig {
+    rig_on(Arc::new(AtomicI64::new(T0)), edit)
+}
+
+fn rig_on(clock: Arc<AtomicI64>, edit: impl FnOnce(&mut Config)) -> Rig {
     let dir = tempfile::tempdir().unwrap();
-    let clock = Arc::new(AtomicI64::new(T0));
     let mut config = Config::new(dir.path().to_path_buf());
     let c = clock.clone();
     config.clock = Arc::new(move || c.load(Ordering::SeqCst));
@@ -53,6 +59,19 @@ fn rig_with(edit: impl FnOnce(&mut Config)) -> Rig {
 
 fn rig() -> Rig {
     rig_with(|_| {})
+}
+
+/// A service that keeps the bytes in a (fake) bucket and only the bookkeeping on disk; one clock for both.
+async fn rig_in_bucket(edit: impl FnOnce(&mut Config)) -> (Rig, FakeS3) {
+    let clock = Arc::new(AtomicI64::new(T0));
+    let c = clock.clone();
+    let fake = common::start(Arc::new(move || c.load(Ordering::SeqCst))).await;
+    let s3 = fake.config.clone();
+    let r = rig_on(clock, |c| {
+        c.s3 = Some(s3);
+        edit(c);
+    });
+    (r, fake)
 }
 
 struct Device {
@@ -144,13 +163,114 @@ impl Rig {
         (s, b)
     }
 
-    async fn put_blob(&self, d: &Device, ciphertext: &[u8]) -> (StatusCode, String) {
-        let cid = *blake3::hash(ciphertext).as_bytes();
-        let path = format!("/v1/blobs/{}", hex::encode(cid));
-        let (s, _) = self
-            .owner_hashed(d, "PUT", &path, ciphertext.to_vec(), cid, self.now())
+    /// `POST /v1/uploads` for blobs `(cid, size)` and objects `(name, size, hash)`.
+    async fn begin(
+        &self,
+        d: &Device,
+        blobs: &[(String, u64)],
+        objects: &[(&str, u64, [u8; 32])],
+    ) -> (StatusCode, serde_json::Value) {
+        let body = serde_json::json!({
+            "blobs": blobs.iter().map(|(c, n)| serde_json::json!({ "cid": c, "size": n })).collect::<Vec<_>>(),
+            "objects": objects.iter().map(|(name, n, h)| serde_json::json!({ "name": name, "size": n, "hash": hex::encode(h) })).collect::<Vec<_>>(),
+        });
+        let (s, b) = self
+            .owner(d, "POST", "/v1/uploads", serde_json::to_vec(&body).unwrap())
             .await;
-        (s, hex::encode(cid))
+        (s, serde_json::from_slice(&b).unwrap_or_default())
+    }
+
+    /// Put bytes where an upload slot says: the service itself (a path) or the bucket (a URL).
+    async fn put_bytes(&self, url: &str, bytes: Vec<u8>) -> (StatusCode, Vec<u8>) {
+        if url.starts_with('/') {
+            let req = Request::builder()
+                .method("PUT")
+                .uri(url)
+                .header("content-length", bytes.len())
+                .body(Body::from(bytes))
+                .unwrap();
+            let (s, b, _) = self.send(req).await;
+            return (s, b);
+        }
+        let res = common::http()
+            .put(url)
+            .header("content-length", bytes.len())
+            .body(bytes)
+            .send()
+            .await
+            .unwrap();
+        let s = StatusCode::from_u16(res.status().as_u16()).unwrap();
+        (s, res.bytes().await.unwrap().to_vec())
+    }
+
+    async fn commit(&self, d: &Device, tokens: &[&str]) -> serde_json::Value {
+        let body = serde_json::to_vec(&serde_json::json!({ "tokens": tokens })).unwrap();
+        let (s, b) = self.owner(d, "POST", "/v1/uploads/commit", body).await;
+        assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+        serde_json::from_slice(&b).unwrap()
+    }
+
+    /// Upload one blob the whole way: CREATED when it went up, OK when the service had it, else the refusal.
+    async fn put_blob(&self, d: &Device, ciphertext: &[u8]) -> (StatusCode, String) {
+        let cid = hex::encode(blake3::hash(ciphertext).as_bytes());
+        let (s, v) = self
+            .begin(d, &[(cid.clone(), ciphertext.len() as u64)], &[])
+            .await;
+        if s != StatusCode::OK {
+            return (s, cid);
+        }
+        let slot = &v["uploads"][0];
+        if slot["stored"] == true {
+            return (StatusCode::OK, cid);
+        }
+        let (s, _) = self
+            .put_bytes(slot["url"].as_str().unwrap(), ciphertext.to_vec())
+            .await;
+        if !s.is_success() {
+            return (s, cid);
+        }
+        let done = self.commit(d, &[slot["token"].as_str().unwrap()]).await;
+        if done["results"][0]["ok"] != true {
+            return (StatusCode::CONFLICT, cid);
+        }
+        (StatusCode::CREATED, cid)
+    }
+
+    async fn put_object(&self, d: &Device, name: &str, bytes: &[u8]) -> StatusCode {
+        let hash = *blake3::hash(bytes).as_bytes();
+        let (s, v) = self
+            .begin(d, &[], &[(name, bytes.len() as u64, hash)])
+            .await;
+        if s != StatusCode::OK {
+            return s;
+        }
+        let slot = &v["uploads"][0];
+        let (s, _) = self
+            .put_bytes(slot["url"].as_str().unwrap(), bytes.to_vec())
+            .await;
+        if !s.is_success() {
+            return s;
+        }
+        let done = self.commit(d, &[slot["token"].as_str().unwrap()]).await;
+        if done["results"][0]["ok"] != true {
+            return StatusCode::CONFLICT;
+        }
+        StatusCode::CREATED
+    }
+
+    /// A GET that follows a redirect to the bucket, as a browser does.
+    async fn fetch(&self, path: &str) -> (StatusCode, Vec<u8>) {
+        let (s, b, h) = self.public(path, None).await;
+        if s != StatusCode::FOUND {
+            return (s, b);
+        }
+        let res = common::http()
+            .get(h["location"].to_str().unwrap())
+            .send()
+            .await
+            .unwrap();
+        let s = StatusCode::from_u16(res.status().as_u16()).unwrap();
+        (s, res.bytes().await.unwrap().to_vec())
     }
 
     async fn public(
@@ -204,11 +324,14 @@ async fn a_blob_whose_bytes_do_not_hash_to_its_id_is_refused() {
     let d = r.device(2, "nest");
     let good = sealed_photo(1, 1000);
     let cid = *blake3::hash(&good).as_bytes();
-    let path = format!("/v1/blobs/{}", hex::encode(cid));
-    // The signature commits to the id; the body is other bytes.
+    // The upload is asked for under the id; the bytes sent are other bytes.
+    let (_, v) = r
+        .begin(&d, &[(hex::encode(cid), good.len() as u64)], &[])
+        .await;
+    let url = v["uploads"][0]["url"].as_str().unwrap().to_string();
     let mut bad = good.clone();
     bad[10] ^= 1;
-    let (s, body) = r.owner_hashed(&d, "PUT", &path, bad, cid, r.now()).await;
+    let (s, body) = r.put_bytes(&url, bad).await;
     assert_eq!(
         s,
         StatusCode::UNPROCESSABLE_ENTITY,
@@ -325,7 +448,7 @@ async fn a_deleted_share_and_an_expired_share_stop_answering() {
         StatusCode::GONE
     );
     // After the grace period the janitor deletes it.
-    assert_eq!(r.svc.store.sweep_expired(T0 + 60_000), 1);
+    assert_eq!(r.svc.store.sweep_expired(T0 + 60_000).len(), 1);
     assert_eq!(r.public(&m2, None).await.0, StatusCode::NOT_FOUND);
 }
 
@@ -615,17 +738,10 @@ async fn blobs_are_listed_probed_read_back_and_objects_hold_library_state() {
     let snap1 = vec![1u8; 3000];
     let snap2 = vec![2u8; 2000];
     for snap in [&snap1, &snap2] {
-        let hash = *blake3::hash(snap).as_bytes();
-        let auth = r.signed(&d, "PUT", "/v1/objects/library-snapshot", hash, r.now());
-        let req = Request::builder()
-            .method("PUT")
-            .uri("/v1/objects/library-snapshot")
-            .header("authorization", format!("Shoebox {}", auth.to_header()))
-            .header("x-content-blake3", hex::encode(hash))
-            .header("content-length", snap.len())
-            .body(Body::from(snap.clone()))
-            .unwrap();
-        assert_eq!(r.send(req).await.0, StatusCode::CREATED);
+        assert_eq!(
+            r.put_object(&d, "library-snapshot", snap).await,
+            StatusCode::CREATED
+        );
     }
     let before = r.svc.store.usage(LIB);
     let (s, got) = r
@@ -820,4 +936,223 @@ async fn a_reported_share_is_switched_off_at_once_and_the_owner_sees_why() {
         .body(Body::empty())
         .unwrap();
     assert_eq!(r.send(nowhere).await.0, StatusCode::NOT_FOUND);
+}
+
+// ---- with the bytes in a bucket ----
+
+fn files_under(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = vec![];
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        for e in std::fs::read_dir(&p).unwrap() {
+            let path = e.unwrap().path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn in_a_bucket_uploads_go_straight_there_and_reads_are_redirected() {
+    let viewer = tempfile::tempdir().unwrap();
+    std::fs::write(viewer.path().join("index.html"), "<!doctype html>").unwrap();
+    let v = viewer.path().to_path_buf();
+    let (r, bucket) = rig_in_bucket(|c| c.viewer_dir = Some(v)).await;
+    let d = r.device(2, "nest");
+    let photo = sealed_photo(1, 5000);
+    let other = sealed_photo(2, 300);
+    let (s, cid) = r.put_blob(&d, &photo).await;
+    assert_eq!(s, StatusCode::CREATED);
+    assert_eq!(
+        r.put_blob(&d, &photo).await.0,
+        StatusCode::OK,
+        "held already"
+    );
+    let (_, other_cid) = r.put_blob(&d, &other).await;
+    let lib = hex::encode(LIB.0);
+    assert_eq!(
+        bucket.get(&format!("libs/{lib}/blobs/{cid}")).unwrap(),
+        photo,
+        "the bytes went to the bucket"
+    );
+    assert_eq!(r.svc.store.usage(LIB), (photo.len() + other.len()) as u64);
+
+    let share = [9u8; 16];
+    let id = hex::encode(share);
+    let body = share_upload(share, 1, vec![hex_cid(&cid)], None);
+    let sealed_manifest = postcard::from_bytes::<ShareUpload>(&body).unwrap().manifest;
+    assert_eq!(
+        r.owner(&d, "PUT", &format!("/v1/shares/{id}"), body)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        bucket.get(&format!("shares/{id}/manifest")).unwrap(),
+        sealed_manifest
+    );
+
+    // A reader is sent to the bucket for what the share lists, and only for that.
+    let (s, _, h) = r.public(&format!("/s/{id}/b/{cid}"), None).await;
+    assert_eq!(s, StatusCode::FOUND);
+    let to = h["location"].to_str().unwrap();
+    assert!(to.starts_with(bucket.config.endpoint.as_str()), "{to}");
+    assert_eq!(h["cache-control"], "private, max-age=300");
+    assert_eq!(r.fetch(&format!("/s/{id}/b/{cid}")).await.1, photo);
+    assert_eq!(r.fetch(&format!("/s/{id}/m")).await.1, sealed_manifest);
+    assert_eq!(
+        r.public(&format!("/s/{id}/b/{other_cid}"), None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    // The owner is sent there too (the client drops its signature on the way).
+    let (s, _) = r
+        .owner(&d, "GET", &format!("/v1/blobs/{other_cid}"), vec![])
+        .await;
+    assert_eq!(s, StatusCode::FOUND);
+
+    // The page may fetch from the bucket, since that is where reads are sent.
+    let (_, _, h) = r.public("/a", None).await;
+    let csp = h["content-security-policy"].to_str().unwrap();
+    let origin = bucket.config.endpoint.origin().ascii_serialization();
+    assert!(
+        csp.contains(&format!("connect-src 'self' {origin}")),
+        "{csp}"
+    );
+
+    // The data directory holds bookkeeping only.
+    for f in files_under(r.dir.path()) {
+        let bytes = std::fs::read(&f).unwrap();
+        assert!(
+            !bytes
+                .windows(64)
+                .any(|w| photo.windows(64).next() == Some(w)),
+            "{} holds blob bytes",
+            f.display()
+        );
+        assert!(!f.ends_with("manifest"), "{}", f.display());
+    }
+
+    // Stopping the share deletes its manifest; deleting a blob deletes its bytes.
+    r.owner(&d, "DELETE", &format!("/v1/shares/{id}"), vec![])
+        .await;
+    assert!(bucket.get(&format!("shares/{id}/manifest")).is_none());
+    assert_eq!(
+        r.public(&format!("/s/{id}/b/{cid}"), None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        r.owner(&d, "DELETE", &format!("/v1/blobs/{cid}"), vec![])
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert!(bucket.get(&format!("libs/{lib}/blobs/{cid}")).is_none());
+    assert_eq!(r.svc.store.usage(LIB), other.len() as u64);
+    assert!(bucket.refused().is_empty(), "{:?}", bucket.refused());
+}
+
+#[tokio::test]
+async fn a_bucket_upload_of_another_size_late_or_never_made_is_not_recorded() {
+    let (r, bucket) = rig_in_bucket(|_| {}).await;
+    let d = r.device(2, "nest");
+    let photo = sealed_photo(1, 1000);
+    let cid = hex::encode(blake3::hash(&photo).as_bytes());
+    let (_, v) = r.begin(&d, &[(cid.clone(), photo.len() as u64)], &[]).await;
+    let url = v["uploads"][0]["url"].as_str().unwrap().to_string();
+    let token = v["uploads"][0]["token"].as_str().unwrap().to_string();
+    assert_eq!(r.svc.store.usage(LIB), photo.len() as u64, "reserved");
+
+    // Committed before the bytes are there: refused, still waiting.
+    let done = r.commit(&d, &[&token]).await;
+    assert_eq!(done["results"][0]["error"], "not-uploaded");
+    // The length is signed: the bucket refuses other bytes, and the URL for any other use.
+    let (s, _) = r.put_bytes(&url, photo[..999].to_vec()).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let res = common::http().get(&url).send().await.unwrap();
+    assert_eq!(res.status().as_u16(), 403);
+    assert!(bucket.keys().is_empty());
+
+    // Two hours on, the URL has run out and the janitor gives the quota back.
+    r.clock.fetch_add(2 * 3600 * 1000 + 1, Ordering::SeqCst);
+    let (s, _) = r.put_bytes(&url, photo.clone()).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    r.svc.sweep().await;
+    assert_eq!(r.svc.store.usage(LIB), 0);
+    assert_eq!(
+        r.commit(&d, &[&token]).await["results"][0]["error"],
+        "unknown-upload"
+    );
+    assert!(r.svc.store.has_blob(LIB, &hex_cid(&cid)).is_none());
+
+    // Bytes that reached the bucket but were never committed are deleted when the upload runs out.
+    let (_, v) = r.begin(&d, &[(cid.clone(), photo.len() as u64)], &[]).await;
+    let url = v["uploads"][0]["url"].as_str().unwrap().to_string();
+    assert_eq!(r.put_bytes(&url, photo.clone()).await.0, StatusCode::OK);
+    assert_eq!(bucket.keys().len(), 1);
+    r.clock.fetch_add(2 * 3600 * 1000 + 1, Ordering::SeqCst);
+    r.svc.sweep().await;
+    assert!(bucket.keys().is_empty());
+    assert_eq!(r.svc.store.usage(LIB), 0);
+    let refused = bucket.refused();
+    assert!(
+        refused
+            .iter()
+            .all(|w| w.contains("SignatureDoesNotMatch") || w.contains("expired")),
+        "{refused:?}"
+    );
+}
+
+#[tokio::test]
+async fn what_a_bucket_holds_survives_a_restart_and_expired_shares_leave_it() {
+    let (r, bucket) = rig_in_bucket(|_| {}).await;
+    let d = r.device(2, "nest");
+    let (_, keep) = r.put_blob(&d, &sealed_photo(1, 400)).await;
+    let (_, gone) = r.put_blob(&d, &sealed_photo(2, 500)).await;
+    assert_eq!(
+        r.put_object(&d, "state.abc", &[3u8; 700]).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        r.put_object(&d, "state.abc", &[4u8; 600]).await,
+        StatusCode::CREATED
+    );
+    r.owner(&d, "DELETE", &format!("/v1/blobs/{gone}"), vec![])
+        .await;
+    let share = [8u8; 16];
+    let id = hex::encode(share);
+    let body = share_upload(share, 1, vec![hex_cid(&keep)], Some(T0 + 60_000));
+    r.owner(&d, "PUT", &format!("/v1/shares/{id}"), body).await;
+    let used = r.svc.store.usage(LIB);
+
+    let mut config = Config::new(r.dir.path().to_path_buf());
+    config.s3 = Some(bucket.config.clone());
+    let c = r.clock.clone();
+    config.clock = Arc::new(move || c.load(Ordering::SeqCst));
+    let svc = Service::open(config).unwrap();
+    assert_eq!(svc.store.usage(LIB), used);
+    assert!(svc.store.has_blob(LIB, &hex_cid(&keep)).is_some());
+    assert!(svc.store.has_blob(LIB, &hex_cid(&gone)).is_none());
+    assert_eq!(svc.store.object_len(LIB, "state.abc"), Some(600));
+    // The log was rewritten with only what is there.
+    let log = std::fs::read_to_string(
+        r.dir
+            .path()
+            .join("libs")
+            .join(hex::encode(LIB.0))
+            .join("index.log"),
+    )
+    .unwrap();
+    assert_eq!(log.lines().count(), 2, "{log}");
+    assert!(!log.contains('-'), "{log}");
+
+    // A week after it expired, the janitor deletes the share and its manifest in the bucket.
+    r.clock
+        .store(T0 + 60_000 + 7 * 86_400_000, Ordering::SeqCst);
+    assert_eq!(svc.sweep().await, 1);
+    assert!(bucket.get(&format!("shares/{id}/manifest")).is_none());
+    assert!(bucket.refused().is_empty(), "{:?}", bucket.refused());
 }

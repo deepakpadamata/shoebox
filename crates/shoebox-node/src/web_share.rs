@@ -216,32 +216,100 @@ impl Session {
         Ok(present)
     }
 
-    async fn put_file(
+    /// Ask where to upload blobs (`(cid, size)`) and objects (`(name, size, hash of the bytes)`). The answer is in
+    /// the same order: a blob the service holds already comes back `stored`.
+    async fn begin(
         &self,
-        cid: &[u8; 32],
-        path: &std::path::Path,
-        len: u64,
+        blobs: &[([u8; 32], u64)],
+        objects: &[(String, u64, [u8; 32])],
         now_ms: i64,
-    ) -> Result<()> {
-        let url_path = format!("/v1/blobs/{}", hex::encode(cid));
-        let file = tokio::fs::File::open(path).await?;
-        let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::with_capacity(
-            file,
-            256 * 1024,
-        ));
+    ) -> Result<Vec<Slot>> {
+        let body = serde_json::json!({
+            "blobs": blobs.iter().map(|(c, n)| serde_json::json!({ "cid": hex::encode(c), "size": n })).collect::<Vec<_>>(),
+            "objects": objects.iter().map(|(name, n, h)| serde_json::json!({ "name": name, "size": n, "hash": hex::encode(h) })).collect::<Vec<_>>(),
+        });
+        let res = self
+            .call("POST", "/v1/uploads", serde_json::to_vec(&body)?, now_ms)
+            .await?;
+        if !res.status().is_success() {
+            return Err(Self::fail(res, "asking where to upload").await);
+        }
+        let v: serde_json::Value = serde_json::from_slice(&res.bytes().await?)?;
+        let slots: Vec<Slot> = v["uploads"]
+            .as_array()
+            .context("the service did not say where to upload")?
+            .iter()
+            .map(|u| Slot {
+                stored: u["stored"].as_bool().unwrap_or(false),
+                token: u["token"].as_str().map(String::from),
+                url: u["url"].as_str().map(String::from),
+            })
+            .collect();
+        ensure!(
+            slots.len() == blobs.len() + objects.len(),
+            "the service answered for {} uploads, not {}",
+            slots.len(),
+            blobs.len() + objects.len()
+        );
+        Ok(slots)
+    }
+
+    /// Put the bytes where [`Session::begin`] said: the bucket (an absolute, presigned URL, which carries its own
+    /// permission) or the service itself (a path).
+    async fn put_to(&self, slot: &Slot, body: reqwest::Body, len: u64) -> Result<()> {
+        let url = slot
+            .url
+            .as_deref()
+            .context("the service gave no upload URL")?;
+        let url = if url.starts_with('/') {
+            self.url(url)
+        } else {
+            url.to_string()
+        };
         let res = self
             .http
-            .put(self.url(&url_path))
-            .header(AUTHORIZATION, self.auth("PUT", &url_path, cid, now_ms))
+            .put(url)
             .header(CONTENT_LENGTH, len)
             .body(body)
             .send()
             .await
-            .context("uploading a blob")?;
+            .context("uploading")?;
         if !res.status().is_success() {
-            return Err(Self::fail(res, "uploading a blob").await);
+            return Err(Self::fail(res, "uploading").await);
         }
         Ok(())
+    }
+
+    /// Tell the service these uploads are in place. Returns the tokens it refused, with why.
+    async fn commit(&self, tokens: &[String], now_ms: i64) -> Result<Vec<(String, String)>> {
+        if tokens.is_empty() {
+            return Ok(vec![]);
+        }
+        let body = serde_json::json!({ "tokens": tokens });
+        let res = self
+            .call(
+                "POST",
+                "/v1/uploads/commit",
+                serde_json::to_vec(&body)?,
+                now_ms,
+            )
+            .await?;
+        if !res.status().is_success() {
+            return Err(Self::fail(res, "finishing uploads").await);
+        }
+        let v: serde_json::Value = serde_json::from_slice(&res.bytes().await?)?;
+        Ok(v["results"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|r| r["ok"].as_bool() != Some(true))
+            .map(|r| {
+                (
+                    r["token"].as_str().unwrap_or_default().to_string(),
+                    r["message"].as_str().unwrap_or("refused").to_string(),
+                )
+            })
+            .collect())
     }
 
     fn cached(&self, plain: &Blake3Hash) -> Option<([u8; 32], u64)> {
@@ -262,6 +330,24 @@ impl Session {
         }
     }
 }
+
+/// Where one upload goes, as the service answered.
+struct Slot {
+    stored: bool,
+    token: Option<String>,
+    url: Option<String>,
+}
+
+/// What [`LibraryNode::upload_all`] did: the blobs that went up, those the service had, and what stopped it.
+#[derive(Default)]
+struct Uploaded {
+    went: std::collections::HashSet<[u8; 32]>,
+    held: std::collections::HashSet<[u8; 32]>,
+    error: Option<anyhow::Error>,
+}
+
+/// Blobs asked about and uploaded per round trip.
+const UPLOAD_ROUND: usize = 200;
 
 /// What gets sealed: a stored blob read piece by piece, or bytes already in memory (a copy without its location).
 enum Plain {
@@ -837,12 +923,9 @@ impl<L: LibraryStore> LibraryNode<L> {
             })
             .collect();
         let asked: Vec<[u8; 32]> = all.iter().map(|b| b.cid).collect();
-        let present = s.has(&asked, now_i64(self.now_ms())).await?;
-        for b in &all {
-            if present.contains(&b.cid) {
-                continue;
-            }
-            self.upload(s, b).await?;
+        let up = self.upload_all(s, &all).await;
+        if let Some(e) = up.error {
+            return Err(e);
         }
         for b in &all {
             if let Some(f) = &b.file {
@@ -1013,29 +1096,111 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok((*hasher.finalize().as_bytes(), written, path))
     }
 
-    /// Upload one blob that the service does not hold (sealing it again if the cache knew it but its file is gone).
-    async fn upload(&self, s: &Session, b: &Staged) -> Result<()> {
-        let (path, temp) = match &b.file {
-            Some(f) => (f.clone(), false),
+    /// Upload the blobs the service (or a Live share's folder) does not hold. Whatever went up before a failure is
+    /// committed and reported as gone up.
+    async fn upload_all(&self, s: &Session, items: &[&Staged]) -> Uploaded {
+        let mut out = Uploaded::default();
+        if let Some(dir) = &s.sink {
+            let asked: Vec<[u8; 32]> = items.iter().map(|b| b.cid).collect();
+            let result = async {
+                let present = s.has(&asked, 0).await?;
+                std::fs::create_dir_all(dir)?;
+                for b in items {
+                    if present.contains(&b.cid) {
+                        out.held.insert(b.cid);
+                        continue;
+                    }
+                    let (path, temp) = self.sealed_file(s, b).await?;
+                    let moved = std::fs::rename(&path, dir.join(hex::encode(b.cid)));
+                    if temp {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                    moved?;
+                    out.went.insert(b.cid);
+                }
+                Ok(())
+            }
+            .await;
+            out.error = result.err();
+            return out;
+        }
+        for round in items.chunks(UPLOAD_ROUND) {
+            let wanted: Vec<([u8; 32], u64)> = round.iter().map(|b| (b.cid, b.size)).collect();
+            let slots = match s.begin(&wanted, &[], now_i64(self.now_ms())).await {
+                Ok(slots) => slots,
+                Err(e) => {
+                    out.error = Some(e);
+                    return out;
+                }
+            };
+            let mut put: Vec<(String, [u8; 32])> = vec![];
+            let mut failed = None;
+            for (b, slot) in round.iter().zip(&slots) {
+                if slot.stored {
+                    out.held.insert(b.cid);
+                    continue;
+                }
+                let sent = async {
+                    let (path, temp) = self.sealed_file(s, b).await?;
+                    let file = tokio::fs::File::open(&path).await;
+                    let result = match file {
+                        Ok(f) => {
+                            let body = reqwest::Body::wrap_stream(
+                                tokio_util::io::ReaderStream::with_capacity(f, 256 * 1024),
+                            );
+                            s.put_to(slot, body, b.size).await
+                        }
+                        Err(e) => Err(e.into()),
+                    };
+                    if temp {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                    result
+                }
+                .await;
+                match sent {
+                    Ok(()) => put.push((slot.token.clone().unwrap_or_default(), b.cid)),
+                    Err(e) => {
+                        failed = Some(e);
+                        break;
+                    }
+                }
+            }
+            let tokens: Vec<String> = put.iter().map(|(t, _)| t.clone()).collect();
+            match s.commit(&tokens, now_i64(self.now_ms())).await {
+                Ok(refused) => {
+                    for (t, c) in &put {
+                        if !refused.iter().any(|(r, _)| r == t) {
+                            out.went.insert(*c);
+                        }
+                    }
+                    if let Some((_, why)) = refused.first() {
+                        failed
+                            .get_or_insert_with(|| anyhow!("the service refused an upload: {why}"));
+                    }
+                }
+                Err(e) => {
+                    failed.get_or_insert(e);
+                }
+            }
+            if let Some(e) = failed {
+                out.error = Some(e);
+                return out;
+            }
+        }
+        out
+    }
+
+    /// The sealed file of a staged blob, sealing it again when the cache knew its id but the file is gone. The flag
+    /// says the file was made here, for the caller to delete.
+    async fn sealed_file(&self, s: &Session, b: &Staged) -> Result<(PathBuf, bool)> {
+        match &b.file {
+            Some(f) => Ok((f.clone(), false)),
             None => {
                 let (cid, _, f) = self.seal_to_file(s, &b.key, &b.plain).await?;
                 ensure!(cid == b.cid, "a blob sealed differently than before");
-                (f, true)
+                Ok((f, true))
             }
-        };
-        let result = match &s.sink {
-            Some(dir) => {
-                std::fs::create_dir_all(dir)?;
-                std::fs::rename(&path, dir.join(hex::encode(b.cid))).map_err(Into::into)
-            }
-            None => {
-                s.put_file(&b.cid, &path, b.size, now_i64(self.now_ms()))
-                    .await
-            }
-        };
-        if temp {
-            let _ = std::fs::remove_file(&path);
         }
-        result
     }
 }

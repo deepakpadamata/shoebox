@@ -5,6 +5,7 @@
 
 pub mod album_state;
 pub mod clock;
+pub mod cloud;
 pub mod codec;
 #[cfg(feature = "testing")]
 pub mod conformance;
@@ -17,6 +18,7 @@ pub mod merge;
 pub mod model;
 pub mod policy;
 pub mod recovery;
+pub mod share;
 pub mod store;
 
 pub use hlc::{Hlc, HlcClock};

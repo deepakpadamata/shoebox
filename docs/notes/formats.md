@@ -46,6 +46,15 @@ Each signature or keyed hash starts with its domain, so one can never be replaye
 | `shoebox/pair-sas/0` | the six-digit pairing code (keyed BLAKE3) |
 | `shoebox/pair-ticket-id/0` | the pairing ticket's lookup id |
 | `shoebox/loro-entry/v1` | signed records in the Loro library |
+| `shoebox/cloud-secret/v1` | the library's cloud secret, derived from the root seed (W1-02) |
+| `shoebox/cloud-blob-key/v1` | a blob's cloud key, from the cloud secret and the plaintext hash |
+| `shoebox/cloud-nonce/v1` | a piece's nonce (keyed BLAKE3 by the blob key, piece number, last flag) |
+| `shoebox/share-manifest-key/v1` | the key that opens a share manifest, derived from the link's share key (W1-03) |
+| `SBXS` (the magic) | a sealed share manifest's signature covers every byte from the magic on |
+
+Sealed cloud blobs are 4 MiB pieces of XChaCha20-Poly1305 (16-byte tags, no header); locked by golden bytes in
+`crates/shoebox-core/tests/cloud.rs`. Sealed share manifests are laid out in the header of `crates/shoebox-core/src/share.rs`
+and locked in `tests/share.rs`.
 
 ## Records
 

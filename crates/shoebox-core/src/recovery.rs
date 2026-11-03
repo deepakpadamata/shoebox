@@ -39,6 +39,12 @@ impl RecoveryKit {
         &self.root
     }
 
+    /// The key that encrypts this library's blobs in Shoebox Cloud (W1-02). Derived from the root, so the
+    /// phrase restores it too.
+    pub fn cloud_secret(&self) -> crate::cloud::CloudSecret {
+        crate::cloud::CloudSecret::from_root(&self.root)
+    }
+
     /// The 24 words, space separated.
     pub fn phrase(&self) -> String {
         Mnemonic::from_entropy(&self.root.seed())

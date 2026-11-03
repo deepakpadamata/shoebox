@@ -89,6 +89,11 @@ enum Cmd {
         #[command(subcommand)]
         action: AlbumCmd,
     },
+    /// Live web links (served from devices, nothing stored online): list them, or serve them from this keeper.
+    Web {
+        #[command(subcommand)]
+        action: WebCmd,
+    },
     /// Install or remove the system service.
     Service {
         #[command(subcommand)]
@@ -167,6 +172,15 @@ enum DevicesCmd {
     /// Replace the recovery phrase (for example after it may have been seen). Prints the new 24
     /// words once; every device keeps working. Needs the current phrase.
     ReplacePhrase,
+}
+
+#[derive(Subcommand)]
+enum WebCmd {
+    /// List the Live web links of the library and whether this keeper serves each.
+    List,
+    /// Hold and answer for every Live web link of the library, and bring the ones whose album changed up to date.
+    /// A Live link works only while a device that holds it is online; a keeper is usually always on.
+    Serve,
 }
 
 #[derive(Subcommand)]
@@ -487,6 +501,45 @@ async fn main() -> Result<()> {
                         d["phrase"].as_str().unwrap_or(""),
                         d["kit"].as_str().unwrap_or("")
                     );
+                }
+            }
+        }
+        Cmd::Web { action } => {
+            let mut c = client(&storage).await?;
+            match action {
+                WebCmd::List => {
+                    let d = c.call_raw(json!({"cmd":"web","action":"list"})).await?;
+                    let rows = d["live_links"].as_array().cloned().unwrap_or_default();
+                    if rows.is_empty() {
+                        println!("No Live links.");
+                    }
+                    for r in rows {
+                        println!(
+                            "“{}”  {} items  {}{}",
+                            r["album"].as_str().unwrap_or("?"),
+                            r["items"],
+                            if r["serving"] == true {
+                                "served here"
+                            } else {
+                                "not served here"
+                            },
+                            if r["stale"] == true {
+                                "  (album changed)"
+                            } else {
+                                ""
+                            }
+                        );
+                    }
+                }
+                WebCmd::Serve => {
+                    let d = c.call_raw(json!({"cmd":"web","action":"serve"})).await?;
+                    println!(
+                        "Now serving {} more Live links; {} brought up to date, {} already current.",
+                        d["adopted"], d["refreshed"], d["current"]
+                    );
+                    for f in d["failed"].as_array().into_iter().flatten() {
+                        eprintln!("failed: {}", f.as_str().unwrap_or("?"));
+                    }
                 }
             }
         }

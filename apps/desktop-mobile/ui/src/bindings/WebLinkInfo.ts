@@ -5,6 +5,14 @@
  */
 export type WebLinkInfo = { share_id: string, 
 /**
+ * A Live link: served from the sharer's own device while it is online, nothing stored with us.
+ */
+live: boolean, 
+/**
+ * Live only: this device is holding the album and answering for it.
+ */
+online: boolean, 
+/**
  * The whole link, key included.
  */
 text: string, qr_svg: string, full_size: boolean, expires_at: number | null, created_at: number, items: number, 

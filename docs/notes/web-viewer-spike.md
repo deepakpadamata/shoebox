@@ -53,3 +53,11 @@ Firefox, and any phone. Those are open items, not assumed fine.
    comes before Live links are offered to many people.
 2. A Live link needs the serving device's endpoint id and a relay it can be reached on in the link.
 3. Re-measure on a phone and in Safari and Firefox before shipping; record the result here.
+
+## Followed up in W1-08
+
+Live mode was built on this spike (A-116 in `assumptions.md`). Two things the spike did not find: the page's policy must
+allow the relay hosts **with a trailing dot** (`https://*.iroh.link.` as well as `https://*.iroh.link`), and a device's
+connection gate has to let `shoebox/webview/0` through for peers that are not in the device list. The iroh client is
+3.3 MB (unoptimised, no `wasm-opt`) and loads only for Live links. Still to do from the conditions above: our own relays
+(V2-04), and Safari, Firefox and a phone.

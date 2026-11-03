@@ -10,7 +10,7 @@ const THUMB_CONCURRENCY = 6;
 const MAX_PLAY_BYTES = 100 * 1024 * 1024;
 const ZIP_IN_MEMORY_LIMIT = 1.5 * 1024 * 1024 * 1024;
 
-let share = null; // { id, key, manifest }
+let share = null; // { id, key, manifest, blob(cid) }
 let items = [];
 const urls = new Map(); // cid -> object URL of the decrypted blob
 let current = -1;
@@ -49,6 +49,9 @@ class ServiceError extends Error {
   }
 }
 
+/** Thrown when none of a Live link's devices answers: it is offline, which is not an error to be alarmed by. */
+class Offline extends Error {}
+
 async function get(path, init) {
   let res;
   try {
@@ -60,9 +63,64 @@ async function get(path, init) {
   return new Uint8Array(await res.arrayBuffer());
 }
 
+// ---- Live links: the same sealed bytes, asked of a device over iroh instead of the service ----
+
+const LIVE_PIECE = 4 * 1024 * 1024 + 16;
+
+function liveError(e) {
+  const m = String(e?.message ?? e);
+  if (m === 'gone') return new ServiceError(404);
+  if (m === 'expired') return new ServiceError(410);
+  if (m === 'busy') return new ServiceError(429);
+  return new Offline(m);
+}
+
+async function connectLive(serversHex) {
+  // Loaded only for Live links: the Cloud path never fetches it.
+  const mod = await import('./pkg-live/shoebox_web_live.js');
+  await mod.default();
+  try {
+    return await mod.Live.connect(fromHex(serversHex));
+  } catch (e) {
+    throw liveError(e);
+  }
+}
+
+function liveTransport(conn, idHex) {
+  const id = fromHex(idHex);
+  return {
+    async manifest() {
+      try {
+        return await conn.manifest(id);
+      } catch (e) {
+        throw liveError(e);
+      }
+    },
+    async blob(cid) {
+      const c = fromHex(cid);
+      let out = null;
+      let have = 0;
+      try {
+        for (;;) {
+          const r = await conn.blob_range(id, c, have, LIVE_PIECE);
+          const total = Number(new DataView(r.buffer, r.byteOffset, 8).getBigUint64(0, true));
+          const part = r.subarray(8);
+          out ??= new Uint8Array(total);
+          out.set(part, have);
+          have += part.length;
+          if (have >= total) return out;
+          if (part.length === 0) throw new Error('unreachable');
+        }
+      } catch (e) {
+        throw liveError(e);
+      }
+    },
+  };
+}
+
 /** Fetch, check against its id, and open one blob. */
 async function openBlob(ref) {
-  const sealed = await get(`/s/${share.id}/b/${ref.cid}`);
+  const sealed = await share.blob(ref.cid);
   if (core.cid_of(sealed) !== ref.cid) throw new Error('a blob did not match its id');
   return core.decrypt_blob(fromHex(ref.key), sealed);
 }
@@ -78,6 +136,7 @@ async function blobUrl(ref) {
 }
 
 function problem(e) {
+  if (e instanceof Offline) return ['This album is not available right now', 'It is shared from a device that is switched off or offline. Try again later, or ask the person who sent it.'];
   if (e instanceof ServiceError) {
     if (e.status === 404) return ['This link has stopped working', 'The person who sent it may have stopped sharing, or the link was copied incompletely.'];
     if (e.status === 410) return ['This link has expired', 'Ask the person who sent it for a new one.'];
@@ -380,16 +439,36 @@ async function main() {
     say('This link looks incomplete', 'Make sure you copied all of it, including everything after the “#”.');
     return;
   }
-  if (link.mode !== 'cloud') {
-    say('This kind of link is not supported yet', 'Ask the person who sent it to share the album again.');
-    return;
-  }
   try {
-    const sealed = await get(`/s/${link.locator}/m`);
-    share = { id: link.locator, key: fromHex(link.key), manifest: JSON.parse(core.open_share(sealed, fromHex(link.key))) };
+    let id = link.locator;
+    let transport;
+    if (link.mode === 'live') {
+      id = link.locator.slice(0, 32);
+      say('Looking for the album…', 'It is shared from a device, which can take a few seconds.', false);
+      const conn = await connectLive(link.locator.slice(32));
+      transport = liveTransport(conn, id);
+    } else {
+      transport = {
+        manifest: () => get(`/s/${id}/m`),
+        blob: (cid) => get(`/s/${id}/b/${cid}`),
+      };
+    }
+    const sealed = await transport.manifest();
+    share = {
+      id,
+      key: fromHex(link.key),
+      blob: transport.blob,
+      manifest: JSON.parse(core.open_share(sealed, fromHex(link.key))),
+    };
   } catch (e) {
     const [h, t] = problem(e);
     say(h, t);
+    if (e instanceof Offline) {
+      const retry = document.createElement('button');
+      retry.textContent = 'Try again';
+      retry.addEventListener('click', () => location.reload());
+      statusEl.append(' ', retry);
+    }
     return;
   }
   const m = share.manifest;

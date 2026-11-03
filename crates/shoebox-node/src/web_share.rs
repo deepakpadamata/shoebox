@@ -90,7 +90,7 @@ pub struct RefreshReport {
 #[derive(Default, Serialize, Deserialize)]
 struct CidCache(BTreeMap<[u8; 32], ([u8; 32], u64)>);
 
-struct Session {
+pub(crate) struct Session {
     base: String,
     http: reqwest::Client,
     secret: CloudSecret,
@@ -102,6 +102,8 @@ struct Session {
     tmp: PathBuf,
     cache: std::sync::Mutex<CidCache>,
     cache_path: PathBuf,
+    /// A Live share keeps its ciphertext in this folder on the serving device instead of uploading it (W1-08).
+    sink: Option<PathBuf>,
 }
 
 fn client() -> Result<reqwest::Client> {
@@ -178,6 +180,14 @@ impl Session {
         now_ms: i64,
     ) -> Result<std::collections::HashSet<[u8; 32]>> {
         let mut present = std::collections::HashSet::new();
+        if let Some(dir) = &self.sink {
+            for c in cids {
+                if dir.join(hex::encode(c)).is_file() {
+                    present.insert(*c);
+                }
+            }
+            return Ok(present);
+        }
         for chunk in cids.chunks(5000) {
             let ids: Vec<String> = chunk.iter().map(hex::encode).collect();
             let res = self
@@ -315,6 +325,15 @@ impl<L: LibraryStore> LibraryNode<L> {
             .cloud_url()
             .await?
             .context("no cloud address is set for this library")?;
+        self.session_for(base, None).await
+    }
+
+    /// A session that seals into `dir` on this device and talks to no service (Live shares).
+    pub(crate) async fn live_session(&self, dir: PathBuf) -> Result<Session> {
+        self.session_for(String::new(), Some(dir)).await
+    }
+
+    async fn session_for(&self, base: String, sink: Option<PathBuf>) -> Result<Session> {
         let secret: [u8; 32] = self
             .store()
             .setting(CLOUD_SECRET_KEY)
@@ -362,6 +381,7 @@ impl<L: LibraryStore> LibraryNode<L> {
             tmp,
             cache: std::sync::Mutex::new(cache),
             cache_path,
+            sink,
         })
     }
 
@@ -559,7 +579,11 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 
     /// What an album holds, as far as a share cares: its photos and which of them are deleted, and the options.
-    async fn album_fingerprint(&self, album: &AlbumId, opts: &WebShareOptions) -> Result<[u8; 32]> {
+    pub(crate) async fn album_fingerprint(
+        &self,
+        album: &AlbumId,
+        opts: &WebShareOptions,
+    ) -> Result<[u8; 32]> {
         let mut ids = self.store().album_items(album, Page::all()).await?;
         ids.sort();
         let mut h = blake3::Hasher::new();
@@ -577,7 +601,7 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn build_share(
+    pub(crate) async fn build_share(
         &self,
         s: &Session,
         album: &AlbumId,
@@ -633,10 +657,15 @@ impl<L: LibraryStore> LibraryNode<L> {
             cids,
             expires_ms: opts.expires_ms,
         })?;
-        let path = format!("/v1/shares/{}", hex::encode(share_id));
-        let res = s.call("PUT", &path, upload, now_i64(self.now_ms())).await?;
-        if !res.status().is_success() {
-            return Err(Session::fail(res, "putting the share on the service").await);
+        if let Some(dir) = &s.sink {
+            let up: ShareUpload = postcard::from_bytes(&upload)?;
+            crate::web_live::store_manifest(dir, album, &up)?;
+        } else {
+            let path = format!("/v1/shares/{}", hex::encode(share_id));
+            let res = s.call("PUT", &path, upload, now_i64(self.now_ms())).await?;
+            if !res.status().is_success() {
+                return Err(Session::fail(res, "putting the share on the service").await);
+            }
         }
         s.save_cache();
         Ok(WebShare {
@@ -932,9 +961,16 @@ impl<L: LibraryStore> LibraryNode<L> {
                 (f, true)
             }
         };
-        let result = s
-            .put_file(&b.cid, &path, b.size, now_i64(self.now_ms()))
-            .await;
+        let result = match &s.sink {
+            Some(dir) => {
+                std::fs::create_dir_all(dir)?;
+                std::fs::rename(&path, dir.join(hex::encode(b.cid))).map_err(Into::into)
+            }
+            None => {
+                s.put_file(&b.cid, &path, b.size, now_i64(self.now_ms()))
+                    .await
+            }
+        };
         if temp {
             let _ = std::fs::remove_file(&path);
         }

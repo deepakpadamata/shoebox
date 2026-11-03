@@ -111,6 +111,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         };
         ln.start_sync_manager(nudge_rx);
         ln.start_rotation_support();
+        ln.start_webview_support();
         ln.restore_watches();
         ln
     }

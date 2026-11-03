@@ -7024,6 +7024,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "http-body-util",
+ "iroh",
  "postcard",
  "serde",
  "serde_json",
@@ -7270,6 +7271,18 @@ dependencies = [
  "serde_json",
  "shoebox-core",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "shoebox-web-live"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.2.17",
+ "getrandom 0.3.4",
+ "iroh",
+ "n0-future",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

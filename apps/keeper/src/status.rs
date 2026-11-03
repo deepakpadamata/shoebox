@@ -150,6 +150,42 @@ async fn albums_json(shared: &Shared) -> Result<Value> {
     Ok(json!({ "albums": rows }))
 }
 
+/// `web list|serve`: Live web links (W1-08). `serve` makes this keeper hold and answer for every Live link of the
+/// library that another device made, so those links work while this keeper is online and the maker is not. It also
+/// seals again the ones whose album has changed.
+pub(crate) async fn web(shared: &Shared, req: &Value) -> Result<Value> {
+    let guard = shared.library.lock().await;
+    let ln = guard
+        .as_ref()
+        .ok_or_else(|| anyhow!("not paired with a library yet"))?;
+    match req["action"].as_str().unwrap_or("list") {
+        "serve" => {
+            let r = ln.sync_live_shares(true).await?;
+            Ok(json!({
+                "adopted": r.adopted,
+                "refreshed": r.refreshed,
+                "current": r.current,
+                "failed": r.failed,
+            }))
+        }
+        "list" => {
+            let mut rows = vec![];
+            for a in ln.store().albums().await? {
+                for s in ln.web_live_shares(&a.id).await? {
+                    rows.push(json!({
+                        "album": a.name,
+                        "items": s.items,
+                        "serving": ln.serves_live_share(&s.share_id),
+                        "stale": ln.web_share_is_stale(&s).await.unwrap_or(false),
+                    }));
+                }
+            }
+            Ok(json!({ "live_links": rows }))
+        }
+        other => Err(anyhow!("unknown web action `{other}`")),
+    }
+}
+
 /// `album list|keep|drop|join`.
 pub(crate) async fn album(shared: &Shared, req: &Value) -> Result<Value> {
     if shared.library.lock().await.is_none() {

@@ -669,6 +669,10 @@ ts_type! {
     /// One web link to an album (W1-07).
     pub struct WebLinkInfo {
         pub share_id: String,
+        /// A Live link: served from the sharer's own device while it is online, nothing stored with us.
+        pub live: bool,
+        /// Live only: this device is holding the album and answering for it.
+        pub online: bool,
         /// The whole link, key included.
         pub text: String,
         pub qr_svg: String,

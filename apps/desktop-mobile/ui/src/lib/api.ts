@@ -236,7 +236,7 @@ export const api = {
   setProfileName: (name: string) => call<{}>('set_profile_name', { name }),
   webLinks: (album: string) => call<WebLinksInfo>('web_links', { album }),
   webLinkCheck: (album: string, full_size: boolean) => call<WebLinkCheck>('web_link_check', { album, full_size }),
-  webLinkCreate: (album: string, full_size: boolean, days: number | null) => call<WebLinkInfo>('web_link_create', { album, full_size, days }),
+  webLinkCreate: (album: string, full_size: boolean, days: number | null, live = false) => call<WebLinkInfo>('web_link_create', { album, full_size, days, live }),
   webLinkRevoke: (album: string, share: string) => call<{}>('web_link_revoke', { album, share }),
   webLinkRotate: (album: string, share: string) => call<WebLinkInfo>('web_link_rotate', { album, share }),
   webLinksRefresh: () => call<number>('web_links_refresh'),

@@ -1,6 +1,6 @@
 //! The local control socket: newline-delimited JSON over a Unix domain socket (mode 0600).
 //!
-//! One request per connection line: `{"cmd": "status" | "devices" | "revoke" | "pair" | "album" |
+//! One request per connection line: `{"cmd": "status" | "devices" | "revoke" | "pair" | "album" | "web" |
 //! "search" | "index" | "shutdown", ...}`. Replies are `{"type":"ok","data":…}` or `{"type":"error","message":…}`.
 //! `pair` is a short conversation: the daemon first sends `{"type":"code","sas":…,
 //! "peer_name":…,"peer_role":…}`, the client answers `{"confirm":true|false}` and the final
@@ -229,6 +229,7 @@ async fn dispatch(shared: &Arc<Shared>, cmd: &str, req: &Value) -> Result<Value>
             Ok(json!({ "library": hex::encode(grant.cap.library.0) }))
         }
         "album" => crate::status::album(shared, req).await,
+        "web" => crate::status::web(shared, req).await,
         "search" => search(shared, req).await,
         "index" => index(shared, req).await,
         "shutdown" => {

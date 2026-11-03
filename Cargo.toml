@@ -11,6 +11,7 @@ members = [
     "crates/shoebox-ml",
     "crates/shoebox-node",
     "crates/shoebox-web",
+    "crates/shoebox-web-live",
     "crates/shoebox-testkit",
     "apps/keeper",
     "apps/cloud",

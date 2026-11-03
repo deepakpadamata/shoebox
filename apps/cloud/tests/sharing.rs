@@ -10,10 +10,10 @@ use shoebox_core::cloud::decrypt_blob;
 use shoebox_core::identity::KeyPair;
 use shoebox_core::merge::Lww;
 use shoebox_core::model::*;
-use shoebox_core::share::{self, ShareLink};
+use shoebox_core::share::{self, ShareKey, ShareLink};
 use shoebox_core::store::*;
 use shoebox_core::Hlc;
-use shoebox_node::{ImportOptions, LibraryNode, WebShareOptions};
+use shoebox_node::{ImportOptions, LibraryNode, WebShareOptions, WEBVIEW_ALPN};
 use shoebox_store::{HybridBackend, Library};
 use shoebox_testkit::Cluster;
 use std::sync::Arc;
@@ -38,7 +38,7 @@ fn hlc(ms: u64) -> Hlc {
 }
 
 async fn world(photos_in_album: usize) -> World {
-    let cluster = Cluster::new(1).await.unwrap();
+    let cluster = Cluster::new(2).await.unwrap();
     let root = KeyPair::generate();
     let backend = HybridBackend::for_node(cluster.node(0).clone(), cluster.clock().clone());
     let (lib, cap) = backend.create_library(&root.root_public()).await.unwrap();
@@ -436,4 +436,243 @@ async fn demo_serve_a_share() {
         .unwrap();
     println!("LINK {}", w.node.web_share_link(&share).await.unwrap());
     tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
+}
+
+/// One request over `shoebox/webview/0`, as a browser sends it: (status, file size, bytes).
+async fn ask(conn: &iroh::endpoint::Connection, req: Vec<u8>) -> (u8, u64, Vec<u8>) {
+    let (mut send, mut recv) = conn.open_bi().await.unwrap();
+    send.write_all(&req).await.unwrap();
+    send.finish().unwrap();
+    let reply = recv.read_to_end(64 * 1024 * 1024).await.unwrap();
+    match reply.split_first() {
+        Some((0, rest)) => (
+            0,
+            u64::from_le_bytes(rest[..8].try_into().unwrap()),
+            rest[8..].to_vec(),
+        ),
+        Some((s, _)) => (*s, 0, vec![]),
+        None => panic!("an empty reply"),
+    }
+}
+
+fn blob_request(id: &[u8; 16], cid: &[u8; 32], offset: u64, len: u32) -> Vec<u8> {
+    let mut r = vec![2u8];
+    r.extend_from_slice(id);
+    r.extend_from_slice(cid);
+    r.extend_from_slice(&offset.to_le_bytes());
+    r.extend_from_slice(&len.to_le_bytes());
+    r
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_live_link_is_served_by_the_device_and_stops_when_revoked() {
+    let w = world(4).await;
+    let share = w
+        .node
+        .create_live_share(&w.album, WebShareOptions::default())
+        .await
+        .unwrap();
+    let link = w.node.live_share_link(&share).await.unwrap();
+    let l = ShareLink::parse(link.split_once('#').unwrap().1).expect("a Live link parses");
+    assert_eq!(l.mode, share::LinkMode::Live);
+    assert_eq!(l.id(), Some(share.share_id));
+    assert_eq!(
+        l.servers()[0],
+        w.node.device().0,
+        "the link names this device"
+    );
+    // The service holds nothing for it.
+    assert_eq!(
+        get(&w.svc, &format!("/s/{}/m", hex::encode(share.share_id)))
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+
+    // Another node, standing in for the browser, asks the device directly.
+    let addr = w._cluster.node(0).addr();
+    let conn = w
+        ._cluster
+        .node(1)
+        .endpoint()
+        .connect(addr, WEBVIEW_ALPN)
+        .await
+        .expect("the device answers the webview protocol");
+    let mut req = vec![1u8];
+    req.extend_from_slice(&share.share_id);
+    let (status, total, sealed) = ask(&conn, req.clone()).await;
+    assert_eq!((status, total), (0, sealed.len() as u64));
+    let (_, manifest) = share::open(&sealed, &l.key, &l.key.signer().public_bytes())
+        .expect("the link's key opens the manifest");
+    assert_eq!(manifest.album_name, "Lisbon");
+    assert_eq!(manifest.items.len(), 4);
+
+    // A thumbnail, fetched in pieces of 1000 bytes, matches its id and decrypts to the library's thumbnail.
+    let item = &manifest.items[0];
+    let mut bytes = vec![];
+    loop {
+        let (s, total, part) = ask(
+            &conn,
+            blob_request(&share.share_id, &item.thumb.cid.0, bytes.len() as u64, 1000),
+        )
+        .await;
+        assert_eq!(s, 0);
+        bytes.extend_from_slice(&part);
+        if bytes.len() as u64 >= total {
+            break;
+        }
+    }
+    assert_eq!(blake3::hash(&bytes).as_bytes(), &item.thumb.cid.0);
+    let plain = decrypt_blob(&item.thumb.key(), &bytes).unwrap();
+    let p = w
+        .photos
+        .iter()
+        .find(|p| p.taken_at == item.taken && p.exif.width == item.width)
+        .unwrap();
+    assert_eq!(
+        plain,
+        w.node
+            .node()
+            .blobs()
+            .get(&p.thumb.hash)
+            .await
+            .unwrap()
+            .to_vec()
+    );
+
+    // It serves this share and nothing else: another id, a blob the share does not list, a bad request.
+    let mut other = vec![1u8];
+    other.extend_from_slice(&[9; 16]);
+    assert_eq!(ask(&conn, other).await.0, 1);
+    assert_eq!(
+        ask(&conn, blob_request(&share.share_id, &[5; 32], 0, 10))
+            .await
+            .0,
+        1
+    );
+    assert_eq!(ask(&conn, vec![9]).await.0, 4);
+    let mut traversal = blob_request(&share.share_id, &[0; 32], 0, 10);
+    traversal.splice(17..49, *b"../meta.........................");
+    assert_eq!(ask(&conn, traversal).await.0, 1);
+
+    // Revoking stops it at once and removes the ciphertext.
+    w.node
+        .revoke_live_share(&w.album, &share.share_id)
+        .await
+        .unwrap();
+    assert_eq!(ask(&conn, req).await.0, 1);
+    assert!(!w.node.serves_live_share(&share.share_id));
+    assert!(w.node.web_live_shares(&w.album).await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_live_link_expires_and_follows_its_album() {
+    let w = world(3).await;
+    let expires = w._cluster.clock().now_ms() as i64 + 60_000;
+    let share = w
+        .node
+        .create_live_share(
+            &w.album,
+            WebShareOptions {
+                full_size: false,
+                expires_ms: Some(expires),
+            },
+        )
+        .await
+        .unwrap();
+    let addr = w._cluster.node(0).addr();
+    let conn = w
+        ._cluster
+        .node(1)
+        .endpoint()
+        .connect(addr, WEBVIEW_ALPN)
+        .await
+        .unwrap();
+    let mut req = vec![1u8];
+    req.extend_from_slice(&share.share_id);
+    assert_eq!(ask(&conn, req.clone()).await.0, 0);
+
+    // Nothing changed: nothing to do. Add a photo: the device seals again and the version moves on.
+    let r = w.node.sync_live_shares(false).await.unwrap();
+    assert_eq!((r.refreshed, r.current), (0, 1));
+    let mut items = shoebox_core::merge::OrSet::new();
+    for p in w.photos.iter().take(4) {
+        items.add(p.id, hlc(3));
+    }
+    w.node
+        .store()
+        .upsert_album(AlbumMeta {
+            id: w.album,
+            name: Lww::new("Lisbon".into(), hlc(1)),
+            cover: Lww::new(None, hlc(1)),
+            items,
+        })
+        .await
+        .unwrap();
+    assert!(w
+        .node
+        .web_share_is_stale(&w.node.web_live_shares(&w.album).await.unwrap()[0])
+        .await
+        .unwrap());
+    let r = w.node.sync_live_shares(false).await.unwrap();
+    assert_eq!(r.refreshed, 1, "{:?}", r.failed);
+    let (_, _, sealed) = ask(&conn, req.clone()).await;
+    let key = ShareKey(share.key);
+    let (header, manifest) = share::open(&sealed, &key, &key.signer().public_bytes()).unwrap();
+    assert_eq!((header.manifest_version, manifest.items.len()), (1, 4));
+
+    // After the date it says so, and does not serve.
+    w._cluster.clock().advance(61_000);
+    assert_eq!(ask(&conn, req).await.0, 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_device_without_the_folder_serves_a_live_link_only_when_asked_to() {
+    let w = world(3).await;
+    let share = w
+        .node
+        .create_live_share(&w.album, WebShareOptions::default())
+        .await
+        .unwrap();
+    assert!(w.node.serves_live_share(&share.share_id));
+
+    // Another device of the library has the record (it is a library setting) but not the folder; the same
+    // situation as here once the folder is gone.
+    let dir = w
+        .node
+        .node()
+        .config()
+        .data_dir
+        .join("live")
+        .join(hex::encode(share.share_id));
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert!(!w.node.serves_live_share(&share.share_id));
+
+    let r = w.node.sync_live_shares(false).await.unwrap();
+    assert_eq!((r.adopted, r.refreshed, r.current), (0, 0, 0));
+    assert!(
+        !w.node.serves_live_share(&share.share_id),
+        "not unless asked"
+    );
+
+    let r = w.node.sync_live_shares(true).await.unwrap();
+    assert_eq!((r.adopted, r.failed.len()), (1, 0), "{:?}", r.failed);
+    assert!(w.node.serves_live_share(&share.share_id));
+
+    // It answers with a manifest the link's key opens.
+    let addr = w._cluster.node(0).addr();
+    let conn = w
+        ._cluster
+        .node(1)
+        .endpoint()
+        .connect(addr, WEBVIEW_ALPN)
+        .await
+        .unwrap();
+    let mut req = vec![1u8];
+    req.extend_from_slice(&share.share_id);
+    let (status, _, sealed) = ask(&conn, req).await;
+    assert_eq!(status, 0);
+    let key = ShareKey(share.key);
+    let (_, m) = share::open(&sealed, &key, &key.signer().public_bytes()).unwrap();
+    assert_eq!(m.items.len(), 3);
 }

@@ -41,6 +41,7 @@ shoebox-testkit.workspace = true
 shoebox-media.workspace = true
 xtask = { path = "../../xtask" }
 tempfile.workspace = true
+iroh.workspace = true
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 

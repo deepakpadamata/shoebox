@@ -293,6 +293,32 @@ impl ShareLink {
         }
     }
 
+    /// A Live link: the share id, then the endpoint ids (at most four) of the devices that may serve it.
+    pub fn live(share_id: [u8; 16], servers: &[[u8; 32]], key: ShareKey) -> Self {
+        let mut locator = share_id.to_vec();
+        for s in servers.iter().take(4) {
+            locator.extend_from_slice(s);
+        }
+        Self {
+            mode: LinkMode::Live,
+            locator,
+            key,
+        }
+    }
+
+    /// The share id, for either mode.
+    pub fn id(&self) -> Option<[u8; 16]> {
+        self.locator.get(..16)?.try_into().ok()
+    }
+
+    /// A Live link's serving devices.
+    pub fn servers(&self) -> Vec<[u8; 32]> {
+        if self.mode != LinkMode::Live {
+            return vec![];
+        }
+        self.locator[16..].as_chunks::<32>().0.to_vec()
+    }
+
     /// The text after the `#`.
     pub fn to_fragment(&self) -> String {
         let mode = match self.mode {
@@ -320,6 +346,14 @@ impl ShareLink {
             return None;
         }
         if mode == LinkMode::Cloud && locator.len() != 16 {
+            return None;
+        }
+        // Live: the share id, then one to four endpoint ids of the devices that may serve it.
+        if mode == LinkMode::Live
+            && !(locator.len() > 16
+                && (locator.len() - 16) % 32 == 0
+                && locator.len() <= 16 + 4 * 32)
+        {
             return None;
         }
         Some(Self {

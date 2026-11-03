@@ -22,6 +22,7 @@ A connection opens one of these by name; a peer that does not serve a name refus
 | `shoebox/has/0` | "do you hold these blobs?" before freeing space (`freeup.rs`) | listed devices |
 | `shoebox/ping/0` | 64-byte echo for latency (`node.rs`) | listed devices |
 | `shoebox/doc-digest/0` | digest of an iroh-docs namespace (`doc_digest.rs`) | anyone who knows the namespace |
+| `shoebox/webview/0` | a browser reading a Live web link: manifest and blob ranges of one share, ciphertext only; wire format in `web_live.rs` (W1-08) | anyone who knows the share id (open to non-members in the connection gate) |
 | iroh-blobs, iroh-docs, iroh-gossip | their own ALPNs, versions as pinned in [`iroh-versions.md`](iroh-versions.md) | see the connection gate (A-079) |
 
 ## Gossip topics

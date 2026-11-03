@@ -230,11 +230,21 @@ mod link {
 
     #[test]
     fn every_length_of_bytes_round_trips_and_garbage_is_refused() {
-        for n in 1..=40usize {
+        // A Live link names its devices: the share id, then one to four endpoint ids.
+        for devices in 1..=4usize {
+            let servers: Vec<[u8; 32]> = (0..devices as u8).map(|d| [d + 1; 32]).collect();
+            let l = ShareLink::live([1; 16], &servers, ShareKey([2; 32]));
+            let back = ShareLink::parse(&l.to_fragment()).unwrap();
+            assert_eq!(back, l, "{devices} devices");
+            assert_eq!(back.id(), Some([1; 16]));
+            assert_eq!(back.servers(), servers);
+        }
+        // Any other length of locator is not a link: none, a share id alone, a part of an id, five devices.
+        for n in [1usize, 15, 16, 17, 47, 49, 16 + 5 * 32] {
             let mut l = ShareLink::cloud([1; 16], ShareKey([2; 32]));
             l.mode = LinkMode::Live;
-            l.locator = (0..n as u8).collect();
-            assert_eq!(ShareLink::parse(&l.to_fragment()).unwrap(), l, "{n} bytes");
+            l.locator = (0..n).map(|i| i as u8).collect();
+            assert!(ShareLink::parse(&l.to_fragment()).is_none(), "{n} bytes");
         }
         let good = ShareLink::cloud([9; 16], ShareKey([8; 32])).to_fragment();
         for bad in [

@@ -70,6 +70,8 @@ pub const ALBUM_ALPN: &[u8] = b"shoebox/album/0";
 pub const ROTATE_ALPN: &[u8] = b"shoebox/rotate/0";
 /// ALPN of the Loro library-store sync protocol (handler plugged in by `shoebox-store-loro`).
 pub const LORO_ALPN: &[u8] = b"shoebox/loro/0";
+/// ALPN of the read-only protocol a browser speaks to a device serving a Live web link (W1-08).
+pub const WEBVIEW_ALPN: &[u8] = b"shoebox/webview/0";
 /// ALPN of the "do you hold these blobs?" probe used before freeing space (M2-08).
 pub const HAS_ALPN: &[u8] = b"shoebox/has/0";
 
@@ -282,9 +284,12 @@ impl PeerTracker {
 
     /// What a peer outside the device list may still do. Pairing and recovery are how devices
     /// get in. Namespace sync and gossip are guarded by the namespace capability, which only
-    /// shared albums use. Blob transfer is open only to members of a shared album.
+    /// shared albums use. Blob transfer is open only to members of a shared album. A browser opening a Live web
+    /// link is nobody's device: the webview protocol answers only for a share whose id the caller knows, with
+    /// ciphertext only.
     fn open_to_outsiders(&self, id: &EndpointId, alpn: &[u8]) -> bool {
         alpn == PAIR_ALPN
+            || alpn == WEBVIEW_ALPN
             || alpn == RECOVER_ALPN
             || alpn == ALBUM_ALPN
             || alpn == crate::doc_digest::DOC_DIGEST_ALPN
@@ -447,6 +452,7 @@ struct Inner {
     rotate_slot: crate::ext::ExtSlot,
     recover_slot: crate::ext::ExtSlot,
     album_slot: crate::ext::ExtSlot,
+    webview_slot: crate::ext::ExtSlot,
     /// Most recent measured round-trip time per peer.
     rtts: Mutex<HashMap<EndpointId, Duration>>,
     /// Blobs on their way in and out right now.
@@ -497,6 +503,7 @@ impl Node {
         let rotate_slot = crate::ext::ExtSlot::default();
         let recover_slot = crate::ext::ExtSlot::default();
         let album_slot = crate::ext::ExtSlot::default();
+        let webview_slot = crate::ext::ExtSlot::default();
         let id = secret.public();
         let span = info_span!("node", id = %id.fmt_short(), name = %config.name);
         async move {
@@ -574,6 +581,7 @@ impl Node {
                 .accept(ALBUM_ALPN, crate::ext::ExtProtocol(album_slot.clone()))
                 .accept(ROTATE_ALPN, crate::ext::ExtProtocol(rotate_slot.clone()))
                 .accept(LORO_ALPN, crate::ext::ExtProtocol(loro_slot.clone()))
+                .accept(WEBVIEW_ALPN, crate::ext::ExtProtocol(webview_slot.clone()))
                 .accept(
                     HAS_ALPN,
                     crate::freeup::HasProtocol {
@@ -607,6 +615,7 @@ impl Node {
                     rotate_slot,
                     recover_slot,
                     album_slot,
+                    webview_slot,
                     rtts: Mutex::new(HashMap::new()),
                     transfers,
                 }),
@@ -637,6 +646,10 @@ impl Node {
     /// Where the shared-album manager registers its invitation handler.
     pub fn album_slot(&self) -> &crate::ext::ExtSlot {
         &self.inner.album_slot
+    }
+
+    pub(crate) fn webview_slot(&self) -> &crate::ext::ExtSlot {
+        &self.inner.webview_slot
     }
 
     /// Where the Loro backend registers its connection handler.

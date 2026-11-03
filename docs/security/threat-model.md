@@ -109,6 +109,15 @@ the two issues with real consequences and are fixed. F4 is the one a user should
 - **Manifest integrity**: signed by a device key of the sharer; the viewer rejects a manifest that does not verify.
 - **Location**: photos shared with their location stripped upload the stripped copy only; an original is uploaded only
   when the sharer allows full-size downloads.
+- **Live links (W1-08)**: a device answers `shoebox/webview/0` to anyone who sends a share id it holds, so the share id
+  is a secret as well as the key (both are in the link; a guessed id gets "not served", the same reply as an id the
+  device does not hold). What it sends is the same ciphertext Cloud would hold; a caller without the key learns only
+  sizes. The relay and anyone watching the device's network see that a browser is connected, when, and how much it
+  fetched, not what. The device is open on that one protocol to peers outside the device list, so it can be asked
+  for ciphertext by a stranger who has an id; it serves one share's folder only, never a record, a member list or
+  another album, and limits itself to 16 streams at once and 1,500 requests per share per minute. A link names up to
+  four devices, so it also shows their endpoint ids to whoever holds the link. Revoking removes the record and the
+  folder; another serving device stops at its next request after the library's settings reach it.
 - **Not covered**: a malicious or compromised service operator serving a different viewer page (the page is the trust
   anchor; subresource integrity and a published build hash reduce it, they do not remove it); abuse content we cannot
   see (takedown is by report, W1-10).

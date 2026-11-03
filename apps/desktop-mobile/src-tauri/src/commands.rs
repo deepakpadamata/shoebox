@@ -409,6 +409,7 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
                 &arg::<String>(&args, "album")?,
                 opt::<bool>(&args, "full_size")?.unwrap_or(false),
                 opt::<u32>(&args, "days")?,
+                opt::<bool>(&args, "live")?.unwrap_or(false),
             )
             .await?),
         "web_link_revoke" => {

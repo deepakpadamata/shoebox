@@ -34,6 +34,7 @@ mod sync;
 mod ticket;
 mod transfers;
 pub mod update;
+pub mod web_live;
 pub mod web_share;
 
 pub use activity::Activity;
@@ -57,7 +58,7 @@ pub use maintenance::MaintenanceConfig;
 pub use node::{
     classify_addrs, classify_addrs_from, FetchReport, Node, NodeEvent, NodeEvents, PathKind,
     PeerAddr, PeerInfo, ALBUM_ALPN, HAS_ALPN, LORO_ALPN, PAIR_ALPN, PING_ALPN, RECOVER_ALPN,
-    ROTATE_ALPN,
+    ROTATE_ALPN, WEBVIEW_ALPN,
 };
 pub use pairing::{DecideFn, PairGrant, PairTicket, PairingCode};
 pub use people::{PeopleView, ME_SETTING};
@@ -69,4 +70,5 @@ pub use shards::{winning_rows, ShardView, PEOPLE_SNAPSHOT_KEY, SHARD_MIME};
 pub use sync::{SyncConfig, SyncPhase};
 pub use ticket::{LibraryTicket, TicketError};
 pub use transfers::{Transfer, TransferSnapshot};
+pub use web_live::LiveReport;
 pub use web_share::{RefreshReport, WebShare, WebShareOptions, CLOUD_SECRET_KEY, CLOUD_URL_KEY};

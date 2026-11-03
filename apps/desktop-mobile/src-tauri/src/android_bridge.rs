@@ -137,8 +137,11 @@ impl PhotoSource for JniPhotoSource {
         })
     }
 
-    fn video_frame(&self, path: &str) -> BoxFuture<'_, Result<Option<Vec<u8>>>> {
-        let (b, path) = (self.0.clone(), path.to_string());
+    fn video_frame(&self, _id: &str, path: Option<&str>) -> BoxFuture<'_, Result<Option<Vec<u8>>>> {
+        let Some(path) = path.map(str::to_string) else {
+            return Box::pin(async { Ok(None) });
+        };
+        let b = self.0.clone();
         Box::pin(async move {
             let jpeg = blocking(move || {
                 b.string_call(

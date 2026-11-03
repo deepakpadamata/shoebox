@@ -2,17 +2,20 @@
 //! (Android: a Kotlin plugin over MediaStore; iOS: a Swift plugin over PhotoKit); the backup
 //! pipeline in `backup.rs` only talks to this trait, so it is tested with [`FakePhotoSource`].
 //!
-//! Gallery photos are read where they are and never copied (A-092): an asset carries the path of
-//! its file, and the library references that file.
+//! Gallery photos are read where they are and never copied (A-092): on Android an asset carries
+//! the path of its file, and the library references that file. PhotoKit has no paths: its assets
+//! are [`Original::Library`], read through [`PhotoSource::read_original`] (P1-02).
 
 use anyhow::{anyhow, Result};
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 /// One photo or video in the camera roll.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "AssetWire", into = "AssetWire")]
 pub struct Asset {
     /// Stable id on this device (MediaStore `_ID`, PhotoKit local identifier).
     pub id: String,
@@ -20,10 +23,84 @@ pub struct Asset {
     pub modified_ms: i64,
     pub size: u64,
     pub mime: String,
-    /// The file, when this app can read it where it is. Without one the photo cannot be added
-    /// (copying it would keep it twice on the phone).
-    #[serde(default)]
-    pub path: Option<String>,
+    pub original: Original,
+}
+
+/// Where an asset's original is read from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Original {
+    /// A file this app can read where it is (Android: MediaStore `DATA`).
+    File(String),
+    /// Only through the platform's photo library, by the asset's id (PhotoKit). `local: false`
+    /// when the original is not on this device (iCloud "Optimize Storage").
+    Library { local: bool },
+    /// Not readable where it is. The photo cannot be added: copying it would keep it twice on
+    /// the phone.
+    Unreadable,
+}
+
+impl Asset {
+    /// The file, for an [`Original::File`] asset.
+    pub fn path(&self) -> Option<&str> {
+        match &self.original {
+            Original::File(p) => Some(p),
+            _ => None,
+        }
+    }
+}
+
+/// What the platform plugins send: Android's `path` (absent when unreadable), and PhotoKit's
+/// `library` and `cloud_only` flags.
+#[derive(Clone, Serialize, Deserialize)]
+struct AssetWire {
+    id: String,
+    modified_ms: i64,
+    size: u64,
+    mime: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    library: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    cloud_only: bool,
+}
+
+impl From<AssetWire> for Asset {
+    fn from(w: AssetWire) -> Self {
+        let original = match (w.library, w.path) {
+            (true, _) => Original::Library {
+                local: !w.cloud_only,
+            },
+            (false, Some(p)) => Original::File(p),
+            (false, None) => Original::Unreadable,
+        };
+        Self {
+            id: w.id,
+            modified_ms: w.modified_ms,
+            size: w.size,
+            mime: w.mime,
+            original,
+        }
+    }
+}
+
+impl From<Asset> for AssetWire {
+    fn from(a: Asset) -> Self {
+        let (path, library, cloud_only) = match a.original {
+            Original::File(p) => (Some(p), false, false),
+            Original::Library { local } => (None, true, !local),
+            Original::Unreadable => (None, false, false),
+        };
+        Self {
+            id: a.id,
+            modified_ms: a.modified_ms,
+            size: a.size,
+            mime: a.mime,
+            path,
+            library,
+            cloud_only,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,8 +116,9 @@ pub enum Permission {
 pub struct Scan {
     /// New or modified assets.
     pub assets: Vec<Asset>,
-    /// Ids deleted from the camera roll since then, when the platform says so. Deletions are
-    /// found by the files themselves going (`backup.rs`); this only tidies the waiting list.
+    /// Ids deleted from the camera roll since then, when the platform says so. This is how a
+    /// [`Original::Library`] photo's deletion is known; a file's is found by the file going
+    /// (`backup.rs`).
     pub removed: Vec<String>,
     /// Pass back next time to get only later changes (an opaque platform change token).
     pub token: String,
@@ -83,9 +161,18 @@ pub trait PhotoSource: Send + Sync {
     fn read_picked(&self, _handle: &str) -> BoxFuture<'_, Result<PathBuf>> {
         Box::pin(async { Err(anyhow!("choosing photos is not available on this device")) })
     }
-    /// A poster frame (JPEG) for the video at `path`, made by the system's own thumbnailer;
-    /// `None` where there is none.
-    fn video_frame(&self, _path: &str) -> BoxFuture<'_, Result<Option<Vec<u8>>>> {
+    /// A readable copy of the original of the [`Original::Library`] asset `id`, made without the
+    /// network; the caller deletes it.
+    fn read_original(&self, _id: &str) -> BoxFuture<'_, Result<PathBuf>> {
+        Box::pin(async { Err(anyhow!("this device has no photo library to read from")) })
+    }
+    /// A poster frame (JPEG) for the video `id` (its file `path`, for an [`Original::File`]
+    /// asset), made by the system's own thumbnailer; `None` where there is none.
+    fn video_frame(
+        &self,
+        _id: &str,
+        _path: Option<&str>,
+    ) -> BoxFuture<'_, Result<Option<Vec<u8>>>> {
         Box::pin(async { Ok(None) })
     }
 }
@@ -121,6 +208,11 @@ struct FakeState {
     picks: Vec<Picked>,
     /// Files the person stops sharing at the next prompt (deleted here, as Android hides them).
     unshare_on_request: Vec<PathBuf>,
+    /// Library assets the person stops sharing at the next prompt (hidden, as PhotoKit does).
+    hide_on_request: Vec<String>,
+    /// The file behind each [`Original::Library`] asset, which only [`PhotoSource::read_original`]
+    /// reads.
+    library_files: BTreeMap<String, PathBuf>,
 }
 
 impl FakePhotoSource {
@@ -140,6 +232,8 @@ impl FakePhotoSource {
                 removed: vec![],
                 picks: vec![],
                 unshare_on_request: vec![],
+                hide_on_request: vec![],
+                library_files: BTreeMap::new(),
             }),
         }
     }
@@ -157,17 +251,35 @@ impl FakePhotoSource {
                 _ => "image/jpeg",
             }
             .into(),
-            path: Some(path.display().to_string()),
+            original: Original::File(path.display().to_string()),
         }
     }
 
     /// Add or replace an asset whose original is the file at `path`.
     pub fn put(&self, id: &str, path: impl Into<PathBuf>, modified_ms: i64) {
-        let asset = Self::asset(id, path, modified_ms);
+        self.insert(Self::asset(id, path, modified_ms));
+    }
+
+    /// Add or replace a photo-library asset (PhotoKit) whose original has the bytes of the file at
+    /// `path`. The scan does not report the file; it is read through
+    /// [`PhotoSource::read_original`].
+    pub fn put_library(&self, id: &str, path: impl Into<PathBuf>, modified_ms: i64) {
+        let path = path.into();
+        let mut asset = Self::asset(id, &path, modified_ms);
+        asset.original = Original::Library { local: true };
+        self.state
+            .lock()
+            .unwrap()
+            .library_files
+            .insert(id.into(), path);
+        self.insert(asset);
+    }
+
+    fn insert(&self, asset: Asset) {
         let mut s = self.state.lock().unwrap();
         s.generation += 1;
         let g = s.generation;
-        s.assets.retain(|(a, _)| a.id != id);
+        s.assets.retain(|(a, _)| a.id != asset.id);
         s.assets.push((asset, g));
     }
 
@@ -178,6 +290,28 @@ impl FakePhotoSource {
         let g = s.generation;
         s.assets.retain(|(a, _)| a.id != id);
         s.removed.push((id.into(), g));
+    }
+
+    /// The library asset is no longer shared with the app: it leaves the scans without being
+    /// reported removed.
+    pub fn hide(&self, id: &str) {
+        let mut s = self.state.lock().unwrap();
+        s.assets.retain(|(a, _)| a.id != id);
+        s.library_files.remove(id);
+    }
+
+    /// Whether the library asset's original is on this device (an edit of it as far as scans
+    /// go, as PhotoKit reports a download).
+    pub fn set_local(&self, id: &str, local: bool) {
+        let mut s = self.state.lock().unwrap();
+        s.generation += 1;
+        let g = s.generation;
+        for (a, at) in s.assets.iter_mut() {
+            if a.id == id {
+                a.original = Original::Library { local };
+                *at = g;
+            }
+        }
     }
 
     pub fn set_permission(&self, p: Permission) {
@@ -199,12 +333,17 @@ impl FakePhotoSource {
         self.state.lock().unwrap().unshare_on_request = files;
     }
 
+    /// At the next prompt the person stops sharing these library assets.
+    pub fn hide_on_request(&self, ids: Vec<String>) {
+        self.state.lock().unwrap().hide_on_request = ids;
+    }
+
     /// The app may see the asset but not read its file where it is.
     pub fn make_unreadable(&self, id: &str) {
         let mut s = self.state.lock().unwrap();
         for (a, _) in s.assets.iter_mut() {
             if a.id == id {
-                a.path = None;
+                a.original = Original::Unreadable;
             }
         }
     }
@@ -227,6 +366,10 @@ impl PhotoSource for FakePhotoSource {
             }
             for f in std::mem::take(&mut s.unshare_on_request) {
                 let _ = std::fs::remove_file(f);
+            }
+            for id in std::mem::take(&mut s.hide_on_request) {
+                s.assets.retain(|(a, _)| a.id != id);
+                s.library_files.remove(&id);
             }
             Ok(s.permission)
         })
@@ -260,6 +403,32 @@ impl PhotoSource for FakePhotoSource {
     }
     fn pick(&self, _files: bool) -> BoxFuture<'_, Result<Vec<Picked>>> {
         Box::pin(async move { Ok(std::mem::take(&mut self.state.lock().unwrap().picks)) })
+    }
+    fn read_original(&self, id: &str) -> BoxFuture<'_, Result<PathBuf>> {
+        let id = id.to_string();
+        Box::pin(async move {
+            let src = {
+                let s = self.state.lock().unwrap();
+                let local = s
+                    .assets
+                    .iter()
+                    .any(|(a, _)| a.id == id && a.original == Original::Library { local: true });
+                if !local {
+                    return Err(anyhow!("{id} is not on this device"));
+                }
+                s.library_files
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("{id} is not in the library"))?
+            };
+            std::fs::create_dir_all(&self.dir)?;
+            let name = src.file_name().ok_or_else(|| anyhow!("no file name"))?;
+            let copy = self
+                .dir
+                .join(format!("original-{id}-{}", name.to_string_lossy()));
+            std::fs::copy(&src, &copy)?;
+            Ok(copy)
+        })
     }
     fn read_picked(&self, handle: &str) -> BoxFuture<'_, Result<PathBuf>> {
         let src = PathBuf::from(handle);

@@ -727,3 +727,136 @@ async fn a_device_without_a_camera_roll_cannot_pick() {
     core.create_library("Mac", "keeper").await.unwrap();
     assert!(core.import_picked(false).await.is_err());
 }
+
+/// P1-02: a photo-library asset (PhotoKit) has no file. It is read through the source, followed
+/// by its id, and deleted when the scan reports it removed, with backup on or off. An original
+/// that is only in the cloud waits, reported, until it is on the device.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn library_photos_are_read_through_the_source_and_followed_by_id() {
+    let r = rig().await;
+    for i in 0..6 {
+        r.source.put_library(&format!("L{i}"), &r.files[i], 100);
+    }
+    r.source.put_library("cloud", &r.files[6], 100);
+    r.source.set_local("cloud", false);
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+    let report = r.core.backup_run(true).await.unwrap();
+    assert_eq!((report.imported, report.pending), (6, 1), "{report:?}");
+    assert!(
+        report.failed.iter().any(|f| f.starts_with("cloud:")),
+        "{:?}",
+        report.failed
+    );
+    assert_eq!(photos(&r.core).await, 6);
+    let leftovers = std::fs::read_dir(r._dir.path().join("scratch"))
+        .map(|d| d.count())
+        .unwrap_or(0);
+    assert_eq!(leftovers, 0, "the originals read for import are deleted");
+
+    // Downloaded to the device: imported on the next run.
+    r.source.set_local("cloud", true);
+    assert_eq!(r.core.backup_run(true).await.unwrap().imported, 1);
+    assert_eq!(photos(&r.core).await, 7);
+
+    // An edit (new content, same id) replaces the old version.
+    r.source.put_library("L1", &r.files[7], 200);
+    assert_eq!(r.core.backup_run(true).await.unwrap().imported, 1);
+    assert_eq!(photos(&r.core).await, 7);
+
+    // Deleted in the library: deleted here. The files are still on disk; only the scan says so.
+    r.source.remove("L2");
+    r.core.backup_run(true).await.unwrap();
+    assert_eq!(photos(&r.core).await, 6);
+
+    // With backup off the library is still followed.
+    let mut off = policy(false, false);
+    off.enabled = false;
+    r.core.backup_configure(off).await.unwrap();
+    r.source.remove("L3");
+    r.core.gallery_check().await.unwrap();
+    assert_eq!(photos(&r.core).await, 5);
+    assert_eq!(r.core.backup_status().await.unwrap().imported, 5);
+    r.core.shutdown().await.unwrap();
+}
+
+/// P1-02: the A-092 unsharing rules for library assets. PhotoKit hides what is not shared
+/// without reporting it removed: across Shoebox's own prompt, or when access narrows, a hidden
+/// asset was unshared and stays in the library; a removal the scan reports is a deletion.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn with_some_library_photos_shared_deletions_count_and_unshares_do_not() {
+    let r = rig().await;
+    r.source.set_permission(Permission::Limited);
+    for i in 0..6 {
+        r.source.put_library(&format!("L{i}"), &r.files[i], 1);
+    }
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+    r.core.backup_run(true).await.unwrap();
+    assert_eq!(photos(&r.core).await, 6);
+
+    r.source.remove("L0");
+    r.core.backup_run(true).await.unwrap();
+    assert_eq!(photos(&r.core).await, 5, "deleted");
+
+    r.source.answer_request(Permission::Limited);
+    r.source.hide_on_request(vec!["L1".into()]);
+    r.core.import_picked(false).await.unwrap();
+    assert_eq!(photos(&r.core).await, 5, "unshared at the prompt: kept");
+    assert_eq!(r.core.backup_status().await.unwrap().imported, 4);
+    assert_eq!(r.core.device_storage().await.unwrap()[0].originals, 4);
+
+    r.source.set_permission(Permission::Granted);
+    r.core.backup_run(true).await.unwrap();
+    r.source.set_permission(Permission::Limited);
+    r.source.hide("L2");
+    r.core.backup_run(true).await.unwrap();
+    assert_eq!(photos(&r.core).await, 5, "access narrowed: kept");
+    assert_eq!(r.core.backup_status().await.unwrap().imported, 3);
+
+    r.source.remove("L3");
+    r.core.backup_run(true).await.unwrap();
+    assert_eq!(photos(&r.core).await, 4, "deleted again");
+    r.core.shutdown().await.unwrap();
+}
+
+/// P1-02: a `backup.json` written by a build before library assets (unreadable assets saved with
+/// `"path": null`, every tracked photo with a path) loads unchanged, without looking at the
+/// whole roll again, and the gallery is still followed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_backup_json_from_before_library_assets_still_works() {
+    let r = rig().await;
+    for i in 0..3 {
+        r.source.put(&format!("a{i}"), &r.files[i], 1);
+    }
+    r.source.put("u", &r.files[3], 1);
+    r.source.make_unreadable("u");
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+    r.core.backup_run(true).await.unwrap();
+    let dir = r.core.data_dir().to_path_buf();
+    r.core.shutdown().await.unwrap();
+
+    // Rewrite it the way the earlier build saved it.
+    let file = dir.join("backup.json");
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    v["pending"]["u"]["path"] = serde_json::Value::Null;
+    for t in v["tracked"].as_object().unwrap().values() {
+        assert!(t["path"].is_string(), "{t}");
+    }
+    let token = v["token"].clone();
+    std::fs::write(&file, serde_json::to_vec(&v).unwrap()).unwrap();
+
+    let core = AppCore::open(&dir, AppOptions::local_only()).await.unwrap();
+    let source = Arc::new(FakePhotoSource::new(dir.join("scratch2")));
+    for i in 0..3 {
+        source.put(&format!("a{i}"), &r.files[i], 1);
+    }
+    core.set_photo_source(source.clone());
+    let st = core.backup_status().await.unwrap();
+    assert_eq!((st.imported, st.pending), (3, 1));
+    let after: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(after["token"], token, "no new look at the whole roll");
+
+    std::fs::remove_file(&r.files[0]).unwrap();
+    core.gallery_check().await.unwrap();
+    assert_eq!(photos(&core).await, 2);
+    core.shutdown().await.unwrap();
+}

@@ -172,8 +172,10 @@ impl PhotoSource for AndroidPhotoSource {
             Ok(PathBuf::from(r.path))
         })
     }
-    fn video_frame(&self, path: &str) -> BoxFuture<'_, Result<Option<Vec<u8>>>> {
-        let path = path.to_string();
+    fn video_frame(&self, _id: &str, path: Option<&str>) -> BoxFuture<'_, Result<Option<Vec<u8>>>> {
+        let Some(path) = path.map(str::to_string) else {
+            return Box::pin(async { Ok(None) });
+        };
         Box::pin(async move {
             let r: FrameReply = self.call("videoFrame", json!({ "path": path })).await?;
             crate::photos_source::decode_frame(&r.jpeg)

@@ -11,9 +11,13 @@
 //! never copied, and when a gallery file goes the photo is deleted from the library too (Recently
 //! Deleted, on every device). Copies an earlier build made are turned back into references
 //! (`moving`).
+//!
+//! A photo-library asset (PhotoKit, [`Original::Library`]) has no file: it is tracked by its id,
+//! read through the source, and its deletion is what the scan reports removed (P1-02). Until
+//! P1-07 serves those originals on request, they are copied in.
 
 use crate::core::{now_ms, AppCore};
-use crate::photos_source::{Asset, Conditions, Permission, PhotoSource, Picked};
+use crate::photos_source::{Asset, Conditions, Original, Permission, PhotoSource, Picked};
 use crate::types::{
     AppEvent, BackupFolder, BackupPolicy, BackupReport, BackupScope, BackupStatus, ImportSummary,
 };
@@ -23,7 +27,7 @@ use shoebox_core::ids::Blake3Hash;
 use shoebox_core::store::LibraryStore;
 use shoebox_node::{ImportMode, ImportOptions, LibraryNode};
 use shoebox_store::Library;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -53,9 +57,16 @@ impl Default for BackupPolicy {
 pub(crate) struct Tracked {
     /// The photo (its original's hash).
     pub hash: String,
-    /// Its file in the gallery.
-    pub path: String,
+    /// Its file in the gallery; none for a photo-library asset, which is followed by its id.
+    #[serde(default)]
+    pub path: Option<String>,
     pub modified_ms: i64,
+}
+
+impl Tracked {
+    fn in_library(&self) -> bool {
+        self.path.is_none()
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -75,6 +86,10 @@ pub(crate) struct BackupState {
     /// Gallery deletions waiting for the person to confirm (asset ids), see [`MASS_DELETION`].
     #[serde(default)]
     pub held_deletions: Vec<String>,
+    /// Tracked library assets the scan reported removed, for the gallery check to act on. Kept
+    /// here because the token has already moved past them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_from_library: Vec<String>,
     /// The photo access the last gallery check ran with: a file that vanishes when access
     /// shrinks was unshared, not deleted.
     #[serde(default)]
@@ -244,30 +259,10 @@ impl AppCore {
         });
 
         // 1. Enumerate and remember what is new, before the token moves.
-        let token = self.backup.lock().await.token.clone();
-        let scan = source.scan(token).await?;
-        {
-            let mut st = self.backup.lock().await;
-            for a in scan.assets {
-                // A photo already in the library keeps following its edits whatever the scope.
-                let tracked = st.tracked.get(&a.id).map(|t| t.modified_ms);
-                if tracked.is_none() && !in_scope(&st.policy.scope, &a) {
-                    continue;
-                }
-                if tracked != Some(a.modified_ms) {
-                    st.pending.insert(a.id.clone(), a);
-                }
-            }
-            for id in &scan.removed {
-                st.pending.remove(id);
-            }
-            st.token = Some(scan.token);
-            st.last_scan_ms = now_ms();
-            st.save(self.data_dir())?;
-        }
+        self.merge_scan(&*source).await?;
         // 2. What the gallery deleted, and copies still waiting to become references. Local work:
         // no conditions apply.
-        self.check_gallery(&*source, &ln).await?;
+        self.check_gallery(&*source, &ln, true).await?;
         self.continue_moves(&ln).await?;
         self.make_posters(&*source, &ln).await;
 
@@ -286,10 +281,40 @@ impl AppCore {
 
         // 3. Import what is waiting, in place.
         let todo: Vec<Asset> = self.backup.lock().await.pending.values().cloned().collect();
-        self.import_in_place(&ln, todo, &mut report, true).await?;
+        self.import_in_place(&*source, &ln, todo, &mut report, true)
+            .await?;
         self.make_posters(&*source, &ln).await;
         report.pending = self.backup.lock().await.pending.len() as u32;
         Ok(report)
+    }
+
+    /// What changed since the token, saved before the token moves: new and edited assets wait in
+    /// `pending`, tracked library assets reported removed wait for the gallery check.
+    async fn merge_scan(&self, source: &dyn PhotoSource) -> Result<()> {
+        let token = self.backup.lock().await.token.clone();
+        let scan = source.scan(token).await?;
+        let mut st = self.backup.lock().await;
+        for a in scan.assets {
+            // A photo already in the library keeps following its edits whatever the scope.
+            let tracked = st.tracked.get(&a.id).map(|t| t.modified_ms);
+            if tracked.is_none() && !in_scope(&st.policy.scope, &a) {
+                continue;
+            }
+            if tracked != Some(a.modified_ms) {
+                st.pending.insert(a.id.clone(), a);
+            }
+        }
+        for id in scan.removed {
+            st.pending.remove(&id);
+            if st.tracked.get(&id).is_some_and(Tracked::in_library)
+                && !st.removed_from_library.contains(&id)
+            {
+                st.removed_from_library.push(id);
+            }
+        }
+        st.token = Some(scan.token);
+        st.last_scan_ms = now_ms();
+        st.save(self.data_dir())
     }
 
     /// The gallery's folders with photos or videos in them, camera folders first, then the
@@ -300,7 +325,7 @@ impl AppCore {
         let scope = self.backup.lock().await.policy.scope.clone();
         let mut photos: BTreeMap<PathBuf, u32> = BTreeMap::new();
         for a in &scan.assets {
-            if let Some(dir) = a.path.as_deref().and_then(|p| Path::new(p).parent()) {
+            if let Some(dir) = a.path().and_then(|p| Path::new(p).parent()) {
                 *photos.entry(dir.to_path_buf()).or_default() += 1;
             }
         }
@@ -323,75 +348,107 @@ impl AppCore {
         Ok(folders)
     }
 
-    /// Add gallery photos by reference and track them. An edited photo (same asset, new content)
-    /// replaces its old version, which the gallery no longer has: that one is deleted.
+    /// Add gallery photos and track them. A file is referenced where it is; a library original
+    /// is read into a temporary file and copied in (P1-07 will serve it on request instead). An
+    /// edited photo (same asset, new content) replaces its old version, which the gallery no
+    /// longer has: that one is deleted.
     async fn import_in_place(
         &self,
+        source: &dyn PhotoSource,
         ln: &LibraryNode<Library>,
         assets: Vec<Asset>,
         report: &mut BackupReport,
         progress: bool,
     ) -> Result<()> {
-        let opts = ImportOptions {
-            mode: ImportMode::Reference,
-            ..ImportOptions::default()
-        };
         let total = assets.len() as u32;
         let mut done = 0u32;
         for chunk in assets.chunks(BATCH) {
             let mut files: Vec<(Asset, PathBuf)> = vec![];
+            let mut read: Vec<(Asset, PathBuf)> = vec![];
             for a in chunk {
-                match &a.path {
-                    Some(p) => files.push((a.clone(), PathBuf::from(p))),
-                    None => report.failed.push(format!(
+                match &a.original {
+                    Original::File(p) => files.push((a.clone(), PathBuf::from(p))),
+                    Original::Library { local: true } => match source.read_original(&a.id).await {
+                        Ok(p) => read.push((a.clone(), p)),
+                        Err(e) => report.failed.push(format!("{}: {e:#}", a.id)),
+                    },
+                    Original::Library { local: false } => report.failed.push(format!(
+                        "{}: the original is in the cloud, not on this device",
+                        a.id
+                    )),
+                    Original::Unreadable => report.failed.push(format!(
                         "{}: Shoebox cannot read this photo where it is, and does not keep a second copy",
                         a.id
                     )),
                 }
             }
-            let paths: Vec<PathBuf> = files.iter().map(|(_, p)| p.clone()).collect();
-            let r = ln.import_paths(&paths, opts.clone()).await?;
-            report.imported += r.imported.len() as u32;
-            report.duplicates += r.duplicates.len() as u32;
-            let mut replaced: Vec<String> = vec![];
-            {
-                let mut st = self.backup.lock().await;
-                for (a, p) in &files {
-                    if let Some((_, why)) = r.failed.iter().find(|(fp, _)| fp == p) {
-                        report.failed.push(format!("{}: {why}", a.id));
-                        continue;
-                    }
-                    st.pending.remove(&a.id);
-                    let Some((_, id)) = r.by_path.iter().find(|(bp, _)| bp == p) else {
-                        continue; // not a photo or video
-                    };
-                    let hash = id.to_string();
-                    let before = st.tracked.insert(
-                        a.id.clone(),
-                        Tracked {
-                            hash: hash.clone(),
-                            path: p.display().to_string(),
-                            modified_ms: a.modified_ms,
-                        },
-                    );
-                    if let Some(old) = before.filter(|old| old.hash != hash) {
-                        replaced.push(old.hash);
-                    }
-                    // Already held, but as a copy an earlier build made: make it a reference.
-                    if r.duplicates.contains(id)
-                        && !st.moving.contains_key(&hash)
-                        && ln.node().blobs().has(id).await?
-                        && !ln.is_in_place(id).await?
-                    {
-                        ln.begin_move_in_place(id).await?;
-                        st.moving.insert(hash, p.display().to_string());
+            for (in_library, batch) in [(false, files), (true, read)] {
+                if batch.is_empty() {
+                    continue;
+                }
+                let opts = ImportOptions {
+                    mode: if in_library {
+                        ImportMode::Copy
+                    } else {
+                        ImportMode::Reference
+                    },
+                    ..ImportOptions::default()
+                };
+                let paths: Vec<PathBuf> = batch.iter().map(|(_, p)| p.clone()).collect();
+                let r = ln.import_paths(&paths, opts).await;
+                if in_library {
+                    for p in &paths {
+                        let _ = std::fs::remove_file(p);
                     }
                 }
-                replaced.retain(|h| !st.tracked.values().any(|t| &t.hash == h));
+                let r = r?;
+                report.imported += r.imported.len() as u32;
+                report.duplicates += r.duplicates.len() as u32;
+                let mut replaced: Vec<String> = vec![];
+                {
+                    let mut st = self.backup.lock().await;
+                    for (a, p) in &batch {
+                        if let Some((_, why)) = r.failed.iter().find(|(fp, _)| fp == p) {
+                            report.failed.push(format!("{}: {why}", a.id));
+                            continue;
+                        }
+                        st.pending.remove(&a.id);
+                        let Some((_, id)) = r.by_path.iter().find(|(bp, _)| bp == p) else {
+                            continue; // not a photo or video
+                        };
+                        let hash = id.to_string();
+                        let before = st.tracked.insert(
+                            a.id.clone(),
+                            Tracked {
+                                hash: hash.clone(),
+                                path: (!in_library).then(|| p.display().to_string()),
+                                modified_ms: a.modified_ms,
+                            },
+                        );
+                        if let Some(old) = before.filter(|old| old.hash != hash) {
+                            replaced.push(old.hash);
+                        }
+                        // Already held, but as a copy an earlier build made: make it a reference.
+                        if !in_library
+                            && r.duplicates.contains(id)
+                            && !st.moving.contains_key(&hash)
+                            && ln.node().blobs().has(id).await?
+                            && !ln.is_in_place(id).await?
+                        {
+                            ln.begin_move_in_place(id).await?;
+                            st.moving.insert(hash, p.display().to_string());
+                        }
+                    }
+                    replaced.retain(|h| !st.tracked.values().any(|t| &t.hash == h));
+                    st.save(self.data_dir())?;
+                }
+                ln.gallery_removed(&hashes(&replaced)).await?;
+            }
+            {
+                let mut st = self.backup.lock().await;
                 st.last_error = report.failed.last().cloned();
                 st.save(self.data_dir())?;
             }
-            ln.gallery_removed(&hashes(&replaced)).await?;
             done += chunk.len() as u32;
             if progress {
                 self.emit(AppEvent::BackupProgress { done, total });
@@ -404,15 +461,15 @@ impl AppCore {
     /// thumbnailer, so no device has to decode them to show a tile. At most [`POSTERS_PER_RUN`]
     /// tries a run; the rest follow on later runs. Never fails the backup.
     async fn make_posters(&self, source: &dyn PhotoSource, ln: &LibraryNode<Library>) {
-        let tracked: Vec<(String, String)> = {
+        let tracked: Vec<(String, String, Option<String>)> = {
             let st = self.backup.lock().await;
             st.tracked
-                .values()
-                .map(|t| (t.hash.clone(), t.path.clone()))
+                .iter()
+                .map(|(asset, t)| (asset.clone(), t.hash.clone(), t.path.clone()))
                 .collect()
         };
         let (mut tried, mut made) = (0usize, 0usize);
-        for (hash, path) in tracked {
+        for (asset, hash, path) in tracked {
             if tried >= POSTERS_PER_RUN {
                 break;
             }
@@ -426,13 +483,13 @@ impl AppCore {
                 continue;
             }
             tried += 1;
-            match source.video_frame(&path).await {
+            match source.video_frame(&asset, path.as_deref()).await {
                 Ok(Some(jpeg)) => match ln.set_video_poster(&id, jpeg).await {
                     Ok(_) => made += 1,
-                    Err(e) => tracing::debug!("poster for {path}: {e:#}"),
+                    Err(e) => tracing::debug!("poster for {asset}: {e:#}"),
                 },
                 Ok(None) => {}
-                Err(e) => tracing::debug!("poster frame of {path}: {e:#}"),
+                Err(e) => tracing::debug!("poster frame of {asset}: {e:#}"),
             }
         }
         if made > 0 {
@@ -475,11 +532,12 @@ impl AppCore {
         let _running = self.backup_running.lock().await;
         let source = self.source()?;
         let ln = self.ln().await?;
-        self.check_gallery(&*source, &ln).await
+        self.check_gallery(&*source, &ln, false).await
     }
 
-    /// Photos whose gallery file is gone are deleted from the library. A file on a card that is not
-    /// mounted is not gone.
+    /// Photos whose gallery file is gone, or whose library asset the scan reported removed, are
+    /// deleted from the library. A file on a card that is not mounted is not gone. `scanned`: the
+    /// caller has just merged a scan; otherwise one is taken when library assets are tracked.
     ///
     /// With only some photos shared, Android hides every other file, so a deleted file and an
     /// unshared one look the same. A shared file stops being visible when the person deletes it
@@ -487,15 +545,28 @@ impl AppCore {
     /// more" prompt (see [`AppCore::import_picked`]) or by narrowing access in the system
     /// settings. Files that vanish across such a change are unshared: they stay in the library
     /// and this phone stops holding them. Any other disappearance is a deletion. Without access,
-    /// nothing is checked.
+    /// nothing is checked. PhotoKit hides unshared assets the same way, and they are told apart
+    /// the same way.
     async fn check_gallery(
         &self,
         source: &dyn PhotoSource,
         ln: &LibraryNode<Library>,
+        scanned: bool,
     ) -> Result<()> {
         let permission = source.permission().await?;
         if permission == Permission::Denied {
             return Ok(());
+        }
+        if !scanned
+            && self
+                .backup
+                .lock()
+                .await
+                .tracked
+                .values()
+                .any(Tracked::in_library)
+        {
+            self.merge_scan(source).await?;
         }
         let narrowed = {
             let mut st = self.backup.lock().await;
@@ -506,19 +577,22 @@ impl AppCore {
             before == Some(Permission::Granted) && permission == Permission::Limited
         };
         if narrowed {
-            return self.release_unshared(ln).await;
+            return self.release_unshared(source, ln).await;
         }
         let (gone, total) = {
             let mut st = self.backup.lock().await;
-            st.pending.retain(|_, a| {
-                a.path
-                    .as_deref()
-                    .is_none_or(|p| !gone_from_gallery(Path::new(p)))
-            });
+            let st = &mut *st;
+            st.pending
+                .retain(|_, a| a.path().is_none_or(|p| !gone_from_gallery(Path::new(p))));
+            st.removed_from_library
+                .retain(|id| st.tracked.contains_key(id));
             let gone: Vec<String> = st
                 .tracked
                 .iter()
-                .filter(|(_, t)| gone_from_gallery(Path::new(&t.path)))
+                .filter(|(id, t)| match &t.path {
+                    Some(p) => gone_from_gallery(Path::new(p)),
+                    None => st.removed_from_library.contains(id),
+                })
                 .map(|(id, _)| id.clone())
                 .collect();
             (gone, st.tracked.len())
@@ -542,13 +616,40 @@ impl AppCore {
     }
 
     /// Access just shrank: what this phone can no longer see was unshared. Keep those photos in
-    /// the library; this phone no longer holds them.
-    async fn release_unshared(&self, ln: &LibraryNode<Library>) -> Result<()> {
+    /// the library; this phone no longer holds them. Library assets are seen by a full scan.
+    async fn release_unshared(
+        &self,
+        source: &dyn PhotoSource,
+        ln: &LibraryNode<Library>,
+    ) -> Result<()> {
+        let library = self
+            .backup
+            .lock()
+            .await
+            .tracked
+            .values()
+            .any(Tracked::in_library);
+        let visible: Option<HashSet<String>> = if library {
+            Some(
+                source
+                    .scan(None)
+                    .await?
+                    .assets
+                    .into_iter()
+                    .map(|a| a.id)
+                    .collect(),
+            )
+        } else {
+            None
+        };
         let unshared: Vec<String> = {
             let st = self.backup.lock().await;
             st.tracked
                 .iter()
-                .filter(|(_, t)| gone_from_gallery(Path::new(&t.path)))
+                .filter(|(id, t)| match &t.path {
+                    Some(p) => gone_from_gallery(Path::new(p)),
+                    None => visible.as_ref().is_some_and(|v| !v.contains(*id)),
+                })
                 .map(|(id, _)| id.clone())
                 .collect()
         };
@@ -609,6 +710,7 @@ impl AppCore {
                 .map(|t| t.hash)
                 .collect();
             st.held_deletions.retain(|id| !ids.contains(id));
+            st.removed_from_library.retain(|id| !ids.contains(id));
             // The same photo can be in the gallery twice: it stays while one copy remains.
             gone.retain(|h| !st.tracked.values().any(|t| &t.hash == h));
             gone.sort();
@@ -654,11 +756,11 @@ impl AppCore {
         };
         if !files && source.permission().await? != Permission::Granted {
             // Deletions so far count as deletions; what vanishes across the prompt was unshared.
-            let _ = self.check_gallery(&*source, &ln).await;
+            let _ = self.check_gallery(&*source, &ln, false).await;
             let answer = source.request_permission().await?;
             {
                 let _running = self.backup_running.lock().await;
-                self.release_unshared(&ln).await?;
+                self.release_unshared(&*source, &ln).await?;
                 self.backup.lock().await.last_permission = Some(answer);
             }
             if answer == Permission::Denied {
@@ -675,7 +777,8 @@ impl AppCore {
                     .collect()
             };
             let mut report = BackupReport::default();
-            self.import_in_place(&ln, todo, &mut report, false).await?;
+            self.import_in_place(&*source, &ln, todo, &mut report, false)
+                .await?;
             summary.imported = report.imported;
             summary.duplicates = report.duplicates;
             summary.failed = report.failed;
@@ -697,7 +800,7 @@ impl AppCore {
         if !in_place.is_empty() {
             let _running = self.backup_running.lock().await;
             let mut report = BackupReport::default();
-            self.import_in_place(&ln, in_place, &mut report, false)
+            self.import_in_place(&*source, &ln, in_place, &mut report, false)
                 .await?;
             summary.imported += report.imported;
             summary.duplicates += report.duplicates;
@@ -753,11 +856,11 @@ const NOT_CAMERA: [&str; 4] = [
     "screenrecorder",
 ];
 
-/// Whether backup takes `a` under `scope`. A photo the app cannot read in place has no folder to
-/// tell by: it is kept, to be reported and retried as before.
+/// Whether backup takes `a` under `scope`. A photo with no file has no folder to tell by: a
+/// library asset (PhotoKit has no folders) is taken, and one the app cannot read in place is kept,
+/// to be reported and retried as before.
 fn in_scope(scope: &BackupScope, a: &Asset) -> bool {
-    a.path
-        .as_deref()
+    a.path()
         .and_then(|p| Path::new(p).parent())
         .is_none_or(|dir| folder_in_scope(scope, dir))
 }
@@ -830,7 +933,7 @@ fn gone_from_gallery(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{camera_folder, folder_location, in_scope, volume_root};
-    use crate::photos_source::Asset;
+    use crate::photos_source::{Asset, Original};
     use crate::types::BackupScope;
     use std::path::{Path, PathBuf};
 
@@ -841,7 +944,7 @@ mod tests {
             modified_ms: 0,
             size: 1,
             mime: "image/jpeg".into(),
-            path: Some(path.into()),
+            original: Original::File(path.into()),
         };
         for yes in [
             "/storage/emulated/0/DCIM/Camera/20261027_101500.jpg",
@@ -874,7 +977,7 @@ mod tests {
         assert!(in_scope(
             &chosen,
             &Asset {
-                path: None,
+                original: Original::Unreadable,
                 ..at("")
             }
         ));

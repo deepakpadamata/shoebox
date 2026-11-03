@@ -418,6 +418,15 @@ Behaviour that will come back as features or needs a decision.
     full access.
   - Not handled: a shared album that references a deleted gallery photo keeps a dangling reference on this phone until
     the photo is purged (the album's other members have their own copies). iOS (PhotoKit) is not built.
+  - Photo-library assets (P1-02, 2026-11-03). PhotoKit has no file paths, so an asset's original is either a file
+    (Android) or a library item read through the source by its id (`Original::Library`). Library assets are tracked
+    by id (`backup.json` `tracked` entries without a `path`). One is deleted when the scan reports it removed; that
+    removal is saved in `removed_from_library` before the token moves. With backup off, the gallery check scans when
+    library assets are tracked. Unsharing works as above: assets hidden across Shoebox's prompt, or when access narrows
+    (found by a full scan), stay in the library. They are not in any backup scope's folders, so every scope takes
+    them. An original only in the cloud is reported and waits. Until P1-07 serves them on request, library
+    originals are read into a temporary file and copied in. Not built for a real platform yet (P1-03/04/06); tested
+    with the fake source only. A `backup.json` from before loads unchanged.
 
 - **A-093 · the Companion role and its keep rules (2026-10-27)** · "Phone" became **Companion** (`Role::Companion`; the serde
   alias `Phone`, the app's `parse_role` and the dev tool still accept the old name, so config files and app.json from

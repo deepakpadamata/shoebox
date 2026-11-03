@@ -13,7 +13,7 @@ Decisions from the first review pass (2026-10-22). Each one notes where it shows
 | 3 | Default role for a new phone | **Phone**: previews of everything, plus originals of its own captures until they meet the redundancy target. | F4.3, mockup 1d |
 | 4 | Headless keeper in MVP? | **Yes.** An always-on keeper (NAS / Pi / VPS daemon) is MVP. It's what makes P2P sync reliable in practice. | F4.6 → MVP |
 | 5 | Shared albums & keeper storage | **Opt-in per album.** Shared albums keep previews by default; a per-album "Keep originals" toggle makes my keeper hold every member's originals. | new F6.9, mockup 4d |
-| 6 | Web viewer / hosted services | **v2.** A self-hosted web viewer served by a keeper, plus an optional **hosted gateway "relay view"** and an optional **hosted private cloud backup** service. The two can be used together. The backup is **zero-knowledge** (ciphertext only; it can't see photos or generate previews), so the web view can't be powered by the backup service alone. | F6.8, new F7.7, vision non-goals |
+| 6 | Web viewer / hosted services | **Decided 2026-11-03 (epic W1):** a share link carries the read key in its `#fragment`; the bytes are ciphertext on our own **Shoebox Cloud**, which is also the paid cloud keeper, so a link works with every device off. A free **Live** mode serves from the sharer's online devices. Viewers are read-only; guest uploads are a stretch goal. *Earlier decision (2026-10-22), now superseded:* **v2.** A self-hosted web viewer served by a keeper, plus an optional **hosted gateway "relay view"** and an optional **hosted private cloud backup** service. The two can be used together. The backup is **zero-knowledge** (ciphertext only; it can't see photos or generate previews), so the web view can't be powered by the backup service alone. | F6.8, new F7.7, vision non-goals |
 
 ### Technical
 
@@ -55,8 +55,7 @@ Decisions from the first review pass (2026-10-22). Each one notes where it shows
 
 ## Still open
 
-- **Hosted services business model** (#6). Free tier? How is the backup service paid for? How does the gateway authenticate album viewers?
-- **Web view source of truth** (#6). The backup is zero-knowledge, so the gateway "relay view" has to fetch from an online member device or keeper, or be given album-specific read keys. Decide which.
+- **Hosted services business model** (#6). Decided in shape by W1 (a free quota for web shares, a paid cloud keeper; viewers need only the link). Still to set: the domain, the free quota, the price and the payment provider (W1-10).
 - **Background sync on iOS** (#10). Validate what Tauri 2 can reach of BGTaskScheduler / BGProcessingTask, or whether a small native plugin is needed.
 - **iroh-docs status** (#7). In 2025 n0 said it wasn't ready for 1.0. Check the current repo/changelog before the spike.
 - **Shared album limits** (part of old #5). Max members/items for v1 are not decided yet.

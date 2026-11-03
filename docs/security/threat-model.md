@@ -94,6 +94,25 @@ the two issues with real consequences and are fixed. F4 is the one a user should
 - **Turning people off** stops face finding and hides names on every device; existing face shards stay until
   compacted.
 
+## Web links and Shoebox Cloud (W1, planned 2026-11-03)
+
+- **What the server holds**: ciphertext blobs named by their hash, encrypted manifests, share ids, expiry, byte counts.
+  It never receives the share key (it is in the link's fragment) or a blob key, so it cannot read photos, album
+  names or captions. It does see sizes, request times, IP addresses and which blobs a share lists.
+- **The link is the capability.** Anyone who has it can view; forwarding it forwards access. Revoke or rotate stops
+  new reads at once; it cannot take back what a viewer already downloaded, and the share sheet says so.
+- **Link leakage**: the viewer page sends `Referrer-Policy: no-referrer`, loads nothing from third parties and
+  has a strict CSP, so the fragment does not leak through requests or referrers. A browser extension or a
+  shared screen can still see what the person sees.
+- **Scoped reads**: a blob is served only through a share that lists its hash, so a guessed or leaked hash opens
+  nothing. Share ids are 128 random bits, separate from the key.
+- **Manifest integrity**: signed by a device key of the sharer; the viewer rejects a manifest that does not verify.
+- **Location**: photos shared with their location stripped upload the stripped copy only; an original is uploaded only
+  when the sharer allows full-size downloads.
+- **Not covered**: a malicious or compromised service operator serving a different viewer page (the page is the trust
+  anchor; subresource integrity and a published build hash reduce it, they do not remove it); abuse content we cannot
+  see (takedown is by report, W1-10).
+
 ## Not covered
 
 * No cryptographic review of the dependencies (iroh, loro, ed25519 implementations) beyond using

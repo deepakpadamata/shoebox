@@ -81,7 +81,7 @@ Each mockup screen lists the IDs it covers (see `design/README.md`).
 | F6.5 | Save shared photo into my library | MVP | Just a reference to the same hash — instant if blob already fetched. |
 | F6.6 | One-off share of a photo/set via blob ticket | v1.x | "Send to someone nearby/over the net" — like AirDrop, any platform. |
 | F6.7 | Comments / reactions in shared albums | v1.x | |
-| F6.8 | Web viewer for people without the app | v2 | Self-hosted on a keeper, or via our optional hosted gateway ("relay view"). |
+| F6.8 | Web link for people without the app | v2 | Read-only page in any browser. The link holds the key; photos are ciphertext on Shoebox Cloud (works with every device off), or, as a free Live option, served by the sharer's online devices. Epic W1. Guests adding photos is a stretch (W1-11). |
 | F6.9 | Per-album "Keep originals" on my keeper | MVP | Off by default (previews only); when on, my keeper stores every member's originals for that album. |
 
 ## F7 · Storage & redundancy
@@ -94,7 +94,7 @@ Each mockup screen lists the IDs it covers (see `design/README.md`).
 | F7.4 | Storage breakdown per device | MVP | |
 | F7.5 | Periodic integrity check (re-hash, repair from peer) | v1.x | BLAKE3 verification makes this cheap. |
 | F7.6 | Encrypted backup to a friend's keeper (reciprocal backup) | Later | Peer stores ciphertext it can't read. |
-| F7.7 | Hosted private cloud backup (optional, paid?) | v2 | Zero-knowledge: acts as a keeper holding ciphertext only. Counts toward copy count. Usable alongside the hosted gateway. |
+| F7.7 | Shoebox Cloud: hosted private cloud backup (optional, paid) | v2 | Zero-knowledge: acts as a keeper holding ciphertext only, tagged "encrypted copy". Counts toward copy count. The same store serves web links (F6.8). Epic W1. |
 
 ## F8 · Settings & network
 

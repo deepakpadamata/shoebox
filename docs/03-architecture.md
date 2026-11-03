@@ -106,11 +106,14 @@ Search runs entirely on the device that searches; only the one-time indexing is 
 
 ## Hosted services (v2, optional)
 
-- **Cloud backup**: a zero-knowledge keeper. Devices upload blobs encrypted with a library key it
-  never sees. It counts toward copy count, but it can't serve previews or the web view.
-- **Gateway "relay view"**: renders an album on the web for people without the app. Because the backup is
-  zero-knowledge, the gateway needs album read keys from a share link (e.g. in the URL fragment), or
-  must proxy from an online member device. Still open.
+One service, **Shoebox Cloud** (epic W1), does both jobs; it holds ciphertext only.
+
+- **Cloud keeper**: a zero-knowledge keeper. Devices upload blobs encrypted per blob (`k_b` derived from a
+  library cloud secret in the recovery kit). It counts toward copy count as an "encrypted copy".
+- **Web links**: a share is an encrypted manifest listing `{cid, k_b}` for the shared photos. The link's
+  `#fragment` carries the share key, so the server never sees it, and a static viewer page decrypts in
+  the browser. Works with every device off. A free **Live** mode has the browser fetch the same encrypted
+  objects from the sharer's online devices over iroh (`shoebox/webview/0`).
 
 ## Security notes
 

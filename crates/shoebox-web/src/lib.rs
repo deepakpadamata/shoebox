@@ -5,7 +5,7 @@
 //! natively.
 
 use shoebox_core::cloud::{decrypt_blob as core_decrypt, BlobKey, CHUNK, TAG};
-use shoebox_core::share::{self, CloudBlob, Item, ItemKind, ShareKey};
+use shoebox_core::share::{self, CloudBlob, Item, ItemKind, LinkMode, ShareKey, ShareLink};
 use wasm_bindgen::prelude::*;
 
 /// What went wrong, as a short code the page maps to a message, then a human sentence.
@@ -69,6 +69,27 @@ fn item_json(i: &Item) -> serde_json::Value {
     })
 }
 
+/// Read the text after a link's `#`. Returns JSON `{ mode: "cloud" | "live", locator: <hex>, key: <hex> }`, or
+/// fails with `bad-link` when the text is not a Shoebox link (a cut-off copy, say).
+#[wasm_bindgen]
+pub fn parse_link(fragment: &str) -> Result<String, JsError> {
+    let link = ShareLink::parse(fragment)
+        .ok_or_else(|| fail("bad-link", "this is not a complete Shoebox link"))?;
+    Ok(serde_json::json!({
+        "mode": match link.mode { LinkMode::Cloud => "cloud", LinkMode::Live => "live" },
+        "locator": hex::encode(&link.locator),
+        "key": hex::encode(link.key.0),
+    })
+    .to_string())
+}
+
+/// [`open_manifest`] for a link: the signing key is derived from the share key, so the link is all it needs.
+#[wasm_bindgen]
+pub fn open_share(sealed: &[u8], share_key: &[u8]) -> Result<String, JsError> {
+    let key = ShareKey(key32(share_key, "the share key")?);
+    open_manifest(sealed, share_key, &key.signer().public_bytes())
+}
+
 /// Check, decrypt and decode a sealed manifest. Returns JSON:
 /// `{ shareId, version, album, expires, items: [...] }`, with blob ids and keys as hex.
 /// The error text starts with one of `not-a-share`, `truncated`, `newer-format`, `bad-signature`,
@@ -119,6 +140,26 @@ mod tests {
             .ok()
             .unwrap();
         assert_eq!(piece, b"a small photo");
+    }
+
+    #[test]
+    fn a_link_parses_and_its_key_opens_its_share() {
+        let key = ShareKey([0x31; 32]);
+        let link = ShareLink::cloud([4; 16], key.clone());
+        let v: serde_json::Value =
+            serde_json::from_str(&parse_link(&link.to_fragment()).ok().unwrap()).unwrap();
+        assert_eq!(v["mode"], "cloud");
+        assert_eq!(v["locator"], hex::encode([4u8; 16]));
+        assert_eq!(v["key"], hex::encode([0x31u8; 32]));
+        let m = Manifest {
+            album_name: "A".into(),
+            items: vec![],
+            expires: None,
+            inbox_key: None,
+        };
+        let sealed = seal(&m, [4; 16], 1, &key, &key.signer());
+        let json = open_share(&sealed, &key.0).ok().unwrap();
+        assert!(json.contains("\"album\":\"A\""));
     }
 
     #[test]

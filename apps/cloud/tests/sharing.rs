@@ -98,8 +98,13 @@ async fn world(photos_in_album: usize) -> World {
     let mut config = Config::new(cloud_dir.path().to_path_buf());
     let clock = cluster.clock().clone();
     config.clock = Arc::new(move || clock.now_ms() as i64);
+    // For the by-hand run below: serve the built viewer page and listen on a known port.
+    config.viewer_dir = std::env::var("SHOEBOX_DEMO_VIEWER").ok().map(Into::into);
+    let port = std::env::var("SHOEBOX_DEMO_PORT").unwrap_or_else(|_| "0".into());
     let svc = Service::open(config).unwrap();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}"))
+        .await
+        .unwrap();
     let addr = listener.local_addr().unwrap();
     let app = router(svc.clone());
     tokio::spawn(async move {
@@ -410,4 +415,25 @@ async fn a_library_without_the_cloud_enabled_says_so() {
         .await
         .unwrap_err();
     assert!(format!("{err:#}").contains("recovery phrase"), "{err:#}");
+}
+
+/// Serve a real share and its viewer page for looking at in a browser. Not part of the suite:
+/// `SHOEBOX_DEMO_VIEWER=apps/web-viewer/dist SHOEBOX_DEMO_PORT=18090 cargo test -p shoebox-cloud --test sharing demo -- --ignored --nocapture`
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "runs until stopped"]
+async fn demo_serve_a_share() {
+    let w = world(10).await;
+    let share = w
+        .node
+        .create_web_share(
+            &w.album,
+            WebShareOptions {
+                full_size: true,
+                expires_ms: None,
+            },
+        )
+        .await
+        .unwrap();
+    println!("LINK {}", w.node.web_share_link(&share).await.unwrap());
+    tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
 }

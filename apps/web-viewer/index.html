@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<title>Shared album</title>
+<link rel="stylesheet" href="style.css">
+<script type="module" src="viewer.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="titles">
+    <h1 id="album">Shared album</h1>
+    <p id="meta" class="meta"></p>
+  </div>
+  <button id="download-all" class="button" type="button" hidden>Download all</button>
+</header>
+<main>
+  <p id="status" class="status" role="status">Opening the album…</p>
+  <noscript><p class="status error">This page decrypts the photos in your browser, so it needs JavaScript.</p></noscript>
+  <div id="grid" class="days"></div>
+</main>
+<footer class="foot">
+  <p>The photos are decrypted here, in your browser. The server that sent this page only ever holds data it cannot read, and the key is in the part of the address after the “#”, which your browser never sends.</p>
+</footer>
+
+<dialog id="lightbox" class="lightbox" aria-label="Photo viewer">
+  <div id="stage" class="stage"></div>
+  <p id="caption" class="caption"></p>
+  <div class="bar">
+    <button id="prev" class="button" type="button" aria-label="Previous photo">‹</button>
+    <button id="live" class="button" type="button" hidden>Play</button>
+    <button id="download" class="button" type="button">Download</button>
+    <button id="next" class="button" type="button" aria-label="Next photo">›</button>
+    <button id="close" class="button" type="button" aria-label="Close">✕</button>
+  </div>
+</dialog>
+</body>
+</html>

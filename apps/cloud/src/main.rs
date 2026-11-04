@@ -21,19 +21,23 @@ struct Args {
     #[arg(long, env = "SHOEBOX_CLOUD_VIEWER")]
     viewer_dir: Option<PathBuf>,
     /// Storage a library may use, in GiB.
-    #[arg(long, default_value_t = 2)]
+    #[arg(long, env = "SHOEBOX_QUOTA_GIB", default_value_t = 2)]
     quota_gib: u64,
     /// Bytes a share may serve a day, in GiB.
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, env = "SHOEBOX_SHARE_DAILY_GIB", default_value_t = 1)]
     share_daily_gib: u64,
     /// Refuse libraries that have not registered (a subscription is needed first).
-    #[arg(long)]
+    #[arg(long, env = "SHOEBOX_CLOSED")]
     closed: bool,
     /// Behind a proxy we run: take the client address from `X-Forwarded-For`.
-    #[arg(long)]
+    #[arg(long, env = "SHOEBOX_TRUST_PROXY")]
     trust_proxy: bool,
     /// A host the viewer page may connect to (a relay, for Live links). Repeatable.
-    #[arg(long = "csp-connect")]
+    #[arg(
+        long = "csp-connect",
+        env = "SHOEBOX_CSP_CONNECT",
+        value_delimiter = ' '
+    )]
     csp_connect: Vec<String>,
     /// Keep the bytes in an S3-compatible bucket at this endpoint (the data directory then holds only
     /// bookkeeping). Browsers are sent to it, so it must be reachable from the internet and allow the viewer's
@@ -50,8 +54,11 @@ struct Args {
     #[arg(long, env = "SHOEBOX_S3_SECRET_ACCESS_KEY", hide_env_values = true)]
     s3_secret_access_key: Option<String>,
     /// Address the bucket as `https://bucket.endpoint/` instead of `https://endpoint/bucket/`.
-    #[arg(long)]
+    #[arg(long, env = "SHOEBOX_S3_VIRTUAL_HOST")]
     s3_virtual_host: bool,
+    /// A token for the operator's `/admin/...` calls (reported shares). Without one there are none.
+    #[arg(long, env = "SHOEBOX_ADMIN_TOKEN", hide_env_values = true)]
+    admin_token: Option<String>,
 }
 
 const GIB: u64 = 1024 * 1024 * 1024;
@@ -69,6 +76,7 @@ async fn main() -> anyhow::Result<()> {
     config.open_registration = !args.closed;
     config.trust_proxy = args.trust_proxy;
     config.csp_connect = args.csp_connect;
+    config.admin_token = args.admin_token;
     if let Some(endpoint) = args.s3_endpoint {
         let need = |v: Option<String>, what: &str| {
             v.ok_or_else(|| anyhow::anyhow!("--s3-endpoint needs {what}"))

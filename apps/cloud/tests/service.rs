@@ -924,18 +924,211 @@ async fn a_reported_share_is_switched_off_at_once_and_the_owner_sees_why() {
         StatusCode::GONE
     );
 
-    // Reinstating is the operator deleting the report; a share that does not exist cannot be reported.
-    std::fs::remove_file(r.dir.path().join("reports").join(&id)).unwrap();
-    assert_eq!(
-        r.public(&format!("/s/{id}/m"), None).await.0,
-        StatusCode::OK
-    );
+    // A share that does not exist cannot be reported.
     let nowhere = Request::builder()
         .method("POST")
         .uri(format!("/report/{}", hex::encode([1u8; 16])))
         .body(Body::empty())
         .unwrap();
     assert_eq!(r.send(nowhere).await.0, StatusCode::NOT_FOUND);
+}
+
+impl Rig {
+    async fn admin(&self, method: &str, path: &str, token: Option<&str>) -> (StatusCode, Vec<u8>) {
+        let mut b = Request::builder().method(method).uri(path);
+        if let Some(t) = token {
+            b = b.header("authorization", format!("Bearer {t}"));
+        }
+        let (s, body, _) = self.send(b.body(Body::empty()).unwrap()).await;
+        (s, body)
+    }
+}
+
+#[tokio::test]
+async fn the_operator_lists_reports_and_reinstates_or_deletes_with_the_admin_token() {
+    // Without a token there is no operator interface at all.
+    let closed = rig();
+    assert_eq!(
+        closed.admin("GET", "/admin/reports", Some("")).await.0,
+        StatusCode::NOT_FOUND
+    );
+
+    let r = rig_with(|c| c.admin_token = Some("operator-secret".into()));
+    let d = r.device(2, "nest");
+    let (_, cid) = r.put_blob(&d, &sealed_photo(1, 500)).await;
+    let mut ids = vec![];
+    for n in [7u8, 8] {
+        let share = [n; 16];
+        let id = hex::encode(share);
+        r.owner(
+            &d,
+            "PUT",
+            &format!("/v1/shares/{id}"),
+            share_upload(share, 1, vec![hex_cid(&cid)], None),
+        )
+        .await;
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/report/{id}"))
+            .body(Body::from(format!("report {n}")))
+            .unwrap();
+        assert_eq!(r.send(req).await.0, StatusCode::ACCEPTED);
+        ids.push(id);
+    }
+
+    for token in [None, Some("wrong"), Some("operator-secret ")] {
+        assert_eq!(
+            r.admin("GET", "/admin/reports", token).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            r.admin(
+                "POST",
+                &format!("/admin/shares/{}/reinstate", ids[0]),
+                token
+            )
+            .await
+            .0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let (s, body) = r
+        .admin("GET", "/admin/reports", Some("operator-secret"))
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let reports = v["reports"].as_array().unwrap();
+    assert_eq!(reports.len(), 2);
+    assert!(reports.iter().any(|x| x["shareId"] == ids[0].as_str()
+        && x["reason"] == "report 7"
+        && x["library"] == hex::encode(LIB.0).as_str()));
+
+    // Reinstated: served again, off the list. Deleted: gone for everyone, owner included.
+    let reinstate = format!("/admin/shares/{}/reinstate", ids[0]);
+    assert_eq!(
+        r.admin("POST", &reinstate, Some("operator-secret")).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        r.public(&format!("/s/{}/m", ids[0]), None).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        r.admin("POST", &reinstate, Some("operator-secret")).await.0,
+        StatusCode::NOT_FOUND,
+        "nothing left to reinstate"
+    );
+    assert_eq!(
+        r.admin(
+            "DELETE",
+            &format!("/admin/shares/{}", ids[1]),
+            Some("operator-secret")
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        r.public(&format!("/s/{}/m", ids[1]), None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    let (_, list) = r.owner(&d, "GET", "/v1/shares", vec![]).await;
+    let v: serde_json::Value = serde_json::from_slice(&list).unwrap();
+    assert_eq!(v["shares"].as_array().unwrap().len(), 1);
+    let (_, body) = r
+        .admin("GET", "/admin/reports", Some("operator-secret"))
+        .await;
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(v["reports"].as_array().unwrap().is_empty());
+    // The blob stays with the library.
+    assert!(r.svc.store.has_blob(LIB, &hex_cid(&cid)).is_some());
+}
+
+/// The Cloudflare Durable Object keeps its records in SQLite and may be evicted between any two requests; here
+/// the records are in memory and the service is opened again on them, mid-upload.
+#[tokio::test]
+async fn with_records_kept_elsewhere_an_upload_and_a_report_survive_a_reopen() {
+    let clock = Arc::new(AtomicI64::new(T0));
+    let c = clock.clone();
+    let bucket = common::start(Arc::new(move || c.load(Ordering::SeqCst))).await;
+    let meta: Arc<dyn shoebox_cloud::meta::Meta> =
+        Arc::new(shoebox_cloud::meta::MemMeta::default());
+    let dir = tempfile::tempdir().unwrap();
+    let open = || {
+        let mut config = Config::new(dir.path().join("unused"));
+        config.s3 = Some(bucket.config.clone());
+        let c = clock.clone();
+        config.clock = Arc::new(move || c.load(Ordering::SeqCst));
+        let svc = Service::open_with(
+            config,
+            meta.clone(),
+            None,
+            Arc::new(shoebox_cloud::s3::Reqwest::new().unwrap()),
+        )
+        .unwrap();
+        Rig {
+            app: router(svc.clone()),
+            svc,
+            clock: clock.clone(),
+            root: KeyPair::from_seed([1; 32]),
+            dir: tempfile::tempdir().unwrap(),
+        }
+    };
+
+    let r = open();
+    let d = r.device(2, "nest");
+    let (_, kept) = r.put_blob(&d, &sealed_photo(1, 400)).await;
+    let share = [5u8; 16];
+    let id = hex::encode(share);
+    r.owner(
+        &d,
+        "PUT",
+        &format!("/v1/shares/{id}"),
+        share_upload(share, 1, vec![hex_cid(&kept)], None),
+    )
+    .await;
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/report/{id}"))
+        .body(Body::from("spam"))
+        .unwrap();
+    assert_eq!(r.send(req).await.0, StatusCode::ACCEPTED);
+    let photo = sealed_photo(2, 900);
+    let cid = hex::encode(blake3::hash(&photo).as_bytes());
+    let (_, v) = r.begin(&d, &[(cid.clone(), photo.len() as u64)], &[]).await;
+    let url = v["uploads"][0]["url"].as_str().unwrap().to_string();
+    let token = v["uploads"][0]["token"].as_str().unwrap().to_string();
+    let used = r.svc.store.usage(LIB);
+    assert!(used >= 400 + 900, "the blob, the share and the reservation");
+    drop(r);
+
+    // Opened again: the reservation still counts, the upload commits, the report still stands.
+    let r = open();
+    assert_eq!(r.svc.store.usage(LIB), used);
+    assert_eq!(r.put_bytes(&url, photo).await.0, StatusCode::OK);
+    assert_eq!(r.commit(&d, &[&token]).await["results"][0]["ok"], true);
+    assert_eq!(r.svc.store.usage(LIB), used);
+    assert!(r.svc.store.has_blob(LIB, &hex_cid(&cid)).is_some());
+    assert_eq!(
+        r.public(&format!("/s/{id}/m"), None).await.0,
+        StatusCode::GONE
+    );
+    assert!(meta.children("uploads").unwrap().is_empty());
+    drop(r);
+
+    // An upload begun and never made is cleaned up by the janitor of a later instance.
+    let r = open();
+    assert!(r.svc.store.has_blob(LIB, &hex_cid(&cid)).is_some());
+    let (_, v) = r.begin(&d, &[(hex::encode([3u8; 32]), 300)], &[]).await;
+    assert!(v["uploads"][0]["token"].is_string());
+    drop(r);
+    let r = open();
+    assert_eq!(r.svc.store.usage(LIB), used + 300);
+    r.clock.fetch_add(2 * 3600 * 1000 + 1, Ordering::SeqCst);
+    r.svc.sweep().await;
+    assert_eq!(r.svc.store.usage(LIB), used);
+    assert!(meta.children("uploads").unwrap().is_empty());
+    assert!(bucket.refused().is_empty(), "{:?}", bucket.refused());
 }
 
 // ---- with the bytes in a bucket ----

@@ -123,6 +123,11 @@ the two issues with real consequences and are fixed. F4 is the one a user should
   that long. The bucket's provider holds the same ciphertext and sees the same metadata as the service (sizes, times,
   addresses of readers), and the bucket should be private so it serves nothing the service did not sign. Uploads are
   checked for size, not hash; a wrong blob fails every reader's check against its id.
+- **On Cloudflare (A-120)**: the Worker reads the bucket for the reader, so no bucket address leaves it and revoking
+  stops every read at once; Cloudflare, as the host, sees what the service sees (ciphertext, sizes, times, readers'
+  addresses) and runs the viewer page. The operator interface (`/admin`, self-hosted too) exists only with a token,
+  sent as a bearer header and compared in constant time; it shows share and library ids and reporters' words, never
+  a key.
 - **Not covered**: a malicious or compromised service operator serving a different viewer page (the page is the trust
   anchor; subresource integrity and a published build hash reduce it, they do not remove it); abuse content we cannot
   see (takedown is by report, W1-10).

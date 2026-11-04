@@ -4,19 +4,26 @@
 //!
 //! The bytes are kept in the data directory, or in an S3-compatible bucket (`s3`), when the service is only a
 //! bookkeeper: uploads and reads then go straight to the bucket through short-lived presigned URLs.
+//!
+//! Two builds: the `server` feature (the default) is the `shoebox-cloud` program, keeping its records in a data
+//! directory; without it the crate builds for WebAssembly and runs in a Cloudflare Durable Object
+//! (`apps/cloud-worker`), which hands in its own records ([`meta::Meta`]) and HTTP client ([`s3::Http`]).
 
 mod api;
+#[cfg(feature = "server")]
+mod disk;
 pub mod limits;
+pub mod meta;
 pub mod s3;
 pub mod store;
 
 use axum::Router;
 use limits::Limiter;
-use s3::{S3Config, S3};
-use std::collections::HashMap;
+use meta::Meta;
+use s3::{Http, S3Config, S3};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use store::{Cid, Store};
+use std::sync::Arc;
+use store::{Store, Target};
 
 /// Settings. Every number is a default a deployment can change; W1-10 sets them from a subscription.
 #[derive(Clone)]
@@ -42,6 +49,8 @@ pub struct Config {
     pub csp_connect: Vec<String>,
     /// Keep the bytes in this bucket instead of the data directory.
     pub s3: Option<S3Config>,
+    /// The operator's token for `/admin/...` (reported shares). No token, no admin calls.
+    pub admin_token: Option<String>,
     /// Milliseconds since the epoch; a test clock in tests.
     pub clock: Arc<dyn Fn() -> i64 + Send + Sync>,
 }
@@ -69,29 +78,10 @@ impl Config {
             skew_ms: 5 * 60 * 1000,
             csp_connect: vec![],
             s3: None,
+            admin_token: None,
             clock: system_clock(),
         }
     }
-}
-
-/// What an upload is for.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Target {
-    Blob(Cid),
-    Object(String),
-}
-
-/// An upload the service handed out a URL for and has reserved quota for, until it is committed or runs out.
-pub(crate) struct Pending {
-    pub lib: shoebox_core::store::LibraryId,
-    pub target: Target,
-    pub size: u64,
-    /// What the bytes hash to (the blob's id, or the object's declared hash). Checked when they pass through the
-    /// service; a bucket cannot check it, and a reader checks it anyway.
-    pub hash: [u8; 32],
-    pub expires_ms: i64,
-    /// The bytes arrived and were recorded (they went through the service).
-    pub done: bool,
 }
 
 pub struct Service {
@@ -99,19 +89,34 @@ pub struct Service {
     pub store: Store,
     pub(crate) limiter: Limiter,
     pub(crate) s3: Option<S3>,
-    pub(crate) uploads: Mutex<HashMap<[u8; 16], Pending>>,
 }
 
 impl Service {
+    /// Open the service on its data directory, with reqwest for the bucket.
+    #[cfg(feature = "server")]
     pub fn open(config: Config) -> anyhow::Result<Arc<Self>> {
-        let s3 = config.s3.as_ref().map(S3::new).transpose()?;
-        let store = Store::open(&config.data_dir, s3.is_some())?;
+        let meta: Arc<dyn Meta> = Arc::new(meta::DirMeta::new(&config.data_dir));
+        let disk = config.s3.is_none().then(|| config.data_dir.clone());
+        Self::open_with(config, meta, disk, Arc::new(s3::Reqwest::new()?))
+    }
+
+    /// Open the service on records kept elsewhere. `disk` holds the bytes when there is no bucket (a server only).
+    pub fn open_with(
+        config: Config,
+        meta: Arc<dyn Meta>,
+        disk: Option<PathBuf>,
+        http: Arc<dyn Http>,
+    ) -> anyhow::Result<Arc<Self>> {
+        let s3 = config.s3.as_ref().map(|c| S3::new(c, http)).transpose()?;
+        if s3.is_none() && disk.is_none() {
+            anyhow::bail!("the bytes need somewhere to go: a bucket or a data directory");
+        }
+        let store = Store::open(meta, if s3.is_some() { None } else { disk })?;
         Ok(Arc::new(Self {
             config,
             store,
             limiter: Limiter::default(),
             s3,
-            uploads: Mutex::new(HashMap::new()),
         }))
     }
     pub fn now(&self) -> i64 {
@@ -130,29 +135,22 @@ impl Service {
                 }
             }
         }
-        let stale: Vec<Pending> = {
-            let mut u = self.uploads.lock().unwrap_or_else(|e| e.into_inner());
-            let ids: Vec<[u8; 16]> = u
-                .iter()
-                .filter(|(_, p)| p.expires_ms <= now)
-                .map(|(id, _)| *id)
-                .collect();
-            ids.iter().filter_map(|id| u.remove(id)).collect()
-        };
+        let stale = self.store.take_expired_uploads(now);
         for p in stale {
             if p.done {
                 continue;
             }
-            self.store.release(p.lib, p.size);
+            let lib = shoebox_core::store::LibraryId(p.library);
+            self.store.release(lib, p.size);
             let Some(s3) = &self.s3 else { continue };
             let (key, kept) = match &p.target {
                 Target::Blob(cid) => (
-                    s3::blob_key(&p.lib.0, cid),
-                    self.store.has_blob(p.lib, cid).is_some(),
+                    s3::blob_key(&p.library, cid),
+                    self.store.has_blob(lib, cid).is_some(),
                 ),
                 Target::Object(name) => (
-                    s3::object_key(&p.lib.0, name),
-                    self.store.object_len(p.lib, name).is_some(),
+                    s3::object_key(&p.library, name),
+                    self.store.object_len(lib, name).is_some(),
                 ),
             };
             if !kept {
@@ -165,4 +163,19 @@ impl Service {
 
 pub fn router(service: Arc<Service>) -> Router {
     api::router(service)
+}
+
+/// The viewer page's Content-Security-Policy. `bucket` is the bucket's origin when readers are redirected there
+/// (`connect-src` applies to where a redirect leads); a Worker that fetches the bucket itself passes `None`.
+pub fn page_csp(config: &Config, bucket: Option<String>) -> String {
+    let connect = std::iter::once("'self'".to_string())
+        .chain(bucket)
+        .chain(config.csp_connect.iter().cloned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; \
+         media-src blob:; connect-src {connect}; worker-src 'self' blob:; base-uri 'none'; \
+         frame-ancestors 'none'; form-action 'none'"
+    )
 }

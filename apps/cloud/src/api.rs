@@ -6,12 +6,14 @@
 //! answers with a URL per blob or object, the client `PUT`s the bytes there, and `POST /v1/uploads/commit` records
 //! them. Without a bucket the URL is the service's own `/u/{token}`. With a bucket, reads answer with a redirect
 //! to a presigned URL that lasts [`crate::s3::READ_TTL`].
+// Without the `server` feature (the Worker build) there is no disk to serve from or viewer directory to read.
+#![cfg_attr(not(feature = "server"), allow(unused_imports, dead_code))]
 
 use crate::s3::{self, S3};
-use crate::store::{Cid, ShareId, StoreError};
-use crate::{Pending, Service, Target};
+use crate::store::{Cid, ShareId, StoreError, Target, Token, Upload};
+use crate::Service;
 use axum::body::Body;
-use axum::extract::{ConnectInfo, Path, Query, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::header::{
     ACCEPT_RANGES, AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG,
     RANGE,
@@ -21,17 +23,13 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::Router;
-use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use shoebox_core::cloud_auth::{CertBundle, CloudAuth};
 use shoebox_core::share::{read_header, ShareUpload};
 use shoebox_core::store::LibraryId;
-use std::net::SocketAddr;
 use std::path::Path as FsPath;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio_util::io::ReaderStream;
 
 type Svc = State<Arc<Service>>;
 
@@ -196,6 +194,7 @@ fn content_length(headers: &HeaderMap) -> Result<u64, ApiError> {
 }
 
 /// Stream an upload to a temporary file, checking its length and hash. The caller has reserved `declared`.
+#[cfg(feature = "server")]
 async fn receive(
     s: &Service,
     body: Body,
@@ -204,6 +203,8 @@ async fn receive(
 ) -> Result<std::path::PathBuf, ApiError> {
     let tmp = s.store.tmp_path();
     let result: Result<(), ApiError> = async {
+        use futures::StreamExt;
+        use tokio::io::AsyncWriteExt;
         let mut file = tokio::fs::File::create(&tmp).await.map_err(|_| {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "io", "could not store")
         })?;
@@ -267,12 +268,25 @@ fn parse_range(value: &str, len: u64) -> Option<(u64, u64)> {
     (start <= end && start < len).then_some((start, end))
 }
 
+#[cfg(not(feature = "server"))]
+async fn serve_file(
+    _path: &FsPath,
+    _req: &HeaderMap,
+    _extra: &[(HeaderName, String)],
+    _charge: impl FnOnce(u64) -> bool,
+) -> Result<Response, ApiError> {
+    Err(ApiError::not_found())
+}
+
+#[cfg(feature = "server")]
 async fn serve_file(
     path: &FsPath,
     req: &HeaderMap,
     extra: &[(HeaderName, String)],
     charge: impl FnOnce(u64) -> bool,
 ) -> Result<Response, ApiError> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    use tokio_util::io::ReaderStream;
     let mut file = tokio::fs::File::open(path)
         .await
         .map_err(|_| ApiError::not_found())?;
@@ -353,14 +367,10 @@ struct UploadRequest {
     objects: Vec<ObjectWanted>,
 }
 
-fn new_token() -> [u8; 16] {
+fn new_token() -> Token {
     let mut t = [0u8; 16];
     getrandom::fill(&mut t).expect("operating system randomness");
     t
-}
-
-fn uploads(s: &Service) -> std::sync::MutexGuard<'_, std::collections::HashMap<[u8; 16], Pending>> {
-    s.uploads.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// `POST /v1/uploads`: reserve quota for blobs and objects and say where to put each. A blob already held answers
@@ -408,7 +418,7 @@ async fn begin_uploads(
     }
 
     let now = s.now();
-    let mut reserved: Vec<[u8; 16]> = vec![];
+    let mut reserved: Vec<Token> = vec![];
     let mut out = vec![];
     for (target, size, hash) in wanted {
         let label = match &target {
@@ -423,10 +433,9 @@ async fn begin_uploads(
         }
         if let Err(e) = s.store.reserve(lib, size, s.config.library_quota) {
             // Give back what this request reserved: the client gets nothing to upload.
-            let mut u = uploads(&s);
             for t in &reserved {
-                if let Some(p) = u.remove(t) {
-                    s.store.release(p.lib, p.size);
+                if let Some(p) = s.store.take_upload(t) {
+                    s.store.release(lib, p.size);
                 }
             }
             return Err(e.into());
@@ -442,10 +451,10 @@ async fn begin_uploads(
             }
             None => format!("/u/{}", hex::encode(token)),
         };
-        uploads(&s).insert(
+        let begun = s.store.upload_begun(
             token,
-            Pending {
-                lib,
+            Upload {
+                library: lib.0,
                 target,
                 size,
                 hash,
@@ -453,6 +462,15 @@ async fn begin_uploads(
                 done: false,
             },
         );
+        if let Err(e) = begun {
+            s.store.release(lib, size);
+            for t in &reserved {
+                if let Some(p) = s.store.take_upload(t) {
+                    s.store.release(lib, p.size);
+                }
+            }
+            return Err(e.into());
+        }
         reserved.push(token);
         out.push(merge(
             label,
@@ -471,6 +489,12 @@ fn merge(mut a: Value, b: Value) -> Value {
 
 /// `PUT /u/{token}`: the bytes of an upload, when they go through the service (no bucket). The token is the
 /// permission: it was handed to a signed request, is random, and lasts two hours.
+#[cfg(not(feature = "server"))]
+async fn put_upload() -> Result<Response, ApiError> {
+    Err(ApiError::not_found())
+}
+
+#[cfg(feature = "server")]
 async fn put_upload(
     State(s): Svc,
     Path(token_hex): Path<String>,
@@ -480,18 +504,16 @@ async fn put_upload(
     if s.s3.is_some() {
         return Err(ApiError::not_found());
     }
-    let token: [u8; 16] = parse_hex(&token_hex).map_err(|_| ApiError::not_found())?;
-    let (lib, target, size, hash) = {
-        let u = uploads(&s);
-        let p = u
-            .get(&token)
-            .filter(|p| !p.done && p.expires_ms > s.now())
-            .ok_or_else(ApiError::not_found)?;
-        (p.lib, p.target.clone(), p.size, p.hash)
-    };
+    let token: Token = parse_hex(&token_hex).map_err(|_| ApiError::not_found())?;
+    let p = s
+        .store
+        .upload(&token)
+        .filter(|p| !p.done && p.expires_ms > s.now())
+        .ok_or_else(ApiError::not_found)?;
+    let (lib, size) = (LibraryId(p.library), p.size);
     // A failed upload ends it and gives the quota back; the client asks again.
     let give_up = |e: ApiError| {
-        if uploads(&s).remove(&token).is_some() {
+        if s.store.take_upload(&token).is_some() {
             s.store.release(lib, size);
         }
         e
@@ -501,12 +523,16 @@ async fn put_upload(
             "send the size the upload was asked for",
         )));
     }
-    let tmp = receive(&s, body, size, &hash).await.map_err(give_up)?;
-    let dest = match &target {
+    let tmp = receive(&s, body, size, &p.hash).await.map_err(give_up)?;
+    let dest = match &p.target {
         Target::Blob(cid) => s.store.blob_path(lib, cid),
         Target::Object(name) => s.store.object_path(lib, name),
     };
-    if tokio::fs::rename(&tmp, &dest).await.is_err() {
+    let moved = match dest.parent() {
+        Some(dir) => tokio::fs::create_dir_all(dir).await.is_ok(),
+        None => false,
+    } && tokio::fs::rename(&tmp, &dest).await.is_ok();
+    if !moved {
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err(give_up(ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -514,13 +540,11 @@ async fn put_upload(
             "could not store",
         )));
     }
-    match &target {
+    match &p.target {
         Target::Blob(cid) => s.store.blob_stored(lib, *cid, size),
         Target::Object(name) => s.store.object_stored(lib, name, size, size),
     }
-    if let Some(p) = uploads(&s).get_mut(&token) {
-        p.done = true;
-    }
+    s.store.upload_done(&token);
     Ok(json_response(
         StatusCode::CREATED,
         json!({ "stored": true }),
@@ -564,18 +588,19 @@ async fn commit_one(
     lib: shoebox_core::store::LibraryId,
     token_hex: &str,
 ) -> Result<(), ApiError> {
-    let token: [u8; 16] = parse_hex(token_hex)?;
-    let (target, size, done) = {
-        let u = uploads(s);
-        let p = u.get(&token).filter(|p| p.lib == lib).ok_or_else(|| {
+    let token: Token = parse_hex(token_hex)?;
+    let p = s
+        .store
+        .upload(&token)
+        .filter(|p| p.library == lib.0)
+        .ok_or_else(|| {
             ApiError::new(
                 StatusCode::NOT_FOUND,
                 "unknown-upload",
                 "no such upload, or it ran out",
             )
         })?;
-        (p.target.clone(), p.size, p.done)
-    };
+    let (target, size, done) = (p.target, p.size, p.done);
     let Some(b) = &s.s3 else {
         if !done {
             return Err(ApiError::new(
@@ -584,7 +609,7 @@ async fn commit_one(
                 "the bytes have not arrived",
             ));
         }
-        uploads(s).remove(&token);
+        s.store.take_upload(&token);
         return Ok(());
     };
     let key = match &target {
@@ -600,7 +625,7 @@ async fn commit_one(
         )),
         Some(n) if n != size => {
             let _ = b.delete(&key, s.now()).await;
-            if uploads(s).remove(&token).is_some() {
+            if s.store.take_upload(&token).is_some() {
                 s.store.release(lib, size);
             }
             Err(ApiError::bad(
@@ -609,7 +634,7 @@ async fn commit_one(
         }
         Some(_) => {
             // Only the request that takes the pending upload out records it (two commits of one token count once).
-            if uploads(s).remove(&token).is_some() {
+            if s.store.take_upload(&token).is_some() {
                 match &target {
                     Target::Blob(cid) => s.store.blob_stored(lib, *cid, size),
                     Target::Object(name) => s.store.object_stored(lib, name, size, size),
@@ -668,7 +693,10 @@ async fn delete_bytes(s: &Service, path: std::path::PathBuf, key: String) -> Res
     match &s.s3 {
         Some(b) => b.delete(&key, s.now()).await.map_err(bucket_error),
         None => {
+            #[cfg(feature = "server")]
             let _ = tokio::fs::remove_file(path).await;
+            #[cfg(not(feature = "server"))]
+            let _ = path;
             Ok(())
         }
     }
@@ -1067,6 +1095,81 @@ async fn report(
     ))
 }
 
+// ---- the operator ----
+
+/// `Authorization: Bearer <admin token>`. Without a configured token there is no admin interface at all.
+fn admin(s: &Service, headers: &HeaderMap) -> Result<(), ApiError> {
+    let want = s
+        .config
+        .admin_token
+        .as_deref()
+        .filter(|t| !t.is_empty())
+        .ok_or_else(ApiError::not_found)?;
+    let got = headers
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+    // `blake3::Hash` compares in constant time.
+    if blake3::hash(got.as_bytes()) != blake3::hash(want.as_bytes()) {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "send the admin token",
+        ));
+    }
+    Ok(())
+}
+
+/// `GET /admin/reports`: shares switched off by a report, oldest first.
+async fn admin_reports(State(s): Svc, headers: HeaderMap) -> Result<Response, ApiError> {
+    admin(&s, &headers)?;
+    Ok(json_response(
+        StatusCode::OK,
+        json!({ "reports": s.store.reports().iter().map(|(id, lib, at, why)| json!({
+            "shareId": hex::encode(id),
+            "library": lib.map(|l| hex::encode(l.0)),
+            "atMs": at,
+            "reason": why,
+        })).collect::<Vec<_>>() }),
+    ))
+}
+
+/// `POST /admin/shares/{share}/reinstate`: serve a reported share again.
+async fn admin_reinstate(
+    State(s): Svc,
+    Path(id_hex): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    admin(&s, &headers)?;
+    let id: ShareId = parse_hex(&id_hex)?;
+    if !s.store.reinstate(&id) {
+        return Err(ApiError::not_found());
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// `DELETE /admin/shares/{share}`: delete a share (and its manifest), whoever owns it. Its blobs stay with the
+/// library, which can delete them.
+async fn admin_delete_share(
+    State(s): Svc,
+    Path(id_hex): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    admin(&s, &headers)?;
+    let id: ShareId = parse_hex(&id_hex)?;
+    let lib = s.store.share_owner(&id).ok_or_else(ApiError::not_found)?;
+    if !s.store.delete_share(lib, &id) {
+        return Err(ApiError::not_found());
+    }
+    if let Some(b) = &s.s3 {
+        b.delete(&s3::manifest_key(&id), s.now())
+            .await
+            .map_err(bucket_error)?;
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 async fn preflight() -> Response {
     StatusCode::NO_CONTENT.into_response()
 }
@@ -1089,19 +1192,15 @@ fn content_type(path: &str) -> &'static str {
 }
 
 fn csp(s: &Service) -> String {
-    // With a bucket, reads are redirected there, and `connect-src` applies to where a redirect leads.
-    let connect = std::iter::once("'self'".to_string())
-        .chain(s.s3.as_ref().map(S3::origin))
-        .chain(s.config.csp_connect.iter().cloned())
-        .collect::<Vec<_>>()
-        .join(" ");
-    format!(
-        "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; \
-         media-src blob:; connect-src {connect}; worker-src 'self' blob:; base-uri 'none'; \
-         frame-ancestors 'none'; form-action 'none'"
-    )
+    crate::page_csp(&s.config, s.s3.as_ref().map(S3::origin))
 }
 
+#[cfg(not(feature = "server"))]
+async fn viewer() -> Result<Response, ApiError> {
+    Err(ApiError::not_found())
+}
+
+#[cfg(feature = "server")]
 async fn viewer(State(s): Svc, uri: Uri) -> Result<Response, ApiError> {
     let dir = s
         .config
@@ -1155,12 +1254,16 @@ async fn client_ip(State(s): Svc, req: Request, next: Next) -> Response {
                 .map(|v| v.trim().to_string())
         })
         .flatten();
+    #[cfg(feature = "server")]
+    let connected = || {
+        req.extensions()
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|c| c.0.ip().to_string())
+    };
+    #[cfg(not(feature = "server"))]
+    let connected = || None;
     let ip = forwarded
-        .or_else(|| {
-            req.extensions()
-                .get::<ConnectInfo<SocketAddr>>()
-                .map(|c| c.0.ip().to_string())
-        })
+        .or_else(connected)
         .unwrap_or_else(|| "local".to_string());
     if !s
         .limiter
@@ -1217,9 +1320,17 @@ pub(crate) fn router(service: Arc<Service>) -> Router {
         .route("/v1/shares/{share}", put(put_share).delete(delete_share))
         .route("/v1/usage", get(usage))
         .route("/v1/library/certs", post(post_certs));
+    let operator = Router::new()
+        .route("/admin/reports", get(admin_reports))
+        .route("/admin/shares/{share}/reinstate", post(admin_reinstate))
+        .route(
+            "/admin/shares/{share}",
+            axum::routing::delete(admin_delete_share),
+        );
     Router::new()
         .merge(public)
         .merge(owner)
+        .merge(operator)
         .fallback(get(viewer))
         .layer(middleware::from_fn_with_state(service.clone(), client_ip))
         .layer(middleware::from_fn(hardening))

@@ -1,15 +1,32 @@
 //! Bytes in an S3-compatible bucket. The service keeps its bookkeeping and hands out short-lived presigned URLs:
 //! clients upload straight to the bucket and readers are redirected to it, so no photo's bytes pass through here.
-//! The few requests the service makes itself (a manifest, a size check, a delete) are presigned too.
+//! The few requests the service makes itself (a manifest, a size check, a delete) are presigned too, and sent
+//! through [`Http`]: reqwest on a server, `fetch` in a Cloudflare Worker.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
+use futures::future::BoxFuture;
 use jiff::Timestamp;
-use reqwest::header::CONTENT_LENGTH;
 use rusty_s3::actions::{DeleteObject, GetObject, HeadObject, PutObject};
 use rusty_s3::{Bucket, Credentials, S3Action, UrlStyle};
 use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
+
+/// What the service needs back from the bucket: the status and, for a HEAD, the size.
+pub struct Reply {
+    pub status: u16,
+    pub content_length: Option<u64>,
+}
+
+/// Sends a presigned request. `method` is `HEAD`, `PUT` or `DELETE`; a `PUT` has a body.
+pub trait Http: Send + Sync {
+    fn send(
+        &self,
+        method: &'static str,
+        url: Url,
+        body: Option<Vec<u8>>,
+    ) -> BoxFuture<'_, Result<Reply>>;
+}
 
 /// Where the bucket is and how to sign for it.
 #[derive(Clone, Debug)]
@@ -29,7 +46,7 @@ pub struct S3Config {
 pub struct S3 {
     bucket: Bucket,
     creds: Credentials,
-    http: reqwest::Client,
+    http: Arc<dyn Http>,
 }
 
 /// How long a reader's link to a blob lasts. A revoked or expired share stops handing out new ones at once; one
@@ -39,22 +56,59 @@ pub const READ_TTL: Duration = Duration::from_secs(600);
 pub const WRITE_TTL: Duration = Duration::from_secs(3600);
 const OWN_TTL: Duration = Duration::from_secs(60);
 
-fn client() -> Result<reqwest::Client> {
-    let roots = rustls::RootCertStore {
-        roots: webpki_roots::TLS_SERVER_ROOTS.into(),
-    };
-    let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()?
-    .with_root_certificates(roots)
-    .with_no_client_auth();
-    Ok(reqwest::Client::builder()
-        .tls_backend_preconfigured(tls)
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(120))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?)
+/// reqwest with rustls and the webpki roots, following no redirects.
+#[cfg(feature = "server")]
+pub struct Reqwest(reqwest::Client);
+
+#[cfg(feature = "server")]
+impl Reqwest {
+    pub fn new() -> Result<Self> {
+        let roots = rustls::RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.into(),
+        };
+        let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+        Ok(Self(
+            reqwest::Client::builder()
+                .tls_backend_preconfigured(tls)
+                .connect_timeout(Duration::from_secs(15))
+                .timeout(Duration::from_secs(120))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
+        ))
+    }
+}
+
+#[cfg(feature = "server")]
+impl Http for Reqwest {
+    fn send(
+        &self,
+        method: &'static str,
+        url: Url,
+        body: Option<Vec<u8>>,
+    ) -> BoxFuture<'_, Result<Reply>> {
+        Box::pin(async move {
+            use reqwest::header::CONTENT_LENGTH;
+            let method = reqwest::Method::from_bytes(method.as_bytes())?;
+            let mut req = self.0.request(method, url);
+            if let Some(b) = body {
+                req = req.header(CONTENT_LENGTH, b.len()).body(b);
+            }
+            let res = req.send().await?;
+            Ok(Reply {
+                status: res.status().as_u16(),
+                content_length: res
+                    .headers()
+                    .get(CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse().ok()),
+            })
+        })
+    }
 }
 
 fn at(now_ms: i64) -> Timestamp {
@@ -62,7 +116,7 @@ fn at(now_ms: i64) -> Timestamp {
 }
 
 impl S3 {
-    pub fn new(c: &S3Config) -> Result<Self> {
+    pub fn new(c: &S3Config, http: Arc<dyn Http>) -> Result<Self> {
         let style = if c.path_style {
             UrlStyle::Path
         } else {
@@ -78,7 +132,7 @@ impl S3 {
         Ok(Self {
             bucket,
             creds: Credentials::new(c.access_key.clone(), c.secret_key.clone()),
-            http: client()?,
+            http,
         })
     }
 
@@ -102,39 +156,22 @@ impl S3 {
     pub async fn head(&self, key: &str, now_ms: i64) -> Result<Option<u64>> {
         let url = HeadObject::new(&self.bucket, Some(&self.creds), key)
             .sign_with_time(OWN_TTL, &at(now_ms));
-        let res = self
-            .http
-            .head(url)
-            .send()
-            .await
-            .context("asking the bucket")?;
-        if res.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
+        let res = self.http.send("HEAD", url, None).await?;
+        match res.status {
+            404 => Ok(None),
+            200..=299 => res
+                .content_length
+                .map(Some)
+                .ok_or_else(|| anyhow!("the bucket did not say how large it is")),
+            s => bail!("the bucket answered {s}"),
         }
-        if !res.status().is_success() {
-            bail!("the bucket answered {}", res.status());
-        }
-        res.headers()
-            .get(CONTENT_LENGTH)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse().ok())
-            .map(Some)
-            .context("the bucket did not say how large it is")
     }
 
     pub async fn put(&self, key: &str, bytes: Vec<u8>, now_ms: i64) -> Result<()> {
-        let len = bytes.len() as u64;
-        let url = self.put_url(key, len, now_ms);
-        let res = self
-            .http
-            .put(url)
-            .header(CONTENT_LENGTH, len)
-            .body(bytes)
-            .send()
-            .await
-            .context("writing to the bucket")?;
-        if !res.status().is_success() {
-            bail!("the bucket answered {}", res.status());
+        let url = self.put_url(key, bytes.len() as u64, now_ms);
+        let res = self.http.send("PUT", url, Some(bytes)).await?;
+        if !(200..300).contains(&res.status) {
+            bail!("the bucket answered {}", res.status);
         }
         Ok(())
     }
@@ -143,14 +180,9 @@ impl S3 {
     pub async fn delete(&self, key: &str, now_ms: i64) -> Result<()> {
         let url = DeleteObject::new(&self.bucket, Some(&self.creds), key)
             .sign_with_time(OWN_TTL, &at(now_ms));
-        let res = self
-            .http
-            .delete(url)
-            .send()
-            .await
-            .context("deleting from the bucket")?;
-        if !res.status().is_success() && res.status() != reqwest::StatusCode::NOT_FOUND {
-            bail!("the bucket answered {}", res.status());
+        let res = self.http.send("DELETE", url, None).await?;
+        if !(200..300).contains(&res.status) && res.status != 404 {
+            bail!("the bucket answered {}", res.status);
         }
         Ok(())
     }

@@ -1,5 +1,6 @@
 //! What the service keeps: libraries (their root key and certificates), blobs and objects they uploaded, and
-//! shares. Files on disk are the truth; a map in memory answers questions without touching the disk.
+//! shares. The records ([`crate::meta::Meta`]: a data directory, or a Durable Object's database) are the truth; a
+//! map in memory answers questions without reading them.
 //!
 //! ```text
 //! <data>/libs/<library hex>/lib.postcard      root key + certificates
@@ -9,6 +10,7 @@
 //! <data>/shares/<share id hex>/meta.postcard  who owns it, version, expiry, the cids it lists
 //! <data>/shares/<share id hex>/manifest       the sealed manifest
 //! <data>/reports/<share id hex>               a share taken down by a report
+//! <data>/uploads/<token hex>                  an upload handed out and not yet committed
 //! <data>/tmp/                                 uploads in progress
 //! ```
 //!
@@ -19,14 +21,15 @@
 //!
 //! Nothing here is plaintext: blobs and manifests arrive encrypted and stay that way.
 
+use crate::meta::Meta;
 use serde::{Deserialize, Serialize};
 use shoebox_core::identity::TrustChain;
 use shoebox_core::model::{AdminCert, DeviceCert};
 use shoebox_core::store::{LibraryId, RootPublicKey};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 pub type Cid = [u8; 32];
 pub type ShareId = [u8; 16];
@@ -66,17 +69,43 @@ pub struct Share {
     pub manifest_len: u64,
 }
 
+/// What an upload is for.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Target {
+    Blob(Cid),
+    Object(String),
+}
+
+/// An upload the service handed out a URL for and has reserved quota for, until it is committed or runs out. Kept
+/// as a record too, so a restart (or a Durable Object that was put to sleep) neither loses the reservation nor
+/// leaves bytes in the bucket that nobody deletes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Upload {
+    pub library: [u8; 16],
+    pub target: Target,
+    pub size: u64,
+    /// What the bytes hash to (the blob's id, or the object's declared hash). Checked when they pass through the
+    /// service; a bucket cannot check it, and a reader checks it anyway.
+    pub hash: [u8; 32],
+    pub expires_ms: i64,
+    /// The bytes arrived and were recorded (they went through the service).
+    pub done: bool,
+}
+
+pub type Token = [u8; 16];
+
 #[derive(Default)]
 struct Inner {
     libs: HashMap<[u8; 16], Library>,
     shares: HashMap<ShareId, Share>,
+    uploads: HashMap<Token, Upload>,
 }
 
 pub struct Store {
-    dir: PathBuf,
+    meta: Arc<dyn Meta>,
+    /// Where the bytes are when they are not in a bucket.
+    disk: Option<PathBuf>,
     inner: Mutex<Inner>,
-    /// The bytes are in a bucket: keep `index.log` (and write no manifest files).
-    in_bucket: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -94,10 +123,17 @@ fn lock(m: &Mutex<Inner>) -> std::sync::MutexGuard<'_, Inner> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
+fn lib_key(lib: &[u8; 16], name: &str) -> String {
+    format!("libs/{}/{name}", hex::encode(lib))
+}
+fn share_key(id: &ShareId, name: &str) -> String {
+    format!("shares/{}/{name}", hex::encode(id))
+}
+fn report_key(id: &ShareId) -> String {
+    format!("reports/{}", hex::encode(id))
+}
+fn upload_key(t: &Token) -> String {
+    format!("uploads/{}", hex::encode(t))
 }
 
 fn hex_name<const N: usize>(name: &str) -> Option<[u8; N]> {
@@ -105,66 +141,47 @@ fn hex_name<const N: usize>(name: &str) -> Option<[u8; N]> {
 }
 
 impl Store {
-    /// Open (and create) a data directory, reading every library and share into memory. `in_bucket` when the
-    /// bytes are kept in an S3 bucket.
-    pub fn open(dir: &Path, in_bucket: bool) -> io::Result<Self> {
-        for sub in ["libs", "shares", "tmp"] {
-            std::fs::create_dir_all(dir.join(sub))?;
+    /// Read every library, share and pending upload into memory. `disk` is where the bytes are kept when they
+    /// are not in a bucket (a data directory, the same one the records are in).
+    pub fn open(meta: Arc<dyn Meta>, disk: Option<PathBuf>) -> io::Result<Self> {
+        #[cfg(feature = "server")]
+        if let Some(dir) = &disk {
+            crate::disk::prepare(dir)?;
         }
-        // Uploads that were in flight when the service stopped are not resumable.
-        for e in std::fs::read_dir(dir.join("tmp"))? {
-            let _ = std::fs::remove_file(e?.path());
+        #[cfg(not(feature = "server"))]
+        if disk.is_some() {
+            return Err(io::Error::other("this build keeps bytes in a bucket only"));
         }
         let mut inner = Inner::default();
-        for e in std::fs::read_dir(dir.join("libs"))? {
-            let e = e?;
-            let Some(id) = hex_name::<16>(&e.file_name().to_string_lossy()) else {
+        for name in meta.children("libs")? {
+            let Some(id) = hex_name::<16>(&name) else {
                 continue;
             };
-            let Ok(bytes) = std::fs::read(e.path().join("lib.postcard")) else {
+            let Some(bytes) = meta.get(&lib_key(&id, "lib.postcard"))? else {
                 continue;
             };
-            let Ok(meta) = postcard::from_bytes::<LibMeta>(&bytes) else {
+            let Ok(m) = postcard::from_bytes::<LibMeta>(&bytes) else {
                 continue;
             };
             let mut lib = Library {
-                meta,
+                meta: m,
                 blobs: BTreeMap::new(),
                 objects: BTreeMap::new(),
                 usage: 0,
             };
-            if in_bucket {
-                read_index(&e.path().join("index.log"), &mut lib)?;
-                inner.libs.insert(id, lib);
-                continue;
+            match &disk {
+                #[cfg(feature = "server")]
+                Some(dir) => crate::disk::scan_library(dir, &id, &mut lib.blobs, &mut lib.objects)?,
+                _ => read_index(meta.as_ref(), &lib_key(&id, "index.log"), &mut lib)?,
             }
-            for (sub, is_blob) in [("blobs", true), ("objects", false)] {
-                let Ok(rd) = std::fs::read_dir(e.path().join(sub)) else {
-                    continue;
-                };
-                for f in rd {
-                    let f = f?;
-                    let name = f.file_name().to_string_lossy().into_owned();
-                    let len = f.metadata()?.len();
-                    if is_blob {
-                        if let Some(cid) = hex_name::<32>(&name) {
-                            lib.blobs.insert(cid, len);
-                            lib.usage += len;
-                        }
-                    } else {
-                        lib.objects.insert(name, len);
-                        lib.usage += len;
-                    }
-                }
-            }
+            lib.usage = lib.blobs.values().chain(lib.objects.values()).sum();
             inner.libs.insert(id, lib);
         }
-        for e in std::fs::read_dir(dir.join("shares"))? {
-            let e = e?;
-            let Some(id) = hex_name::<16>(&e.file_name().to_string_lossy()) else {
+        for name in meta.children("shares")? {
+            let Some(id) = hex_name::<16>(&name) else {
                 continue;
             };
-            let Ok(bytes) = std::fs::read(e.path().join("meta.postcard")) else {
+            let Some(bytes) = meta.get(&share_key(&id, "meta.postcard"))? else {
                 continue;
             };
             let Ok(m) = postcard::from_bytes::<ShareMeta>(&bytes) else {
@@ -184,54 +201,66 @@ impl Store {
                 },
             );
         }
+        for name in meta.children("uploads")? {
+            let Some(token) = hex_name::<16>(&name) else {
+                continue;
+            };
+            let Some(u) = meta
+                .get(&upload_key(&token))?
+                .and_then(|b| postcard::from_bytes::<Upload>(&b).ok())
+            else {
+                continue;
+            };
+            // Still reserved until it is committed or runs out (one that went through the service is counted already).
+            if !u.done {
+                if let Some(lib) = inner.libs.get_mut(&u.library) {
+                    lib.usage += u.size;
+                }
+            }
+            inner.uploads.insert(token, u);
+        }
         Ok(Self {
-            dir: dir.to_path_buf(),
+            meta,
+            disk,
             inner: Mutex::new(inner),
-            in_bucket,
         })
     }
 
     pub fn in_bucket(&self) -> bool {
-        self.in_bucket
+        self.disk.is_none()
     }
 
     /// Note a change in what a library's bucket holds. A line lost to a crash leaves a blob the service does not
     /// know about: the client is told it is missing and uploads it again under the same name.
     fn log(&self, lib: LibraryId, line: std::fmt::Arguments<'_>) {
-        if !self.in_bucket {
+        if !self.in_bucket() {
             return;
         }
-        use std::io::Write;
-        let path = self.lib_dir(lib).join("index.log");
-        let written = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .and_then(|mut f| writeln!(f, "{line}"));
-        if let Err(e) = written {
-            tracing::error!(path = %path.display(), "could not note a change in the bucket: {e}");
+        let key = lib_key(&lib.0, "index.log");
+        if let Err(e) = self.meta.append(&key, &line.to_string()) {
+            tracing::error!(key, "could not note a change in the bucket: {e}");
         }
     }
 
+    fn bytes_dir(&self) -> PathBuf {
+        self.disk.clone().unwrap_or_default()
+    }
+    /// A temporary file for an upload going through the service.
     pub fn tmp_path(&self) -> PathBuf {
         let mut r = [0u8; 8];
         getrandom::fill(&mut r).expect("operating system randomness");
-        self.dir.join("tmp").join(hex::encode(r))
-    }
-    fn lib_dir(&self, lib: LibraryId) -> PathBuf {
-        self.dir.join("libs").join(hex::encode(lib.0))
+        self.bytes_dir().join("tmp").join(hex::encode(r))
     }
     pub fn blob_path(&self, lib: LibraryId, cid: &Cid) -> PathBuf {
-        self.lib_dir(lib).join("blobs").join(hex::encode(cid))
+        self.bytes_dir()
+            .join(lib_key(&lib.0, "blobs"))
+            .join(hex::encode(cid))
     }
     pub fn object_path(&self, lib: LibraryId, name: &str) -> PathBuf {
-        self.lib_dir(lib).join("objects").join(name)
+        self.bytes_dir().join(lib_key(&lib.0, "objects")).join(name)
     }
-    fn share_dir(&self, id: &ShareId) -> PathBuf {
-        self.dir.join("shares").join(hex::encode(id))
-    }
-    fn report_path(&self, id: &ShareId) -> PathBuf {
-        self.dir.join("reports").join(hex::encode(id))
+    pub fn manifest_path(&self, id: &ShareId) -> PathBuf {
+        self.bytes_dir().join(share_key(id, "manifest"))
     }
 
     /// Take a share down because someone reported it (W1-10). The ciphertext stays, as does the share's record, so
@@ -241,24 +270,45 @@ impl Store {
         if !lock(&self.inner).shares.contains_key(id) {
             return false;
         }
-        let path = self.report_path(id);
-        if path.exists() {
+        if self.report_of(id).is_some() {
             return true;
         }
-        let _ = std::fs::create_dir_all(self.dir.join("reports"));
-        let _ = write_atomic(&path, format!("{now_ms}\n{reason}").as_bytes());
+        let _ = self
+            .meta
+            .put(&report_key(id), format!("{now_ms}\n{reason}").as_bytes());
         true
     }
 
-    /// When and why a share was reported, if it was. Reinstating is deleting the file in `reports/`.
+    /// When and why a share was reported, if it was. Reinstating is deleting the record ([`Store::reinstate`]).
     pub fn report_of(&self, id: &ShareId) -> Option<(i64, String)> {
-        let text = std::fs::read_to_string(self.report_path(id)).ok()?;
+        let bytes = self.meta.get(&report_key(id)).ok()??;
+        let text = String::from_utf8(bytes).ok()?;
         let (at, reason) = text.split_once('\n')?;
         Some((at.parse().ok()?, reason.to_string()))
     }
 
-    pub fn manifest_path(&self, id: &ShareId) -> PathBuf {
-        self.share_dir(id).join("manifest")
+    /// Every share taken down by a report, for the operator: id, owner, when and why.
+    pub fn reports(&self) -> Vec<(ShareId, Option<LibraryId>, i64, String)> {
+        let mut out = vec![];
+        for name in self.meta.children("reports").unwrap_or_default() {
+            let Some(id) = hex_name::<16>(&name) else {
+                continue;
+            };
+            if let Some((at, why)) = self.report_of(&id) {
+                let lib = lock(&self.inner).shares.get(&id).map(|s| s.library);
+                out.push((id, lib, at, why));
+            }
+        }
+        out.sort_by_key(|r| r.2);
+        out
+    }
+
+    /// Serve a reported share again (the operator looked and found nothing wrong). False if it was not reported.
+    pub fn reinstate(&self, id: &ShareId) -> bool {
+        if self.report_of(id).is_none() {
+            return false;
+        }
+        self.meta.delete(&report_key(id)).is_ok()
     }
 
     // ---- libraries and their certificates ----
@@ -368,11 +418,8 @@ impl Store {
     }
 
     fn save_lib(&self, library: LibraryId, meta: &LibMeta) -> io::Result<()> {
-        let dir = self.lib_dir(library);
-        std::fs::create_dir_all(dir.join("blobs"))?;
-        std::fs::create_dir_all(dir.join("objects"))?;
-        write_atomic(
-            &dir.join("lib.postcard"),
+        self.meta.put(
+            &lib_key(&library.0, "lib.postcard"),
             &postcard::to_stdvec(meta).expect("certificates encode"),
         )
     }
@@ -615,8 +662,6 @@ impl Store {
             Self::check_share_locked(&inner, lib, &id, version, &cids, manifest_len, quota)?;
         let new_len = manifest_len;
         let l = inner.libs.get_mut(&lib.0).expect("checked above");
-        let dir = self.share_dir(&id);
-        std::fs::create_dir_all(&dir).map_err(|_| StoreError::Conflict("could not save"))?;
         let meta = ShareMeta {
             library: lib.0,
             version,
@@ -625,10 +670,10 @@ impl Store {
             manifest_len: new_len,
         };
         manifest
-            .map_or(Ok(()), |m| write_atomic(&dir.join("manifest"), m))
+            .map_or(Ok(()), |m| self.meta.put(&share_key(&id, "manifest"), m))
             .and_then(|_| {
-                write_atomic(
-                    &dir.join("meta.postcard"),
+                self.meta.put(
+                    &share_key(&id, "meta.postcard"),
                     &postcard::to_stdvec(&meta).expect("share meta encodes"),
                 )
             })
@@ -658,8 +703,63 @@ impl Store {
         if let Some(l) = inner.libs.get_mut(&lib.0) {
             l.usage = l.usage.saturating_sub(s.manifest_len);
         }
-        let _ = std::fs::remove_dir_all(self.share_dir(id));
+        let _ = self.meta.delete(&share_key(id, "manifest"));
+        let _ = self.meta.delete(&share_key(id, "meta.postcard"));
+        let _ = self.meta.delete(&report_key(id));
         true
+    }
+
+    /// The library that owns a share, whoever asks (the operator deleting a reported share).
+    pub fn share_owner(&self, id: &ShareId) -> Option<LibraryId> {
+        lock(&self.inner).shares.get(id).map(|s| s.library)
+    }
+
+    // ---- uploads handed out ----
+
+    /// Remember an upload whose quota was reserved with [`Store::reserve`].
+    pub fn upload_begun(&self, token: Token, u: Upload) -> Result<(), StoreError> {
+        self.meta
+            .put(
+                &upload_key(&token),
+                &postcard::to_stdvec(&u).expect("an upload encodes"),
+            )
+            .map_err(|_| StoreError::Conflict("could not save"))?;
+        lock(&self.inner).uploads.insert(token, u);
+        Ok(())
+    }
+
+    pub fn upload(&self, token: &Token) -> Option<Upload> {
+        lock(&self.inner).uploads.get(token).cloned()
+    }
+
+    /// The bytes of an upload arrived through the service and were recorded.
+    pub fn upload_done(&self, token: &Token) {
+        let mut inner = lock(&self.inner);
+        if let Some(u) = inner.uploads.get_mut(token) {
+            u.done = true;
+            let _ = self.meta.put(
+                &upload_key(token),
+                &postcard::to_stdvec(&*u).expect("an upload encodes"),
+            );
+        }
+    }
+
+    /// Take an upload out (committed, or given up). Only one caller gets it, so two commits count once.
+    pub fn take_upload(&self, token: &Token) -> Option<Upload> {
+        let u = lock(&self.inner).uploads.remove(token)?;
+        let _ = self.meta.delete(&upload_key(token));
+        Some(u)
+    }
+
+    /// Take out every upload that ran out by `now_ms` (a janitor run); the caller releases their quota.
+    pub fn take_expired_uploads(&self, now_ms: i64) -> Vec<Upload> {
+        let tokens: Vec<Token> = lock(&self.inner)
+            .uploads
+            .iter()
+            .filter(|(_, u)| u.expires_ms <= now_ms)
+            .map(|(t, _)| *t)
+            .collect();
+        tokens.iter().filter_map(|t| self.take_upload(t)).collect()
     }
 
     /// Delete expired shares (a janitor run), returning which. With a bucket the caller deletes their manifests.
@@ -679,12 +779,11 @@ impl Store {
 }
 
 /// Read a library's `index.log` into it, then write it back with only what is there now.
-fn read_index(path: &Path, lib: &mut Library) -> io::Result<()> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
+fn read_index(meta: &dyn Meta, key: &str, lib: &mut Library) -> io::Result<()> {
+    let Some(bytes) = meta.get(key)? else {
+        return Ok(());
     };
+    let text = String::from_utf8_lossy(&bytes);
     for line in text.lines() {
         let mut parts = line.split(' ');
         match (parts.next(), parts.next(), parts.next()) {
@@ -706,10 +805,9 @@ fn read_index(path: &Path, lib: &mut Library) -> io::Result<()> {
             (Some("-o"), Some(name), None) => {
                 lib.objects.remove(name);
             }
-            _ => tracing::warn!(path = %path.display(), "skipping a line it cannot read: {line}"),
+            _ => tracing::warn!(key, "skipping a line it cannot read: {line}"),
         }
     }
-    lib.usage = lib.blobs.values().chain(lib.objects.values()).sum();
     let mut out = String::new();
     for (cid, n) in &lib.blobs {
         out.push_str(&format!("+b {} {n}\n", hex::encode(cid)));
@@ -717,5 +815,5 @@ fn read_index(path: &Path, lib: &mut Library) -> io::Result<()> {
     for (name, n) in &lib.objects {
         out.push_str(&format!("+o {name} {n}\n"));
     }
-    write_atomic(path, out.as_bytes())
+    meta.put(key, out.as_bytes())
 }

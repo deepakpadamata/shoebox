@@ -1,0 +1,9 @@
+# Shoebox Cloud behind Caddy (compose.yaml). Caddy gets and renews the certificate for SHOEBOX_DOMAIN.
+{$SHOEBOX_DOMAIN} {
+	# The page, its scripts and its WebAssembly compress well; photos are ciphertext and do not.
+	@text header_regexp Content-Type ^(text/|application/(javascript|json|wasm))
+	encode @text zstd gzip
+
+	# Caddy sets X-Forwarded-For to the caller's address, ignoring what the caller sent.
+	reverse_proxy cloud:8080
+}

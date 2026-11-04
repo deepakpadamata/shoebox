@@ -26,7 +26,10 @@ use common::FakeS3;
 struct World {
     _cluster: Cluster,
     node: LibraryNode<Library>,
-    svc: Arc<Service>,
+    /// The service in this process; `None` when the test runs against one deployed elsewhere.
+    svc: Option<Arc<Service>>,
+    /// The service's address, as the library knows it.
+    base: String,
     cloud_dir: tempfile::TempDir,
     work: tempfile::TempDir,
     album: AlbumId,
@@ -62,6 +65,8 @@ enum Bytes {
     FakeBucket,
     /// A real S3-compatible bucket (see [`real_bucket`]).
     Bucket(shoebox_cloud::s3::S3Config),
+    /// No service here: one already running at this address (a Cloudflare Worker, a container).
+    Deployed(String),
 }
 
 /// A real bucket named by `SHOEBOX_TEST_S3_ENDPOINT`, `_BUCKET`, `_REGION` (default `us-east-1`),
@@ -107,8 +112,8 @@ async fn real_bucket() -> Option<shoebox_cloud::s3::S3Config> {
 
 async fn world_with(photos_in_album: usize, role: Role, bytes: Bytes) -> World {
     let cluster = Cluster::with_roles(&[role, role]).await.unwrap();
-    if matches!(bytes, Bytes::Bucket(_)) {
-        // A real bucket checks presigned times against real time.
+    if matches!(bytes, Bytes::Bucket(_) | Bytes::Deployed(_)) {
+        // A real bucket checks presigned times against real time, and so does a service elsewhere.
         let now = shoebox_cloud::system_clock()() as u64;
         cluster.clock().advance(now - cluster.clock().now_ms());
     }
@@ -164,8 +169,22 @@ async fn world_with(photos_in_album: usize, role: Role, bytes: Bytes) -> World {
         .await
         .unwrap();
 
-    // The service, on a real socket, with the library's clock so signed times agree.
     let cloud_dir = tempfile::tempdir().unwrap();
+    if let Bytes::Deployed(base) = bytes {
+        node.set_cloud_url(&base).await.unwrap();
+        return World {
+            _cluster: cluster,
+            node,
+            svc: None,
+            base,
+            cloud_dir,
+            work,
+            album,
+            photos,
+            bucket: None,
+        };
+    }
+    // The service, on a real socket, with the library's clock so signed times agree.
     let mut config = Config::new(cloud_dir.path().to_path_buf());
     let clock = cluster.clock().clone();
     config.clock = Arc::new(move || clock.now_ms() as i64);
@@ -181,6 +200,7 @@ async fn world_with(photos_in_album: usize, role: Role, bytes: Bytes) -> World {
             config.s3 = Some(c);
             None
         }
+        Bytes::Deployed(_) => unreachable!(),
     };
     // For the by-hand run below: serve the built viewer page and listen on a known port.
     config.viewer_dir = std::env::var("SHOEBOX_DEMO_VIEWER").ok().map(Into::into);
@@ -194,12 +214,14 @@ async fn world_with(photos_in_album: usize, role: Role, bytes: Bytes) -> World {
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    node.set_cloud_url(&format!("http://{addr}")).await.unwrap();
+    let base = format!("http://{addr}");
+    node.set_cloud_url(&base).await.unwrap();
 
     World {
         _cluster: cluster,
         node,
-        svc,
+        svc: Some(svc),
+        base,
         cloud_dir,
         work,
         album,
@@ -209,7 +231,16 @@ async fn world_with(photos_in_album: usize, role: Role, bytes: Bytes) -> World {
 }
 
 /// A GET as the viewer makes it, following a redirect to the bucket.
-async fn get(svc: &Arc<Service>, path: &str) -> (StatusCode, Vec<u8>) {
+async fn get(w: &World, path: &str) -> (StatusCode, Vec<u8>) {
+    let Some(svc) = &w.svc else {
+        let res = common::http()
+            .get(format!("{}{path}", w.base))
+            .send()
+            .await
+            .unwrap();
+        let status = StatusCode::from_u16(res.status().as_u16()).unwrap();
+        return (status, res.bytes().await.unwrap().to_vec());
+    };
     let res = router(svc.clone())
         .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
         .await
@@ -232,14 +263,14 @@ async fn open_share(w: &World, link: &str) -> (share::Header, share::Manifest) {
     let fragment = link.split_once('#').unwrap().1;
     let l = ShareLink::parse(fragment).expect("a link that parses");
     let id = hex::encode(l.share_id().unwrap());
-    let (s, sealed) = get(&w.svc, &format!("/s/{id}/m")).await;
+    let (s, sealed) = get(w, &format!("/s/{id}/m")).await;
     assert_eq!(s, StatusCode::OK);
     share::open(&sealed, &l.key, &l.key.signer().public_bytes()).expect("the link's key opens it")
 }
 
 async fn blob(w: &World, share_id: &[u8; 16], b: &share::CloudBlob) -> Vec<u8> {
     let (s, bytes) = get(
-        &w.svc,
+        w,
         &format!("/s/{}/b/{}", hex::encode(share_id), hex::encode(b.cid.0)),
     )
     .await;
@@ -433,7 +464,7 @@ async fn a_revoked_link_stops_at_once_and_a_rotated_one_replaces_it() {
         .await
         .unwrap();
     let id = hex::encode(share.share_id);
-    assert_eq!(get(&w.svc, &format!("/s/{id}/m")).await.0, StatusCode::OK);
+    assert_eq!(get(&w, &format!("/s/{id}/m")).await.0, StatusCode::OK);
 
     let new = w
         .node
@@ -443,7 +474,7 @@ async fn a_revoked_link_stops_at_once_and_a_rotated_one_replaces_it() {
     assert_ne!(new.share_id, share.share_id);
     assert_ne!(new.key, share.key);
     assert_eq!(
-        get(&w.svc, &format!("/s/{id}/m")).await.0,
+        get(&w, &format!("/s/{id}/m")).await.0,
         StatusCode::NOT_FOUND
     );
     let link = w.node.web_share_link(&new).await.unwrap();
@@ -455,7 +486,7 @@ async fn a_revoked_link_stops_at_once_and_a_rotated_one_replaces_it() {
         .await
         .unwrap();
     assert_eq!(
-        get(&w.svc, &format!("/s/{}/m", hex::encode(new.share_id)))
+        get(&w, &format!("/s/{}/m", hex::encode(new.share_id)))
             .await
             .0,
         StatusCode::NOT_FOUND
@@ -475,14 +506,14 @@ async fn blobs_already_uploaded_are_not_uploaded_again_and_certificates_reach_th
         .create_web_share(&w.album, WebShareOptions::default())
         .await
         .unwrap();
-    let used = w.svc.store.usage(w.node.person_id());
+    let used = w.svc.as_ref().unwrap().store.usage(w.node.person_id());
     assert!(used > 0);
     // A second link to the same album seals the same blobs to the same bytes: only the manifest is new.
     w.node
         .create_web_share(&w.album, WebShareOptions::default())
         .await
         .unwrap();
-    let after = w.svc.store.usage(w.node.person_id());
+    let after = w.svc.as_ref().unwrap().store.usage(w.node.person_id());
     assert!(
         after - used < 4096,
         "the second share added {} bytes",
@@ -579,7 +610,7 @@ async fn a_live_link_is_served_by_the_device_and_stops_when_revoked() {
     );
     // The service holds nothing for it.
     assert_eq!(
-        get(&w.svc, &format!("/s/{}/m", hex::encode(share.share_id)))
+        get(&w, &format!("/s/{}/m", hex::encode(share.share_id)))
             .await
             .0,
         StatusCode::NOT_FOUND
@@ -1030,7 +1061,7 @@ async fn from_a_bucket_an_album_opens_from_the_link_alone_and_stops_when_revoked
         .unwrap();
     assert!(bucket.get(&format!("shares/{id}/manifest")).is_none());
     assert_eq!(
-        get(&w.svc, &format!("/s/{id}/m")).await.0,
+        get(&w, &format!("/s/{id}/m")).await.0,
         StatusCode::NOT_FOUND
     );
     assert!(bucket.refused().is_empty(), "{:?}", bucket.refused());
@@ -1093,7 +1124,24 @@ async fn with_a_real_bucket_a_link_opens_and_the_library_restores() {
     let Some(config) = real_bucket().await else {
         panic!("set SHOEBOX_TEST_S3_ENDPOINT, _ACCESS_KEY_ID and _SECRET_ACCESS_KEY");
     };
-    let w = world_with(4, Role::Keeper, Bytes::Bucket(config)).await;
+    a_link_opens_and_the_library_restores(world_with(4, Role::Keeper, Bytes::Bucket(config)).await)
+        .await;
+}
+
+/// Against a service already running (`SHOEBOX_TEST_CLOUD_URL`): `wrangler dev`, a deployed Worker, a container.
+/// With `SHOEBOX_TEST_ADMIN_TOKEN` it also reports the link and has the operator reinstate it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a running service"]
+async fn with_a_deployed_service_a_link_opens_and_the_library_restores() {
+    let Ok(base) = std::env::var("SHOEBOX_TEST_CLOUD_URL") else {
+        panic!("set SHOEBOX_TEST_CLOUD_URL to the service's address");
+    };
+    let base = base.trim_end_matches('/').to_string();
+    a_link_opens_and_the_library_restores(world_with(4, Role::Keeper, Bytes::Deployed(base)).await)
+        .await;
+}
+
+async fn a_link_opens_and_the_library_restores(w: World) {
     let share = w
         .node
         .create_web_share(
@@ -1139,12 +1187,68 @@ async fn with_a_real_bucket_a_link_opens_and_the_library_restores() {
     assert_eq!(blobs.get(&p.original.hash).await.unwrap(), original);
 
     let id = hex::encode(share.share_id);
+    // A range of a blob, as a video player asks for one.
+    let first = &manifest.items[0].thumb;
+    let res = common::http()
+        .get(format!("{}/s/{id}/b/{}", w.base, hex::encode(first.cid.0)))
+        .header("range", "bytes=0-9")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 206);
+    assert_eq!(res.bytes().await.unwrap().len(), 10);
+
+    if let Ok(token) = std::env::var("SHOEBOX_TEST_ADMIN_TOKEN") {
+        let http = common::http();
+        let res = http
+            .post(format!("{}/report/{id}", w.base))
+            .body("a test report")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status().as_u16(), 202);
+        assert_eq!(get(&w, &format!("/s/{id}/m")).await.0, StatusCode::GONE);
+        let reports: serde_json::Value = serde_json::from_str(
+            &http
+                .get(format!("{}/admin/reports", w.base))
+                .bearer_auth(&token)
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            reports["reports"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["shareId"] == id.as_str() && r["reason"] == "a test report"),
+            "{reports}"
+        );
+        let res = http
+            .post(format!("{}/admin/shares/{id}/reinstate", w.base))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status().as_u16(), 204);
+        assert_eq!(get(&w, &format!("/s/{id}/m")).await.0, StatusCode::OK);
+    }
+
+    // To look at the album in a browser: the link is printed and left working.
+    if std::env::var("SHOEBOX_TEST_KEEP_LINK").is_ok() {
+        println!("the link: {link}");
+        return;
+    }
     w.node
         .revoke_web_share(&w.album, &share.share_id)
         .await
         .unwrap();
     assert_eq!(
-        get(&w.svc, &format!("/s/{id}/m")).await.0,
+        get(&w, &format!("/s/{id}/m")).await.0,
         StatusCode::NOT_FOUND
     );
 }

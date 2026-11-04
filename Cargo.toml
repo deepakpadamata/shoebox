@@ -15,6 +15,7 @@ members = [
     "crates/shoebox-testkit",
     "apps/keeper",
     "apps/cloud",
+    "apps/cloud-worker",
     "apps/desktop-mobile/src-tauri",
     "tools/store-bench",
     "tools/shoebox-dev",
@@ -85,6 +86,11 @@ opt-level = 2
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# Stripping symbols also drops the WebAssembly target-features section, and wasm-bindgen then cannot tell the
+# Worker uses reference types (worker-build's catch wrappers need them). wasm-opt shrinks it afterwards anyway.
+[profile.release.package.shoebox-cloud-worker]
+strip = "none"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

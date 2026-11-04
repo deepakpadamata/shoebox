@@ -78,12 +78,25 @@ again; nothing is lost that a device still has). The bucket does not check BLAKE
 caught by whoever reads it (the viewer and `cloud_restore` both check the ciphertext against its id) and spoils only the
 uploader's own share. One service instance per data directory.
 
+## The operator
+
+With `--admin-token` (`SHOEBOX_ADMIN_TOKEN`), `GET /admin/reports` lists reported shares (share id, library, when, the
+reporter's words), `POST /admin/shares/{id}/reinstate` serves one again and `DELETE /admin/shares/{id}` deletes it and
+its manifest; each takes `Authorization: Bearer <token>` (compared in constant time). Without a token there is no
+`/admin`. How to deploy, on Cloudflare or a server of your own: [cloud-deploy.md](cloud-deploy.md).
+
 ## Where things are
 
 ```text
-<data>/libs/<library>/{lib.postcard, blobs/<cid>, objects/<name>}
+<data>/libs/<library>/{lib.postcard, index.log (with a bucket), blobs/<cid>, objects/<name>}
 <data>/shares/<share_id>/{meta.postcard, manifest}
+<data>/reports/<share_id>
+<data>/uploads/<token>        an upload reserved and not yet committed or expired
 ```
+
+The records go through a small key-value interface (`meta::Meta`): files in the data folder on a server, the Durable
+Object's SQLite database on Cloudflare (`apps/cloud-worker`, A-120). An upload in progress is a record too, so a
+restart keeps its quota reserved and the janitor still deletes its bytes if it is never committed.
 
 Everything is read into memory at start. That is fine into the low millions of blobs. With a bucket the machine needs
 only a small disk for the bookkeeping. The service writes no access log; a deployment's proxy must not
@@ -91,4 +104,4 @@ log paths either (a share id in a log is not a key, but it is a link's address).
 
 ## Not done here
 
-Billing and per-library quotas (W1-10), the sharer's client (W1-05), the viewer (W1-06).
+Billing (W1-10), the sharer's client (W1-05), the viewer (W1-06).

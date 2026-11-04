@@ -1,0 +1,13 @@
+# The context for deploy/selfhost/Dockerfile: sources only.
+target
+**/node_modules
+**/.wrangler
+**/build
+**/dist
+.git
+apps/cloud-worker/.dev.vars
+models
+fixtures-out
+design
+site
+planning

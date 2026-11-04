@@ -1,0 +1,36 @@
+# Shoebox Cloud as a systemd service, without Docker (docs/notes/cloud-deploy.md).
+#   install -m 755 shoebox-cloud /usr/local/bin/          # from `cargo build --release -p shoebox-cloud`
+#   mkdir -p /usr/local/share/shoebox && cp -r apps/web-viewer/dist /usr/local/share/shoebox/viewer
+#   cp deploy/selfhost/shoebox-cloud.service /etc/systemd/system/ && mkdir -p /etc/shoebox
+#   cp deploy/selfhost/.env.example /etc/shoebox/cloud.env    # edit it
+#   systemctl enable --now shoebox-cloud
+# Put a TLS proxy in front (Caddy: `reverse_proxy 127.0.0.1:8080`) and keep SHOEBOX_TRUST_PROXY=true.
+[Unit]
+Description=Shoebox Cloud
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/shoebox/cloud.env
+Environment=SHOEBOX_CLOUD_DATA=/var/lib/shoebox-cloud
+Environment=SHOEBOX_CLOUD_LISTEN=127.0.0.1:8080
+Environment=SHOEBOX_CLOUD_VIEWER=/usr/local/share/shoebox/viewer
+Environment=SHOEBOX_TRUST_PROXY=true
+ExecStart=/usr/local/bin/shoebox-cloud
+Restart=on-failure
+DynamicUser=yes
+StateDirectory=shoebox-cloud
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -15,12 +15,29 @@ path = "src/lib.rs"
 [[bin]]
 name = "shoebox-cloud"
 path = "src/main.rs"
+required-features = ["server"]
+
+[features]
+default = ["server"]
+# The `shoebox-cloud` program: records and bytes in a data directory, reqwest for the bucket, a TCP listener.
+# Without it the crate builds for WebAssembly, for the Cloudflare Worker (`apps/cloud-worker`).
+server = [
+    "axum/http1",
+    "axum/tokio",
+    "dep:tokio",
+    "dep:tokio-util",
+    "dep:tracing-subscriber",
+    "dep:clap",
+    "dep:reqwest",
+    "dep:rustls",
+    "dep:webpki-roots",
+]
 
 [dependencies]
 shoebox-core.workspace = true
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query"] }
-tokio = { workspace = true, features = ["net", "fs", "io-util", "signal"] }
-tokio-util = { version = "0.7", features = ["io"] }
+axum = { version = "0.8", default-features = false, features = ["query"] }
+tokio = { workspace = true, features = ["net", "fs", "io-util", "signal"], optional = true }
+tokio-util = { version = "0.7", features = ["io"], optional = true }
 futures.workspace = true
 bytes.workspace = true
 blake3.workspace = true
@@ -30,16 +47,16 @@ serde.workspace = true
 serde_json = "1"
 anyhow.workspace = true
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-clap = { version = "4", features = ["derive", "env"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+clap = { version = "4", features = ["derive", "env"], optional = true }
 getrandom = "0.3"
 # Bytes may live in an S3-compatible bucket: requests are presigned here (sans-IO) and sent with reqwest.
 rusty-s3 = { version = "0.11", default-features = false, features = ["rustcrypto"] }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 url = "2"
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-webpki-roots = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+webpki-roots = { version = "1", optional = true }
 
 [dev-dependencies]
 shoebox-node.workspace = true

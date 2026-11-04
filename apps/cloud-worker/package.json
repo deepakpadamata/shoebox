@@ -1,0 +1,12 @@
+{
+  "name": "shoebox-cloud-worker",
+  "private": true,
+  "description": "Deploys Shoebox Cloud to Cloudflare (docs/notes/cloud-deploy.md).",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.3"
+  }
+}

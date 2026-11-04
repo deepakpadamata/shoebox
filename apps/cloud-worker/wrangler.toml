@@ -1,0 +1,43 @@
+# Shoebox Cloud on Cloudflare: see docs/notes/cloud-deploy.md. `npm run deploy` builds and uploads it.
+name = "shoebox-cloud"
+main = "build/index.js"
+compatibility_date = "2026-10-15"
+
+[build]
+# The viewer page (apps/web-viewer/dist) and the Worker's WebAssembly.
+command = "../../scripts/build-cloud-worker.sh"
+
+# The viewer page. The Worker runs first for every path, so the page gets its security headers.
+[assets]
+directory = "../web-viewer/dist"
+binding = "ASSETS"
+run_worker_first = true
+html_handling = "none"
+not_found_handling = "none"
+
+# The service: one Durable Object with its own SQLite database for the books.
+[durable_objects]
+bindings = [{ name = "CLOUD", class_name = "Cloud" }]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Cloud"]
+
+# Where the bytes go. R2 through its S3 API: the endpoint is https://<account id>.r2.cloudflarestorage.com.
+# The keys are secrets: `npx wrangler secret put S3_ACCESS_KEY_ID`, `... S3_SECRET_ACCESS_KEY`, and optionally
+# `... ADMIN_TOKEN` for /admin (reported shares). For `wrangler dev` put them in .dev.vars instead.
+[vars]
+S3_ENDPOINT = ""
+S3_BUCKET = "shoebox"
+S3_REGION = "auto"
+# Storage per library and bytes a link may serve a day, in GiB.
+QUOTA_GIB = "2"
+SHARE_DAILY_GIB = "1"
+# "true" refuses libraries that have not registered.
+CLOSED = "false"
+# Hosts the viewer page may connect to, space-separated: relays, for Live links (write each with and without a
+# trailing dot, as iroh asks for `relay.example.org.`).
+CSP_CONNECT = ""
+
+# Serve it on your own domain (otherwise it is at https://shoebox-cloud.<your subdomain>.workers.dev):
+# routes = [{ pattern = "view.example.org", custom_domain = true }]

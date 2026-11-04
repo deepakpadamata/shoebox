@@ -1,0 +1,44 @@
+# Shoebox Cloud on your own server: the service behind Caddy, which gets the HTTPS certificate.
+#   cp .env.example .env    # set SHOEBOX_DOMAIN, and the rest if you want
+#   docker compose up -d --build
+# The domain's DNS must point at this machine, with ports 80 and 443 open. See docs/notes/cloud-deploy.md.
+name: shoebox-cloud
+
+services:
+  cloud:
+    build:
+      context: ../..
+      dockerfile: deploy/selfhost/Dockerfile
+    image: shoebox-cloud
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Caddy is in front and sets X-Forwarded-For to the caller's address.
+      SHOEBOX_TRUST_PROXY: "true"
+    volumes:
+      - cloud-data:/data
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - cloud
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SHOEBOX_DOMAIN: ${SHOEBOX_DOMAIN:?set SHOEBOX_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  # Back this up: without a bucket it holds every byte the libraries uploaded, with one only the bookkeeping
+  # (which libraries, shares and reports there are); losing it loses the service's record of both.
+  cloud-data:
+  caddy-data:
+  caddy-config:

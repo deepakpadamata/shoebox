@@ -1,7 +1,7 @@
 //! The Android camera roll as a [`PhotoSource`]: a thin client of the Kotlin `PhotoLibraryPlugin`
 //! (MediaStore, permissions, battery and network state).
 
-use crate::photos_source::{Asset, Conditions, Permission, PhotoSource, Picked, Scan};
+use crate::photos_source::{Asset, Conditions, Permission, PhotoSource, Picked, Scan, VideoSource};
 use anyhow::{anyhow, Result};
 use futures::future::BoxFuture;
 use serde::Deserialize;
@@ -178,6 +178,27 @@ impl PhotoSource for AndroidPhotoSource {
         };
         Box::pin(async move {
             let r: FrameReply = self.call("videoFrame", json!({ "path": path })).await?;
+            crate::photos_source::decode_frame(&r.jpeg)
+        })
+    }
+    fn plays_video(&self) -> bool {
+        true
+    }
+    fn play_video(&self, video: &VideoSource) -> BoxFuture<'_, Result<()>> {
+        let video = video.clone();
+        Box::pin(async move {
+            let _: serde_json::Value = self
+                .call("playVideo", serde_json::to_value(&video)?)
+                .await?;
+            Ok(())
+        })
+    }
+    fn video_frame_of(&self, video: &VideoSource) -> BoxFuture<'_, Result<Option<Vec<u8>>>> {
+        let video = video.clone();
+        Box::pin(async move {
+            let r: FrameReply = self
+                .call("videoFrame", serde_json::to_value(&video)?)
+                .await?;
             crate::photos_source::decode_frame(&r.jpeg)
         })
     }

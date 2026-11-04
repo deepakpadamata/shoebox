@@ -117,7 +117,9 @@ pub const COMMANDS: &[&str] = &[
     "shared_fetch",
     "shared_remove_member",
     "profile",
-    "media_base",
+    "native_video",
+    "play_video",
+    "make_poster",
     "set_profile_name",
     "album_share_check",
     "album_share",
@@ -392,7 +394,19 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             .await?),
         "shared_join" => out(core.shared_join(&arg::<String>(&args, "text")?).await?),
         "profile" => out(core.profile().await?),
-        "media_base" => out(core.media_base()),
+        "native_video" => out(core.native_video()),
+        "play_video" => {
+            core.play_video(
+                &arg::<String>(&args, "id")?,
+                opt::<String>(&args, "kind")?
+                    .as_deref()
+                    .unwrap_or("original"),
+                opt::<String>(&args, "album")?.as_deref(),
+            )
+            .await?;
+            Ok(json!({}))
+        }
+        "make_poster" => out(core.make_poster(&arg::<String>(&args, "id")?).await?),
         "set_profile_name" => {
             core.set_profile_name(&arg::<String>(&args, "name")?)
                 .await?;

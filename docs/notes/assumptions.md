@@ -509,6 +509,16 @@ Behaviour that will come back as features or needs a decision.
     `media-src` only; the release network security config allows plain HTTP to 127.0.0.1 only (debug: anywhere, for
     `tauri android dev`). Photos still use `shoebox://`; desktop is unchanged.
     A stopgap: R1-16 replaces it with Android's own player and `content://` URIs for media already on the phone.
+    **Replaced (R1-16, 2026-11-05):** the server, the `media_base` command, the 127.0.0.1 CSP entry and the network
+    security config are gone; the app opens no port. Videos play in a Media3 player over the app (`PlayerActivity`):
+    a gallery video from its file where it is, any other from the blob store through `BlobDataSource`, which reads
+    1 MB pieces from the running app core over JNI (`NativeBridge.readBlob`, `video.rs`), checked against the hash.
+    Posters of videos this phone holds come from the system's frame grabber the same way (`make_poster`), not from
+    the WebView. A Live Photo's short clip is read whole into a `blob:` URL and still plays inline. Gallery *photos*
+    still load over `shoebox://`: they are small and unranged, which the WebView handles; whether it can load their
+    `content://` URIs directly was not checked. Checked on an emulator (Android 16): a 90 s gallery video and a 60 s
+    store-only one start at once, seek, close with Back, get native posters, and no app socket listens. **Not checked
+    on the S25:** the 140 MB HEVC video, and a video fetched from the keeper and then played.
   - *Open-ended ranges got the whole file.* `bytes=N-` (what a media element sends) now gets at most 4 MB.
   - *Range reads were slow.* `BlobStore::open_range` read through iroh-blobs' seek-and-read reader: 1.4 s per 4 MB on
     the phone; one `export_ranges` request takes 70 ms (60 MB/s), well above a phone video's bitrate.

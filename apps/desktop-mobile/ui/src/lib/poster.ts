@@ -3,7 +3,7 @@
 // needs), grab a frame, hand it to the app core as a small JPEG, which keeps it in the library for
 // every device (phones usually make theirs natively during backup). A couple at a time, newest
 // request first, and only for tiles still on screen, so scrolling never leaves a backlog.
-import { api, videoUrl } from './api';
+import { api, playsNatively, videoUrl } from './api';
 
 const MAX_SIDE = 480;
 const WORKERS = 2;
@@ -19,11 +19,12 @@ function once<T>(target: EventTarget, ok: string, timeoutMs: number): Promise<T 
 }
 
 async function grab(id: string): Promise<boolean> {
+  // Android's thumbnailer reads the original where it is (the web view cannot load a long video).
+  if (playsNatively()) return api.makePoster(id).catch(() => false);
   const video = document.createElement('video');
   video.muted = true;
   video.preload = 'auto';
   video.crossOrigin = 'anonymous';
-  // The same source the viewer plays from (on Android, `shoebox://` cannot serve a long video).
   video.src = videoUrl(id);
   try {
     await once(video, 'loadeddata', 10_000);

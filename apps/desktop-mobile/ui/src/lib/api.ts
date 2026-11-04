@@ -93,25 +93,35 @@ export function blobUrl(id: string, kind: BlobKind, album?: string): string {
   return `/blob/${id}?kind=${kind}`;
 }
 
-// Android's WebView cannot play a long video from `shoebox://` (it re-applies byte ranges), so
-// the app serves video originals over loopback HTTP there; `null` elsewhere.
-let mediaBase: string | null = null;
+// Android's WebView cannot play a long video from `shoebox://` (it re-applies byte ranges): there
+// videos play in the system's own player (`api.playVideo`, R1-16), and posters come from the
+// system's thumbnailer (`api.makePoster`).
+let nativeVideo = false;
 
-export async function loadMediaBase() {
-  if (inTauri) mediaBase = await call<string | null>('media_base').catch(() => null);
+export async function loadNativeVideo() {
+  if (inTauri) nativeVideo = await call<boolean>('native_video').catch(() => false);
 }
 
-/** Where a `<video>` loads a video's original from. */
+/** Videos play in the platform's player, not in a `<video>`. */
+export function playsNatively(): boolean {
+  return nativeVideo;
+}
+
+/** Where a `<video>` loads a video's original from (where videos play in the web view). */
 export function videoUrl(id: string, album?: string): string {
-  if (!mediaBase) return blobUrl(id, 'original', album);
-  const kind = album ? `album:${album}:original` : 'original';
-  return `${mediaBase}/blob/${id}?kind=${kind}`;
+  return blobUrl(id, 'original', album);
 }
 
-/** Where a `<video>` loads the video of a Live Photo or motion photo from. */
-export function motionUrl(id: string): string {
-  if (!mediaBase) return blobUrl(id, 'motion');
-  return `${mediaBase}/blob/${id}?kind=motion`;
+/**
+ * Where a `<video>` loads the video of a Live Photo or motion photo from. Where the web view
+ * cannot play from `shoebox://`, the short clip is read whole into memory first; revoke a
+ * `blob:` URL when done.
+ */
+export async function motionSrc(id: string): Promise<string> {
+  if (!nativeVideo) return blobUrl(id, 'motion');
+  const res = await fetch(blobUrl(id, 'motion'));
+  if (!res.ok) throw new AppError('This device cannot play the video of this Live Photo');
+  return URL.createObjectURL(await res.blob());
 }
 
 /** Subscribe to app events; returns the unsubscribe function. */
@@ -213,6 +223,10 @@ export const api = {
   renameDevice: (name: string) => call<{}>('rename_device', { name }),
   renameAlbum: (album: string, name: string) => call<{}>('rename_album', { album, name }),
   setPoster: (id: string, data: string) => call<{}>('set_poster', { id, data }),
+  /** Make a video's poster frame with the platform's thumbnailer; `false` where it cannot. */
+  makePoster: (id: string) => call<boolean>('make_poster', { id }),
+  /** Play a video that is on this device in the platform's player (where `playsNatively()`). */
+  playVideo: (id: string, album?: string) => call<{}>('play_video', { id, album }),
   backupStatus: () => call<BackupStatus>('backup_status'),
   backupConfigure: (policy: BackupPolicy) => call<BackupStatus>('backup_configure', { policy }),
   backupRun: () => call<BackupReport>('backup_run'),

@@ -13,13 +13,13 @@ mod export;
 #[cfg(target_os = "macos")]
 mod heic_macos;
 pub mod keystore;
-pub mod media;
 pub mod notify;
 mod people;
 pub mod photos_source;
 mod search_models;
 mod shared;
 pub mod types;
+mod video;
 mod web_links;
 
 #[cfg(feature = "http")]

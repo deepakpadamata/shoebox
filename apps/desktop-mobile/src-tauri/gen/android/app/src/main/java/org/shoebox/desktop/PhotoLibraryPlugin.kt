@@ -132,9 +132,30 @@ class PhotoLibraryPlugin(private val activity: Activity) : Plugin(activity) {
         JSObject()
     }
 
+    /** A poster frame: of a gallery file (`path`), or of a video in the blob store (`blob`, `size`). */
     @Command
-    fun videoFrame(invoke: Invoke) = guarded(invoke, "cannot make a poster frame") {
-        JSObject().put("jpeg", backend.videoFrame(invoke.getArgs().getString("path") ?: throw IllegalArgumentException("missing path")))
+    fun videoFrame(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val path = if (args.isNull("path")) null else args.getString("path")
+        // Decoding a frame takes a while, and a blob is read through the app core: off the main thread.
+        Thread {
+            try {
+                val jpeg = if (path != null) backend.videoFrame(path) else backend.videoFrameOfBlob(args.getString("blob"), args.getLong("size"))
+                invoke.resolve(JSObject().put("jpeg", jpeg))
+            } catch (e: Exception) {
+                invoke.reject("cannot make a poster frame: ${e.message}")
+            }
+        }.start()
+    }
+
+    /** Play a video in Android's player over the app (R1-16, `video.rs`). */
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    @Command
+    fun playVideo(invoke: Invoke) = guarded(invoke, "cannot play the video") {
+        val args = invoke.getArgs()
+        val path = if (args.isNull("path")) null else args.getString("path")
+        activity.startActivity(PlayerActivity.intent(activity, path, args.getString("blob"), args.getLong("size")))
+        JSObject()
     }
 
     @Command

@@ -214,7 +214,6 @@ pub struct AppCore {
     /// personal albums (A-097): stopped when the library closes.
     followers: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     /// Where the UI loads video originals over HTTP (`media.rs`); `None`: through `shoebox://`.
-    media_base: Mutex<Option<String>>,
     file: Mutex<AppFile>,
     events: broadcast::Sender<AppEvent>,
     pending_pairing: PendingAnswer,
@@ -303,7 +302,6 @@ impl AppCore {
             library: tokio::sync::RwLock::new(None),
             shared: tokio::sync::RwLock::new(None),
             followers: Mutex::new(vec![]),
-            media_base: Mutex::new(None),
             file: Mutex::new(file),
             events,
             pending_pairing: Mutex::new(PairingSlot::Idle),
@@ -2082,14 +2080,6 @@ impl AppCore {
 
     /// The bytes of one rendition of a photo (or a byte range of it). `None` = not on this
     /// device; for previews and originals the fetch starts in the background so a retry works.
-    pub fn set_media_base(&self, base: String) {
-        *self.media_base.lock().unwrap() = Some(base);
-    }
-
-    pub fn media_base(&self) -> Option<String> {
-        self.media_base.lock().unwrap().clone()
-    }
-
     pub async fn blob(
         self: &Arc<Self>,
         id: &str,

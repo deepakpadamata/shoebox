@@ -229,12 +229,9 @@ pub fn run() {
                 ..AppOptions::default()
             };
             let core = tauri::async_runtime::block_on(AppCore::open(&data_dir, opts))?;
-            // Video originals go over loopback HTTP on Android (see `media.rs`).
+            // The system player reads videos held in the blob store through the core (`video.rs`).
             #[cfg(target_os = "android")]
-            match tauri::async_runtime::block_on(crate::media::start(core.clone())) {
-                Ok(base) => core.set_media_base(base),
-                Err(e) => tracing::warn!("no media server, long videos will not play: {e:#}"),
-            }
+            crate::video::install(core.clone());
             // Tray icon (M3-16): the app keeps syncing with its window closed; Quit ends it.
             #[cfg(desktop)]
             setup_tray(app)?;

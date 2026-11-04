@@ -146,6 +146,17 @@ pub enum Picked {
     Unreadable(String),
 }
 
+/// A video on this device, for the platform's player and thumbnailer (`video.rs`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct VideoSource {
+    /// Its file in this phone's gallery, played where it is; `None` when it is in the blob store.
+    pub path: Option<String>,
+    /// The blob (hex hash), read through the app core when there is no `path`.
+    pub blob: String,
+    pub mime: String,
+    pub size: u64,
+}
+
 pub trait PhotoSource: Send + Sync {
     fn permission(&self) -> BoxFuture<'_, Result<Permission>>;
     fn request_permission(&self) -> BoxFuture<'_, Result<Permission>>;
@@ -173,6 +184,18 @@ pub trait PhotoSource: Send + Sync {
         _id: &str,
         _path: Option<&str>,
     ) -> BoxFuture<'_, Result<Option<Vec<u8>>>> {
+        Box::pin(async { Ok(None) })
+    }
+    /// Videos play in the platform's own player rather than the web view (Android, R1-16).
+    fn plays_video(&self) -> bool {
+        false
+    }
+    /// Open `video` in the platform's player, over the app.
+    fn play_video(&self, _video: &VideoSource) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async { Err(anyhow!("this device plays videos in the app")) })
+    }
+    /// A poster frame (JPEG) of `video` from the system's thumbnailer; `None` where there is none.
+    fn video_frame_of(&self, _video: &VideoSource) -> BoxFuture<'_, Result<Option<Vec<u8>>>> {
         Box::pin(async { Ok(None) })
     }
 }

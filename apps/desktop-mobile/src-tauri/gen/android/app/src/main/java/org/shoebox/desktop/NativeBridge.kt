@@ -27,4 +27,11 @@ object NativeBridge {
      */
     @JvmStatic
     external fun registerImageDecoder(decoder: HeifDecoder)
+
+    /**
+     * Bytes `offset` to `offset + length` of a blob in the open app's store, checked against its
+     * hash (`video.rs`); fewer at its end, `null` when it cannot be read.
+     */
+    @JvmStatic
+    external fun readBlob(hash: String, offset: Long, length: Int): ByteArray?
 }

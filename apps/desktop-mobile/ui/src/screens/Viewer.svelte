@@ -2,7 +2,7 @@
   // Full-size viewer (M3-08/09): the preview shows at once, the original replaces it when it is
   // here or once fetched on demand; the info panel says where every copy is stored.
   import { onMount } from 'svelte';
-  import { api, blobUrl, motionUrl, videoUrl, type FaceOut, type PhotoDetail, type PhotoSummary } from '../lib/api';
+  import { api, blobUrl, motionSrc, playsNatively, videoUrl, type FaceOut, type PhotoDetail, type PhotoSummary } from '../lib/api';
   import FaceCrop from '../components/FaceCrop.svelte';
   import { bytes, dateTime, plural } from '../lib/format';
   import { fail, toast } from '../lib/store.svelte';
@@ -40,6 +40,9 @@
   // A Live Photo or motion photo: its video plays over the picture (F2.10).
   let playingLive = $state(false);
   let liveFetching = $state(false);
+  let liveSrc = $state<string | null>(null);
+  // A video opening in the platform's player.
+  let starting = $state(false);
   // The original is here but the media element could not play it (a codec this device lacks).
   let unplayable = $state(false);
 
@@ -47,8 +50,9 @@
     const id = photo.id;
     detail = null;
     originalReady = false;
-    playingLive = false;
+    stopLive();
     liveFetching = false;
+    starting = false;
     unplayable = false;
     fetching = false;
     zoom = 1;
@@ -99,7 +103,7 @@
 
   // Play the video of a Live Photo, getting it from another device first if this one has not got it.
   async function playLive() {
-    if (playingLive) { playingLive = false; return; }
+    if (playingLive) { stopLive(); return; }
     if (!detail?.has_motion) {
       liveFetching = true;
       const id = photo.id;
@@ -115,11 +119,37 @@
         liveFetching = false;
       }
     }
-    playingLive = true;
+    const id = photo.id;
+    try {
+      const src = await motionSrc(id);
+      if (photo.id !== id) { if (src.startsWith('blob:')) URL.revokeObjectURL(src); return; }
+      liveSrc = src;
+      playingLive = true;
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  function stopLive() {
+    playingLive = false;
+    if (liveSrc?.startsWith('blob:')) URL.revokeObjectURL(liveSrc);
+    liveSrc = null;
+  }
+
+  // Android: the video opens in the system's player over the app.
+  async function playNative() {
+    starting = true;
+    try {
+      await api.playVideo(photo.id);
+    } catch (e) {
+      fail(e);
+    } finally {
+      starting = false;
+    }
   }
 
   function liveFailed() {
-    playingLive = false;
+    stopLive();
     toast('This device cannot play the video of this Live Photo');
   }
 
@@ -194,12 +224,15 @@
     </div>
     <button class="nav left" aria-label="Previous" disabled={index === 0} onclick={() => onmove(-1)}>‹</button>
     <div class="media">
-      {#if photo.is_video && originalReady}
+      {#if photo.is_video && originalReady && playsNatively()}
+        {#if poster}<img src={poster} alt={`Video from ${dateTime(photo.taken_at)}`} />{/if}
+        <button class="play" aria-label="Play the video" disabled={starting} onclick={playNative}>▶</button>
+      {:else if photo.is_video && originalReady}
         <!-- svelte-ignore a11y_media_has_caption -->
         <video src={videoUrl(photo.id)} poster={poster ?? undefined} controls autoplay onerror={originalFailed}></video>
       {:else if playingLive}
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video src={motionUrl(photo.id)} autoplay playsinline onended={() => (playingLive = false)} onerror={liveFailed} onclick={() => (playingLive = false)}></video>
+        <video src={liveSrc} autoplay playsinline onended={stopLive} onerror={liveFailed} onclick={stopLive}></video>
       {:else}
         {#key photo.id}{#if src}<img {src} alt={`${photo.is_video ? 'Video' : 'Photo'} from ${dateTime(photo.taken_at)}`} style="transform: translateY({pullY}px) scale({zoom}); opacity: {1 - Math.min(0.5, pullY / 400)}" ondblclick={() => (zoom = zoom > 1 ? 1 : 2.5)} onerror={imageFailed} />{/if}{/key}
       {/if}
@@ -292,6 +325,8 @@
   .live { position: absolute; left: 62px; bottom: 16px; z-index: 2; background: rgba(0,0,0,.55); color: #fff; border: 0; border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 700; letter-spacing: .04em; cursor: pointer; }
   .live[aria-pressed='true'] { background: var(--accent); color: var(--accent-ink); }
   .live:disabled { opacity: .7; cursor: default; }
+  .play { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2; width: 72px; height: 72px; border-radius: 50%; border: 0; background: rgba(0,0,0,.55); color: #fff; font-size: 28px; padding-left: 6px; cursor: pointer; }
+  .play:disabled { opacity: .6; }
   .overlay { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.7); padding: 10px 14px; border-radius: 12px; display: flex; flex-direction: column; gap: 4px; align-items: center; font-size: 13px; }
   .info { width: 320px; flex: none; background: var(--surface); color: var(--ink); padding: 18px 16px; overflow: auto; border-left: 1px solid var(--line); }
   @media (max-width: 720px) {

@@ -215,6 +215,26 @@ class PhotoBackend(private val context: Context) {
         } catch (e: Exception) {
             null
         } ?: return ""
+        return jpegOf(bitmap)
+    }
+
+    /** A poster frame of a video in the blob store, read through the app core. */
+    fun videoFrameOfBlob(blob: String, size: Long): String {
+        val retriever = android.media.MediaMetadataRetriever()
+        val bitmap = try {
+            retriever.setDataSource(BlobMediaDataSource(blob, size))
+            val us = (retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L) * 100
+            retriever.getFrameAtTime(us, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+        } catch (e: Exception) {
+            null
+        } finally {
+            retriever.release()
+        } ?: return ""
+        return jpegOf(bitmap)
+    }
+
+    /** At most 480 px, JPEG, base64; recycles `bitmap`. */
+    private fun jpegOf(bitmap: Bitmap): String {
         // The thumbnailer may hand back more than was asked for.
         val scale = minOf(1f, 480f / maxOf(bitmap.width, bitmap.height))
         val small = if (scale < 1f) {

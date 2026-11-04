@@ -114,8 +114,19 @@ async fn world_with(photos_in_album: usize, role: Role, bytes: Bytes) -> World {
     let cluster = Cluster::with_roles(&[role, role]).await.unwrap();
     if matches!(bytes, Bytes::Bucket(_) | Bytes::Deployed(_)) {
         // A real bucket checks presigned times against real time, and so does a service elsewhere.
-        let now = shoebox_cloud::system_clock()() as u64;
-        cluster.clock().advance(now - cluster.clock().now_ms());
+        // It keeps following real time: a run over a slow network takes minutes, longer than a signature may lag.
+        let clock = cluster.clock().clone();
+        let follow = move || {
+            let now = shoebox_cloud::system_clock()() as u64;
+            clock.advance(now.saturating_sub(clock.now_ms()));
+        };
+        follow();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                follow();
+            }
+        });
     }
     let root = KeyPair::generate();
     let backend = HybridBackend::for_node(cluster.node(0).clone(), cluster.clock().clone());

@@ -38,7 +38,7 @@ From OpenAI CLIP (https://github.com/openai/CLIP), Copyright (c) 2021 OpenAI, MI
 libheif 1.23.1 (vendor/libheif-sys/vendor/libheif), HEIC decoding: LGPL-3.0-or-later  (full text below, each source tree in this repository)
 libde265 1.0.16 (vendor/libde265), HEVC decoding: LGPL-3.0-or-later  (full text below, each source tree in this repository)
 
-== Rust crates (866) ==
+== Rust crates (869) ==
 
 acto 0.8.2: Apache-2.0 OR MIT  [standard MIT text; copyright Roland Kuhn <rk@rkuhn.info>]
 adler2 2.0.1: 0BSD OR MIT OR Apache-2.0  [a21c914647d3, 1bc86297d032, 30fefc3a7d6a]
@@ -126,6 +126,8 @@ cfg-expr 0.20.10: MIT OR Apache-2.0  [7e1b38c60796, 6d182023b788]
 cfg-if 1.0.5: MIT OR Apache-2.0  [954f335b8baf, 84e1bbfebd74]
 cfg_aliases 0.2.2: MIT  [48513346d335]
 chacha20 0.10.2: MIT OR Apache-2.0  [e8541ea93f02, 1038b7737a0a]
+chacha20 0.9.1: Apache-2.0 OR MIT  [e8541ea93f02, 282b5e566e85]
+chacha20poly1305 0.10.1: Apache-2.0 OR MIT  [e8541ea93f02, e90ad0f8f6fe]
 chrono 0.4.45: MIT OR Apache-2.0  [ce4a94c006fa]
 cipher 0.4.4: MIT OR Apache-2.0  [e8541ea93f02, 92f01fc7ca90]
 cmake 0.1.58: MIT OR Apache-2.0  [954f335b8baf, 84e1bbfebd74]
@@ -528,6 +530,7 @@ pkg-config 0.3.34: MIT OR Apache-2.0  [954f335b8baf, 84e1bbfebd74]
 plist 1.10.3: MIT  [5b0ae40d1a35]
 png 0.18.1: MIT OR Apache-2.0  [954f335b8baf, 80cdd90699e4]
 polling 3.11.0: Apache-2.0 OR MIT  [954f335b8baf, 30fefc3a7d6a]
+poly1305 0.8.0: Apache-2.0 OR MIT  [e8541ea93f02, e827371937a1]
 polyval 0.6.2: Apache-2.0 OR MIT  [e8541ea93f02, 3dad7b797447]
 portable-atomic 1.15.0: Apache-2.0 OR MIT  [4bf96504d6e8, 30fefc3a7d6a]
 portable-atomic-util 0.2.8: Apache-2.0 OR MIT  [4bf96504d6e8, 30fefc3a7d6a]
@@ -1247,7 +1250,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
---- [e8541ea93f02] used by: aead 0.5.2, aes 0.8.4, aes-gcm 0.10.3, base16ct 1.0.0, base64ct 1.8.3, block-buffer 0.10.4, block-buffer 0.12.1, block-padding 0.3.3, cbc 0.1.2, chacha20 0.10.2, cipher 0.4.4, const-oid 0.10.2, cpufeatures 0.2.17, cpufeatures 0.3.1, crypto-common 0.1.7, crypto-common 0.2.2, ctr 0.9.2, der 0.8.2, digest 0.10.7, digest 0.11.3, ghash 0.5.1, hkdf 0.12.4, hmac 0.12.1, hybrid-array 0.4.15, inout 0.1.4, opaque-debug 0.3.1, pem-rfc7468 1.0.0, pkcs8 0.11.0, polyval 0.6.2, sha1 0.10.7, sha2 0.10.9, sha2 0.11.1, signature 3.0.0, spki 0.8.1, universal-hash 0.5.1
+--- [e8541ea93f02] used by: aead 0.5.2, aes 0.8.4, aes-gcm 0.10.3, base16ct 1.0.0, base64ct 1.8.3, block-buffer 0.10.4, block-buffer 0.12.1, block-padding 0.3.3, cbc 0.1.2, chacha20 0.10.2, chacha20 0.9.1, chacha20poly1305 0.10.1, cipher 0.4.4, const-oid 0.10.2, cpufeatures 0.2.17, cpufeatures 0.3.1, crypto-common 0.1.7, crypto-common 0.2.2, ctr 0.9.2, der 0.8.2, digest 0.10.7, digest 0.11.3, ghash 0.5.1, hkdf 0.12.4, hmac 0.12.1, hybrid-array 0.4.15, inout 0.1.4, opaque-debug 0.3.1, pem-rfc7468 1.0.0, pkcs8 0.11.0, poly1305 0.8.0, polyval 0.6.2, sha1 0.10.7, sha2 0.10.9, sha2 0.11.1, signature 3.0.0, spki 0.8.1, universal-hash 0.5.1
 
 Apache License
                         Version 2.0, January 2004
@@ -1479,7 +1482,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
---- [e90ad0f8f6fe] used by: aes-gcm 0.10.3
+--- [e90ad0f8f6fe] used by: aes-gcm 0.10.3, chacha20poly1305 0.10.1
 
 Copyright (c) 2019 The RustCrypto Project Developers
 
@@ -5369,6 +5372,34 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 --- [1038b7737a0a] used by: chacha20 0.10.2, zeroize_derive 1.5.0
 
 Copyright (c) 2019-2026 The RustCrypto Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+--- [282b5e566e85] used by: chacha20 0.9.1
+
+Copyright (c) 2019-2023 The RustCrypto Project Developers
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -18033,6 +18064,34 @@ SOFTWARE.
 --- [80cdd90699e4] used by: png 0.18.1
 
 Copyright (c) 2015 nwin
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+--- [e827371937a1] used by: poly1305 0.8.0
+
+Copyright (c) 2015-2019 RustCrypto Developers
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated

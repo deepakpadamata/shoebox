@@ -108,7 +108,12 @@ async fn edits_flow_between_library_nodes_without_explicit_sync_calls() {
     })
     .await
     .expect("edits flow back");
-    assert!(converged(&nodes).await);
+    // Node 0 having both edits says nothing yet about node 2 having node 1's new photo.
+    wait_until(Duration::from_secs(20), || async {
+        converged(&nodes).await
+    })
+    .await
+    .expect("all three converge");
     c.shutdown().await;
 }
 

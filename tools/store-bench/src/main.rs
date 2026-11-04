@@ -7,7 +7,9 @@
 //!
 //! Measured: populate time, initial sync (empty replica catches up), incremental sync (N edits),
 //! bytes needed to persist a replica, peak RSS, and query latencies (first page of the timeline,
-//! a page from the middle, and `at_risk`).
+//! a page from the middle, and `at_risk`). Live heap bytes per photo at each stage come from a
+//! counting allocator (M4-11, `docs/notes/phone-memory.md`); `loro-net` also reopens replica B
+//! from its files, as a phone does on every start.
 
 use anyhow::Result;
 use clap::Parser;
@@ -22,6 +24,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+mod counting;
+use counting::{live, reset_peak, PEAK};
 
 #[derive(Parser)]
 struct Args {
@@ -169,6 +174,7 @@ async fn measure<S: LibraryStore>(
         disk,
     } = pair;
 
+    let heap0 = live();
     let t = Instant::now();
     for i in 0..n {
         a.upsert_photo(photo(i, n)).await?;
@@ -177,6 +183,7 @@ async fn measure<S: LibraryStore>(
         }
     }
     let populate = t.elapsed();
+    let heap_photos = live();
 
     let t = Instant::now();
     if args.holdings != "none" {
@@ -205,10 +212,14 @@ async fn measure<S: LibraryStore>(
         }
     }
     let holdings_time = t.elapsed();
+    let heap_holdings = live();
 
+    reset_peak();
     let t = Instant::now();
     b.sync_with(&a_addr).await?;
     let initial_sync = t.elapsed();
+    let heap_synced = live();
+    let heap_sync_peak = PEAK.load(Ordering::Relaxed);
     let have = b.photos_by_time(TimeRange::ALL, Page::all()).await?.len();
     anyhow::ensure!(
         have == n,
@@ -297,6 +308,12 @@ async fn measure<S: LibraryStore>(
         "at_risk_all_ms": at_risk_all.as_secs_f64() * 1000.0,
         "at_risk_all_count": risky.len(),
         "at_risk_page_us": at_risk_page,
+        // Live heap per photo: replica A after its photos, after its holdings, replica B once
+        // synced, and the most the sync held at once above what A already had.
+        "heap_b_per_photo_a_photos": (heap_photos - heap0) as f64 / n as f64,
+        "heap_b_per_photo_a_holdings": (heap_holdings - heap_photos) as f64 / n as f64,
+        "heap_b_per_photo_b_synced": (heap_synced as f64 - heap_holdings as f64) / n as f64,
+        "heap_mb_sync_peak_over_a": (heap_sync_peak - heap_holdings) as f64 / 1e6,
     }))
 }
 
@@ -387,6 +404,7 @@ async fn main() -> Result<()> {
             b.sync_with(&a_addr).await?; // the device list first, so signed records can be judged
             let (pa, pb): (PathBuf, PathBuf) =
                 (dir.path().join("a/loro"), dir.path().join("b/loro"));
+            let cap = cap.clone();
             let pair = Pair {
                 a,
                 b,
@@ -395,9 +413,37 @@ async fn main() -> Result<()> {
                 disk: Box::new(move |_, _| (dir_size(&pa), dir_size(&pb))),
             };
             let out = measure(&args, pair, rss).await;
+            nb.shutdown().await.ok();
+            drop(bb);
+            drop(nb);
+            // B opened again from its files, as a phone does on every start.
+            let before = counting::live();
+            let t = Instant::now();
+            let nb = shoebox_node::Node::open(mk("b")).await?;
+            let bb = shoebox_store_loro::LoroBackend::for_node(nb.clone(), ManualClock::new(1_000));
+            let node_only = counting::live() - before;
+            let b = bb.open_library(&cap).await?;
+            let reopen = t.elapsed();
+            let have = b
+                .photos_by_time(TimeRange::ALL, Page::first(10))
+                .await?
+                .len();
+            anyhow::ensure!(have == 10);
+            let reopened = counting::live() - before;
+            drop(b);
             na.shutdown().await.ok();
             nb.shutdown().await.ok();
-            out?
+            if let Ok(keep) = std::env::var("SB_KEEP_B") {
+                let _ = std::process::Command::new("cp")
+                    .args(["-R", &dir.path().join("b/loro").to_string_lossy(), &keep])
+                    .status();
+            }
+            let mut out = out?;
+            out["heap_b_per_photo_reopened"] =
+                json!((reopened - node_only) as f64 / args.photos as f64);
+            out["heap_mb_node_alone"] = json!(node_only as f64 / 1e6);
+            out["reopen_s"] = json!(reopen.as_secs_f64());
+            out
         }
         "docs" => {
             let dir = tempfile::tempdir()?;

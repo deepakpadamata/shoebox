@@ -14,6 +14,7 @@ use crate::identity::{IdentityError, TrustChain};
 use crate::ids::{Blake3Hash, EndpointId, Timestamp};
 use crate::merge::{Lww, OrSet};
 use crate::model::*;
+use crate::photo_table::PhotoTable;
 use crate::store::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
@@ -127,7 +128,8 @@ pub struct LibraryState {
     device: EndpointId,
     hlc: HlcClock,
     max_seen: Hlc,
-    photos: BTreeMap<PhotoId, PhotoRecord>,
+    /// Packed: strings and device ids are stored once (M4-11).
+    photos: PhotoTable,
     /// Non-deleted photos, newest first (ties by id).
     timeline: BTreeSet<TimelineKey>,
     /// Purge markers: a record whose latest tombstone HLC is not after the marker is dropped.
@@ -145,8 +147,9 @@ pub struct LibraryState {
     persons: BTreeMap<PersonId, Person>,
     face_labels: BTreeMap<(PhotoId, [u8; 4]), FaceLabel>,
     motions: BTreeMap<PhotoId, MotionRecord>,
-    /// Devices currently holding each blob (any kind).
-    holders_by_blob: BTreeMap<Blake3Hash, BTreeSet<EndpointId>>,
+    /// Devices currently holding each blob (any kind), sorted. A list, not a set: a blob has a
+    /// handful of holders, and a one-element `BTreeSet` allocates a whole node (M4-11).
+    holders_by_blob: BTreeMap<Blake3Hash, Vec<EndpointId>>,
 }
 
 fn cert_key(c: &DeviceCert) -> (Hlc, bool, Role, &str, &[u8]) {
@@ -206,7 +209,7 @@ impl LibraryState {
                 counter: 0,
                 device,
             },
-            photos: BTreeMap::new(),
+            photos: PhotoTable::default(),
             timeline: BTreeSet::new(),
             purged: BTreeMap::new(),
             albums: BTreeMap::new(),
@@ -271,7 +274,7 @@ impl LibraryState {
         if !self.alive(&merged) {
             return;
         }
-        let old = self.photos.insert(rec.id, merged.clone());
+        let old = self.photos.insert(&merged);
         if old.as_ref() == Some(&merged) {
             return;
         }
@@ -296,7 +299,7 @@ impl LibraryState {
             self.purged.insert(id, newest);
             fx.touch(Touched::Purged(id));
         }
-        if let Some(rec) = self.photos.get(&id).cloned() {
+        if let Some(rec) = self.photos.get(&id) {
             if !self.alive(&rec) {
                 self.photos.remove(&id);
                 self.unindex(&rec);
@@ -365,9 +368,12 @@ impl LibraryState {
         let changed = self.holdings.insert((device, blob), merged.clone()) != Some(merged.clone());
         if changed {
             if merged.value.is_some() {
-                self.holders_by_blob.entry(blob).or_default().insert(device);
+                let holders = self.holders_by_blob.entry(blob).or_default();
+                if let Err(at) = holders.binary_search(&device) {
+                    holders.insert(at, device);
+                }
             } else if let Some(holders) = self.holders_by_blob.get_mut(&blob) {
-                holders.remove(&device);
+                holders.retain(|d| *d != device);
                 if holders.is_empty() {
                     self.holders_by_blob.remove(&blob);
                 }
@@ -625,8 +631,9 @@ impl LibraryState {
 
     pub fn set_favorite(&mut self, id: &PhotoId, fav: bool, now_ms: u64) -> Result<Effect> {
         let hlc = self.tick(now_ms);
-        let rec = self.photos.get_mut(id).ok_or(StoreError::NotFound)?;
+        let mut rec = self.photos.get(id).ok_or(StoreError::NotFound)?;
         rec.set_favorite(fav, hlc);
+        self.photos.insert(&rec);
         let mut fx = Effect::default();
         fx.change(Change::PhotoUpserted(*id));
         fx.touch(Touched::Photo(*id));
@@ -635,7 +642,7 @@ impl LibraryState {
 
     pub fn mark_deleted(&mut self, id: &PhotoId, now_ms: u64) -> Result<Effect> {
         let hlc = self.tick(now_ms);
-        let rec = self.photos.get(id).cloned().ok_or(StoreError::NotFound)?;
+        let rec = self.photos.get(id).ok_or(StoreError::NotFound)?;
         let mut fx = Effect::default();
         if rec.is_deleted() {
             return Ok(fx);
@@ -643,7 +650,7 @@ impl LibraryState {
         let mut updated = rec.clone();
         updated.mark_deleted(Timestamp(now_ms as i64), hlc);
         self.unindex(&rec);
-        self.photos.insert(*id, updated);
+        self.photos.insert(&updated);
         fx.change(Change::PhotoDeleted(*id));
         fx.touch(Touched::Photo(*id));
         Ok(fx)
@@ -651,7 +658,7 @@ impl LibraryState {
 
     pub fn restore_photo(&mut self, id: &PhotoId, now_ms: u64) -> Result<Effect> {
         let hlc = self.tick(now_ms);
-        let rec = self.photos.get(id).cloned().ok_or(StoreError::NotFound)?;
+        let rec = self.photos.get(id).ok_or(StoreError::NotFound)?;
         let mut fx = Effect::default();
         if !rec.is_deleted() {
             return Ok(fx);
@@ -659,7 +666,7 @@ impl LibraryState {
         let mut updated = rec;
         updated.restore(hlc);
         self.index(&updated);
-        self.photos.insert(*id, updated);
+        self.photos.insert(&updated);
         fx.change(Change::PhotoUpserted(*id));
         fx.touch(Touched::Photo(*id));
         Ok(fx)
@@ -685,7 +692,7 @@ impl LibraryState {
     pub fn purge_deleted(&mut self, ids: &[PhotoId], clock_now_ms: u64) -> (Vec<PhotoId>, Effect) {
         let mut due: Vec<PhotoId> = ids
             .iter()
-            .filter(|id| self.photos.get(id).is_some_and(|p| p.is_deleted()))
+            .filter(|id| self.photos.is_deleted(id) == Some(true))
             .copied()
             .collect();
         due.sort();
@@ -948,7 +955,7 @@ impl LibraryState {
     /// purged photo: delete the stored record).
     pub fn entry(&self, what: &Touched) -> Option<StateEntry> {
         match what {
-            Touched::Photo(id) => self.photos.get(id).cloned().map(StateEntry::Photo),
+            Touched::Photo(id) => self.photos.get(id).map(StateEntry::Photo),
             Touched::Album(id) => self.albums.get(id).cloned().map(StateEntry::Album),
             Touched::Device(id) => self.devices.get(id).cloned().map(StateEntry::Device),
             Touched::Admin(id) => self.admins.get(id).cloned().map(StateEntry::Admin),
@@ -994,7 +1001,7 @@ impl LibraryState {
     /// Every record, for full export (tests, snapshots, initial persistence).
     pub fn all_entries(&self) -> Vec<StateEntry> {
         let mut out: Vec<StateEntry> = vec![];
-        out.extend(self.photos.values().cloned().map(StateEntry::Photo));
+        out.extend(self.photos.values().map(StateEntry::Photo));
         out.extend(self.albums.values().cloned().map(StateEntry::Album));
         out.extend(self.devices.values().cloned().map(StateEntry::Device));
         out.extend(self.admins.values().cloned().map(StateEntry::Admin));
@@ -1059,7 +1066,7 @@ impl LibraryState {
     // ---------- reads ----------
 
     pub fn photo(&self, id: &PhotoId) -> Option<PhotoRecord> {
-        self.photos.get(id).cloned()
+        self.photos.get(id)
     }
 
     pub fn setting(&self, key: &str) -> Option<Vec<u8>> {
@@ -1115,25 +1122,20 @@ impl LibraryState {
             .range((start, Bound::Unbounded))
             .filter(|(Reverse(t), _)| range.contains(*t))
             .take(page.limit)
-            .filter_map(|(_, id)| self.photos.get(id).cloned())
+            .filter_map(|(_, id)| self.photos.get(id))
             .collect()
     }
 
     pub fn deleted_photos(&self) -> Vec<PhotoRecord> {
-        let mut out: Vec<PhotoRecord> = self
-            .photos
-            .values()
-            .filter(|p| p.is_deleted())
-            .cloned()
-            .collect();
+        let mut out: Vec<PhotoRecord> = self.photos.values().filter(|p| p.is_deleted()).collect();
         out.sort_by_key(|p| (Reverse(p.deleted_at.value), p.id));
         out
     }
 
     /// Soft-deleted and purged photos are hidden; photos that have not synced yet are not.
     fn photo_visible_in_album(&self, id: &PhotoId) -> bool {
-        match self.photos.get(id) {
-            Some(p) => !p.is_deleted(),
+        match self.photos.is_deleted(id) {
+            Some(deleted) => !deleted,
             None => !self.purged.contains_key(id),
         }
     }
@@ -1242,12 +1244,12 @@ impl LibraryState {
         };
         self.photos
             .range((start, Bound::Unbounded))
-            .filter(|(_, p)| {
-                !p.is_deleted()
-                    && self.copy_count(&p.original.hash) < min_copies as usize
-                    && !self.held_by_keeper(&p.original.hash)
+            .filter(|(_, original, deleted)| {
+                !deleted
+                    && self.copy_count(original) < min_copies as usize
+                    && !self.held_by_keeper(original)
             })
-            .map(|(id, _)| *id)
+            .map(|(id, _, _)| *id)
             .take(page.limit)
             .collect()
     }

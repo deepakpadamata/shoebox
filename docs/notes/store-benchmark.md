@@ -84,4 +84,5 @@ verified, replicas persisted to disk; the first line is before group-commit and 
 Acceptance (100k < 10 s and < 100 MB on disk; 500k completes) is met. Two optimisations made the difference: group commit of the update log
 (one `fsync` per burst instead of per write: populate 487 s → 25 s) and signature verification spread over all cores (initial sync 8.8 → 4.0 s).
 Not measured: a phone-class device (none available here). Memory per photo is still ~7 KB per replica (both replicas share this process's RSS),
-which will matter on phones; interning strings in `LibraryState` is the obvious next step and is **not done**.
+which will matter on phones. **Update (M4-11, 2026-11-05):** measured per replica with a counting allocator, it was 4.9–5.9 KB, and
+is now 2.0–2.5 KB (update-form compaction, freed Loro caches, packed photo records): see `phone-memory.md`.

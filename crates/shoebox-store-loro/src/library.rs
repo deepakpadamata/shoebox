@@ -310,7 +310,7 @@ impl LibraryShared {
                 return;
             }
             let snapshot = if compact {
-                match inner.doc.export(ExportMode::Snapshot) {
+                match inner.doc.export(ExportMode::all_updates()) {
                     Ok(s) => Some((s, log_len)),
                     Err(e) => {
                         warn!("could not export a snapshot: {e}");
@@ -494,10 +494,31 @@ impl Inner {
         }
     }
 
+    /// Append bytes just imported to the log as they are (see [`Inner::import`]).
+    fn log_bytes(&mut self, bytes: &[u8]) {
+        let Some(persist) = &mut self.persist else {
+            return;
+        };
+        let now = self.doc.oplog_vv();
+        if now == self.logged {
+            return;
+        }
+        if let Err(e) = persist.append(bytes) {
+            warn!("could not write the update log: {e}");
+            return;
+        }
+        self.logged = now;
+        if persist.should_compact() {
+            if let Err(e) = self.compact_now() {
+                warn!("compaction failed: {e}");
+            }
+        }
+    }
+
     /// Write a fresh snapshot, empty the log and save the signature verdicts, all under the lock
     /// (see [`LibraryShared::compact_when_idle`] for the usual way, which writes off the lock).
     fn compact_now(&mut self) -> Result<()> {
-        let snapshot = self.doc.export(ExportMode::Snapshot).map_err(be)?;
+        let snapshot = self.doc.export(ExportMode::all_updates()).map_err(be)?;
         let verdicts = self.verdicts_for_disk();
         if let Some(p) = &mut self.persist {
             p.compact(&snapshot).map_err(be)?;
@@ -522,11 +543,26 @@ impl Inner {
 
     fn import(&mut self, bytes: &[u8]) -> Result<Vec<Change>> {
         let before = self.doc.state_frontiers();
+        let all_logged = self.doc.oplog_vv() == self.logged;
         self.doc.import(bytes).map_err(be)?;
-        self.log_new_ops();
+        if all_logged {
+            // Log what arrived as it is: re-exporting it would cost the time and leave Loro
+            // holding an encoded copy of every block it touched (M4-11).
+            self.log_bytes(bytes);
+        } else {
+            self.log_new_ops();
+        }
         let after = self.doc.state_frontiers();
         if before == after {
             return Ok(vec![]);
+        }
+        if before.is_empty() {
+            // Everything is new (a first sync): every key, without a diff as big as the library.
+            let mut keys = vec![];
+            self.doc
+                .get_map(ENTRIES)
+                .for_each(|k, _| keys.push(k.to_string()));
+            return Ok(self.fold_keys(keys));
         }
         let diff = self.doc.diff(&before, &after).map_err(be)?;
         let mut keys: Vec<String> = vec![];
@@ -535,6 +571,10 @@ impl Inner {
                 keys.extend(m.updated.keys().map(|k| k.to_string()));
             }
         }
+        drop(diff);
+        // Diffing builds a checkout cache as large as the document; nothing else needs it.
+        self.doc.free_diff_calculator();
+        self.doc.free_history_cache();
         Ok(self.fold_keys(keys))
     }
 

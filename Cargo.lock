@@ -7582,7 +7582,9 @@ name = "store-bench"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "clap",
+ "loro",
  "serde_json",
  "shoebox-core",
  "shoebox-node",

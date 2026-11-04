@@ -95,11 +95,11 @@ Not measured: a Pi 5 (none at hand); the Mac and nest with every other device of
 
 ## Not met yet
 
-* **Mobile memory under 300 MB during a 100k-photo sync: not met.** The library state costs about
-  5–7 KB per photo per replica in memory (100,000 photos ≈ 500–700 MB), because every photo record is
-  held in full. A phone with 4 GB survives it, a 2 GB phone may not. The fix is a windowed/lazy state
-  (keep ids, dates and flags in memory, load records on demand); it is a design change in
-  `LibraryState`, ticketed here rather than patched.
+* **Mobile memory under 300 MB during a 100k-photo sync: not met during the first sync.** A replica at
+  rest now costs about 2.0–2.5 KB per photo (203 MB synced, 252 MB reopened at 100k, live heap on the Mac;
+  it was 4.9–5.9 KB). The first sync still carries the whole library in one message, which adds several
+  hundred MB while it lasts. Measurements, what changed and the issues left (batched sync, a phone
+  measurement): `phone-memory.md`.
 * **A 600 GB keeper sync with interruption and resume:** not run (no such disk or corpus was
   available). The per-blob resume is tested at small scale; the large-scale claim "at most one
   restart-induced re-download of any chunk" is inferred from iroh-blobs' range resume, not measured.

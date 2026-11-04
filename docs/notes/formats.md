@@ -120,7 +120,7 @@ Node data dir (the keeper storage dir is one, plus `keeper.json`, `keeper.lock`,
 | `keys/` | endpoint key file (when no OS keystore) |
 | `blobs/` | iroh-blobs store; tags `lib/<hash>`, `pin/<hash>`, `album/<album>/<hash>`, `place/<hash>` (an original referenced in place, a phone's gallery file) |
 | `store/docs/` | iroh-docs store (shared albums) |
-| `loro/<epoch>/` | the library: `snapshot.loro`, `updates.log` |
+| `loro/<epoch>/` | the library: `snapshot.loro` (Loro bytes any `import` reads: a full snapshot from builds before M4-11, all updates since; both open), `updates.log` |
 | `holder-confirmations.json` | who confirmed holding which original (free-up) |
 | `epoch-notice.bin` | the latest epoch notice, postcard `EpochNotice` (layout 2; layout 1 had `rotation-notice.bin`) |
 | `admins-seen.bin` | admins this device has seen, for new-admin alerts |

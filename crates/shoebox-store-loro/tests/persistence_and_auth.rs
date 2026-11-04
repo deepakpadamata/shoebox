@@ -429,3 +429,55 @@ async fn a_quiet_replica_compacts_and_its_remembered_signatures_change_nothing_a
         "a viewer's records are refused on reopening"
     );
 }
+
+/// Replicas are compacted to Loro's update form (M4-11: a document opened from it holds far less
+/// memory). One written by an earlier build holds a full snapshot instead and still opens.
+#[tokio::test]
+async fn a_replica_saved_as_a_full_snapshot_by_an_earlier_build_still_opens() {
+    let dir = tempfile::tempdir().unwrap();
+    let me = EndpointId([1; 32]);
+    let root = KeyPair::from_seed(ROOT_SEED).root_public();
+    let (lib, cap) = LoroBackend::new(LoroNetwork::new(), me, ManualClock::new(100))
+        .with_data_dir(dir.path())
+        .create_library(&root)
+        .await
+        .unwrap();
+    for n in 0..50 {
+        lib.upsert_photo(photo(n, me)).await.unwrap();
+    }
+    lib.set_favorite(&hash(3), true).await.unwrap();
+    let snapshot = lib.export_snapshot();
+    drop(lib);
+
+    // What an earlier build left: the snapshot file holds a full snapshot, the log is empty.
+    let replica = walk(dir.path())
+        .into_iter()
+        .find(|p| p.ends_with("updates.log"))
+        .expect("a replica directory")
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    std::fs::write(replica.join("snapshot.loro"), &snapshot).unwrap();
+    std::fs::write(replica.join("updates.log"), b"").unwrap();
+
+    let lib = LoroBackend::new(LoroNetwork::new(), me, ManualClock::new(200))
+        .with_data_dir(dir.path())
+        .open_library(&cap)
+        .await
+        .unwrap();
+    assert_eq!(count(&lib).await, 50);
+    assert!(lib.photo(&hash(3)).await.unwrap().unwrap().favorite.value);
+}
+
+fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = vec![];
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}

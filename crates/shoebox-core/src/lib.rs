@@ -17,6 +17,7 @@ pub mod ids;
 pub mod library_state;
 pub mod merge;
 pub mod model;
+mod photo_table;
 pub mod policy;
 pub mod recovery;
 pub mod share;

@@ -245,7 +245,7 @@ impl IndexGate for DesktopGate {
     }
 }
 
-fn on_mains() -> bool {
+pub(crate) fn on_mains() -> bool {
     #[cfg(target_os = "macos")]
     {
         if let Ok(out) = std::process::Command::new("pmset")

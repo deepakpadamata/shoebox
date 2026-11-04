@@ -290,6 +290,16 @@ pub fn run() {
                 let core = core.clone();
                 tauri::async_runtime::block_on(async move { core.set_photo_source(source) });
             }
+            #[cfg(target_os = "macos")]
+            {
+                // The Photos library (P1-04): nothing is read until the person turns it on in
+                // Settings, which asks for access.
+                let source = std::sync::Arc::new(crate::macos_photos::MacPhotoSource::new(
+                    core.data_dir().join("tmp").join("photos"),
+                ));
+                let core = core.clone();
+                tauri::async_runtime::block_on(async move { core.set_photo_source(source) });
+            }
             app.manage(Core(core));
             Ok(())
         })

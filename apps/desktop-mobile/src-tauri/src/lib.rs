@@ -26,6 +26,8 @@ mod web_links;
 pub mod http;
 
 #[cfg(all(feature = "tauri-app", target_os = "macos"))]
+mod macos_photos;
+#[cfg(all(feature = "tauri-app", target_os = "macos"))]
 mod ocr_macos;
 #[cfg(feature = "tauri-app")]
 mod share;

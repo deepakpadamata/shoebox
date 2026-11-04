@@ -14,12 +14,15 @@
 //!
 //! A photo-library asset (PhotoKit, [`Original::Library`]) has no file: it is tracked by its id,
 //! read through the source, and its deletion is what the scan reports removed (P1-02). Until
-//! P1-07 serves those originals on request, they are copied in.
+//! P1-07 serves those originals on request, they are copied in; on a Mac they always are (D4).
+//! One in the cloud only is downloaded on mains power (D3), and a Live Photo's video comes with
+//! its still (P1-08).
 
 use crate::core::{now_ms, AppCore};
 use crate::photos_source::{Asset, Conditions, Original, Permission, PhotoSource, Picked};
 use crate::types::{
-    AppEvent, BackupFolder, BackupPolicy, BackupReport, BackupScope, BackupStatus, ImportSummary,
+    AppEvent, BackupFolder, BackupPolicy, BackupPreview, BackupReport, BackupScope, BackupStatus,
+    ImportSummary,
 };
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
@@ -195,6 +198,18 @@ impl AppCore {
         paused: Option<String>,
     ) -> BackupStatus {
         BackupStatus {
+            source: self
+                .photo_source
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map_or("", |s| s.kind())
+                .into(),
+            cloud_waiting: st
+                .pending
+                .values()
+                .filter(|a| a.original == Original::Library { local: false })
+                .count() as u32,
             policy: st.policy.clone(),
             permission,
             imported: st.tracked.len() as u32,
@@ -204,6 +219,39 @@ impl AppCore {
             last_scan_ms: st.last_scan_ms as f64,
             last_error: st.last_error.clone(),
         }
+    }
+
+    /// How many photos and how much space backing up would take: a full look, nothing imported.
+    /// Asks for access first if it has not been given.
+    pub async fn backup_preview(&self) -> Result<BackupPreview> {
+        let source = self.source()?;
+        let mut perm = source.permission().await?;
+        if perm == Permission::Denied {
+            perm = source.request_permission().await?;
+            if perm == Permission::Denied {
+                bail!("access to Photos was not granted; allow it in System Settings → Privacy & Security → Photos");
+            }
+        }
+        let scan = source.scan(None).await?;
+        let mut p = BackupPreview {
+            photos: 0,
+            videos: 0,
+            bytes: 0.0,
+            cloud_only: 0,
+            permission: format!("{perm:?}").to_lowercase(),
+        };
+        for a in &scan.assets {
+            if a.mime.starts_with("video/") {
+                p.videos += 1;
+            } else {
+                p.photos += 1;
+            }
+            p.bytes += a.size as f64;
+            if a.original == (Original::Library { local: false }) {
+                p.cloud_only += 1;
+            }
+        }
+        Ok(p)
     }
 
     /// Save the rules. Does not import by itself: call [`AppCore::backup_run`] next (the UI does,
@@ -362,20 +410,27 @@ impl AppCore {
     ) -> Result<()> {
         let total = assets.len() as u32;
         let mut done = 0u32;
+        // Originals in the cloud only are downloaded on mains power (D3); until then they wait.
+        let on_power = source.conditions().await.is_ok_and(|c| c.charging);
         for chunk in assets.chunks(BATCH) {
             let mut files: Vec<(Asset, PathBuf)> = vec![];
             let mut read: Vec<(Asset, PathBuf)> = vec![];
             for a in chunk {
                 match &a.original {
                     Original::File(p) => files.push((a.clone(), PathBuf::from(p))),
-                    Original::Library { local: true } => match source.read_original(&a.id).await {
-                        Ok(p) => read.push((a.clone(), p)),
-                        Err(e) => report.failed.push(format!("{}: {e:#}", a.id)),
-                    },
-                    Original::Library { local: false } => report.failed.push(format!(
-                        "{}: the original is in the cloud, not on this device",
-                        a.id
-                    )),
+                    Original::Library { local } => {
+                        let got = if *local {
+                            source.read_original(&a.id).await
+                        } else if on_power {
+                            source.download_original(&a.id).await
+                        } else {
+                            continue; // stays pending
+                        };
+                        match got {
+                            Ok(p) => read.push((a.clone(), p)),
+                            Err(e) => report.failed.push(format!("{}: {e:#}", a.id)),
+                        }
+                    }
                     Original::Unreadable => report.failed.push(format!(
                         "{}: Shoebox cannot read this photo where it is, and does not keep a second copy",
                         a.id
@@ -397,8 +452,9 @@ impl AppCore {
                 let paths: Vec<PathBuf> = batch.iter().map(|(_, p)| p.clone()).collect();
                 let r = ln.import_paths(&paths, opts).await;
                 if in_library {
+                    // Each read is alone in a directory of its own, with a Live Photo's video.
                     for p in &paths {
-                        let _ = std::fs::remove_file(p);
+                        let _ = p.parent().map(std::fs::remove_dir_all);
                     }
                 }
                 let r = r?;
@@ -528,9 +584,14 @@ impl AppCore {
     }
 
     /// Look for gallery deletions now (the background loop does this when backup is off).
+    /// A Mac's Photos library is not looked at while its backup is off: what was imported stays,
+    /// and Photos is not scanned (P1-04). A phone's gallery still is: it owns those photos (A-092).
     pub async fn gallery_check(&self) -> Result<()> {
         let _running = self.backup_running.lock().await;
         let source = self.source()?;
+        if source.kind() == "photos_library" && !self.backup.lock().await.policy.enabled {
+            return Ok(());
+        }
         let ln = self.ln().await?;
         self.check_gallery(&*source, &ln, false).await
     }

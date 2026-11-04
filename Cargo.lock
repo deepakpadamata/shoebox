@@ -1612,6 +1612,7 @@ dependencies = [
  "shoebox-node",
  "shoebox-search",
  "shoebox-store",
+ "swift-rs",
  "tauri",
  "tauri-build",
  "tauri-plugin-barcode-scanner",

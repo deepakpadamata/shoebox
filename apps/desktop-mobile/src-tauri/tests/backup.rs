@@ -739,23 +739,33 @@ async fn library_photos_are_read_through_the_source_and_followed_by_id() {
     }
     r.source.put_library("cloud", &r.files[6], 100);
     r.source.set_local("cloud", false);
+    // On battery, an original in the cloud only waits (D3); nothing failed.
+    let battery = Conditions {
+        on_wifi: true,
+        charging: false,
+        battery_pct: 80,
+    };
+    r.source.set_conditions(battery);
     r.core.backup_configure(policy(false, false)).await.unwrap();
     let report = r.core.backup_run(true).await.unwrap();
     assert_eq!((report.imported, report.pending), (6, 1), "{report:?}");
-    assert!(
-        report.failed.iter().any(|f| f.starts_with("cloud:")),
-        "{:?}",
-        report.failed
-    );
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(r.core.backup_status().await.unwrap().cloud_waiting, 1);
+    assert!(r.source.downloads().is_empty());
     assert_eq!(photos(&r.core).await, 6);
     let leftovers = std::fs::read_dir(r._dir.path().join("scratch"))
         .map(|d| d.count())
         .unwrap_or(0);
     assert_eq!(leftovers, 0, "the originals read for import are deleted");
 
-    // Downloaded to the device: imported on the next run.
-    r.source.set_local("cloud", true);
+    // On mains power it is downloaded and imported.
+    r.source.set_conditions(Conditions {
+        charging: true,
+        ..battery
+    });
     assert_eq!(r.core.backup_run(true).await.unwrap().imported, 1);
+    assert_eq!(r.source.downloads(), ["cloud"]);
+    assert_eq!(r.core.backup_status().await.unwrap().cloud_waiting, 0);
     assert_eq!(photos(&r.core).await, 7);
 
     // An edit (new content, same id) replaces the old version.
@@ -859,4 +869,97 @@ async fn a_backup_json_from_before_library_assets_still_works() {
     core.gallery_check().await.unwrap();
     assert_eq!(photos(&core).await, 2);
     core.shutdown().await.unwrap();
+}
+
+/// P1-08: a Live Photo in the Photos library comes with its video, as one photo, the way a
+/// folder's `IMG_0001.JPG` and `IMG_0001.MOV` do (A-109); the read directory is cleaned up.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_live_photo_from_the_library_keeps_its_video() {
+    let r = rig().await;
+    let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/samples");
+    // PhotoKit names an edited still `FullSizeRender`; the read names it after the original.
+    let lib = r._dir.path().join("library");
+    std::fs::create_dir_all(&lib).unwrap();
+    let still = lib.join("IMG_0001.JPG");
+    std::fs::copy(&r.files[0], &still).unwrap();
+    let video = lib.join("FullSizeRender.mov");
+    std::fs::copy(samples.join("clip.mov"), &video).unwrap();
+    r.source.put_library_live("live", &still, &video, 1);
+    r.source.put_library("plain", &r.files[1], 1);
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+    let report = r.core.backup_run(true).await.unwrap();
+    assert_eq!(report.imported, 2, "{report:?}");
+    let page = r.core.library_page(None, 10).await.unwrap();
+    assert_eq!(page.items.len(), 2, "the video is no item of its own");
+    let live: Vec<bool> = page.items.iter().map(|p| p.live).collect();
+    assert_eq!(live.iter().filter(|l| **l).count(), 1, "{live:?}");
+    let leftovers = std::fs::read_dir(r._dir.path().join("scratch"))
+        .map(|d| d.count())
+        .unwrap_or(0);
+    assert_eq!(leftovers, 0, "the read directories are deleted");
+
+    // Backed up again (from another device, or after a favourite): still one photo, one video.
+    r.source.put_library_live("live", &still, &video, 2);
+    r.core.backup_run(true).await.unwrap();
+    let page = r.core.library_page(None, 10).await.unwrap();
+    assert_eq!(page.items.len(), 2);
+    r.core.shutdown().await.unwrap();
+}
+
+/// P1-04: before turning on the Photos library, the person sees what it would take; access is
+/// asked for then, and refusing is an error with the next step.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_preview_counts_the_library_and_asks_for_access() {
+    let r = rig().await;
+    for i in 0..4 {
+        r.source.put_library(&format!("L{i}"), &r.files[i], 1);
+    }
+    r.source.set_local("L3", false);
+    r.source.set_permission(Permission::Denied);
+    let err = r.core.backup_preview().await.unwrap_err();
+    assert!(format!("{err:#}").contains("System Settings"), "{err:#}");
+
+    r.source.answer_request(Permission::Granted);
+    let p = r.core.backup_preview().await.unwrap();
+    let bytes: u64 = r.files[..4]
+        .iter()
+        .map(|f| std::fs::metadata(f).unwrap().len())
+        .sum();
+    assert_eq!((p.photos, p.videos, p.cloud_only), (4, 0, 1));
+    assert_eq!(p.bytes, bytes as f64);
+    assert_eq!(p.permission, "granted");
+    assert_eq!(photos(&r.core).await, 0, "nothing imported");
+    assert_eq!(r.core.backup_status().await.unwrap().source, "camera_roll");
+    r.core.shutdown().await.unwrap();
+}
+
+/// P1-04: turning a Mac's Photos library off keeps what it brought in and stops looking at
+/// Photos: a deletion there while it is off does not delete here.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_photos_library_turned_off_keeps_its_photos_and_is_not_followed() {
+    let r = rig().await;
+    r.source.set_photos_library();
+    for i in 0..3 {
+        r.source.put_library(&format!("L{i}"), &r.files[i], 1);
+    }
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+    r.core.backup_run(true).await.unwrap();
+    assert_eq!(photos(&r.core).await, 3);
+    assert_eq!(
+        r.core.backup_status().await.unwrap().source,
+        "photos_library"
+    );
+
+    let mut off = policy(false, false);
+    off.enabled = false;
+    r.core.backup_configure(off).await.unwrap();
+    r.source.remove("L0");
+    r.core.gallery_check().await.unwrap();
+    assert_eq!(photos(&r.core).await, 3, "not followed while off");
+
+    // On again: the deletion made meanwhile is seen.
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+    r.core.backup_run(true).await.unwrap();
+    assert_eq!(photos(&r.core).await, 2);
+    r.core.shutdown().await.unwrap();
 }

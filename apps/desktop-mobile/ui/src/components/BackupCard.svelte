@@ -1,8 +1,8 @@
 <script lang="ts">
   // "Back up camera roll" (mockups 1d/5e): the switch, the rules, and what it is doing now.
-  import { api, type BackupFolder, type BackupPolicy, type BackupScope } from '../lib/api';
+  import { api, type BackupFolder, type BackupPolicy, type BackupPreview, type BackupScope } from '../lib/api';
   import { app, fail, toast } from '../lib/store.svelte';
-  import { plural } from '../lib/format';
+  import { bytes, plural } from '../lib/format';
   import Toggle from './Toggle.svelte';
   import ProgressBar from './ProgressBar.svelte';
   import Sheet from './Sheet.svelte';
@@ -10,6 +10,29 @@
 
   const st = $derived(app.backup);
   let busy = $state(false);
+  // A Mac backs up the Photos app's library (P1-04): no folders, Wi-Fi or charger rules.
+  const photosApp = $derived(st?.source === 'photos_library');
+
+  // Turning the Photos library on first shows what it would take; access is asked for then.
+  let preview = $state<BackupPreview | null>(null);
+
+  async function toggle(on: boolean) {
+    if (!on || !photosApp) return apply({ enabled: on });
+    busy = true;
+    try {
+      preview = await api.backupPreview();
+    } catch (e) {
+      fail(e);
+      app.backup = await api.backupStatus().catch(() => app.backup);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function startPhotos() {
+    preview = null;
+    await apply({ enabled: true, wifi_only: false, charging_only: false, scope: { kind: 'all' } });
+  }
 
   const scopeLabel = (s: BackupScope) =>
     s.kind === 'camera' ? 'Camera photos' : s.kind === 'all' ? 'Every folder' : plural(s.folders.length, 'chosen folder');
@@ -71,10 +94,15 @@
   <div class="card pad stack">
     <div class="row-flex">
       <div class="grow">
-        <b>Back up camera roll</b>
-        <div class="small muted">New photos and videos are copied into your library, then to your other devices.</div>
+        {#if photosApp}
+          <b>Back up the Photos library</b>
+          <div class="small muted">Photos and videos in the Photos app are copied into your library, then to your other devices. Edits and deletions in Photos follow.</div>
+        {:else}
+          <b>Back up camera roll</b>
+          <div class="small muted">New photos and videos are copied into your library, then to your other devices.</div>
+        {/if}
       </div>
-      <Toggle checked={st.policy.enabled} label="Back up camera roll" onchange={(v) => apply({ enabled: v })} />
+      <Toggle checked={st.policy.enabled} label={photosApp ? 'Back up the Photos library' : 'Back up camera roll'} onchange={toggle} />
     </div>
 
     {#if st.policy.enabled}
@@ -88,21 +116,45 @@
       {:else}
         <div class="small muted">✓ {plural(st.imported, 'photo')} backed up from this device.</div>
       {/if}
+      {#if st.cloud_waiting > 0}
+        <div class="small muted">☁ {plural(st.cloud_waiting, 'photo')} in iCloud only: downloaded while this Mac is on mains power.</div>
+      {/if}
       {#if st.permission === 'limited'}
         <div class="small paused">Only the photos you chose are shared with the app. Allow all photos in the system settings to back up everything.</div>
       {/if}
+      {#if !photosApp}
       <div class="row-flex small">
         <span class="grow">Backing up: <b>{scopeLabel(st.policy.scope)}</b></span>
         <Button size="sm" disabled={busy} onclick={openFolders}>Choose folders</Button>
       </div>
       <label class="row-flex small"><Toggle checked={st.policy.wifi_only} label="Wi-Fi only" onchange={(v) => apply({ wifi_only: v })} /> Only on Wi-Fi</label>
       <label class="row-flex small"><Toggle checked={st.policy.charging_only} label="Only while charging" onchange={(v) => apply({ charging_only: v })} /> Only while charging</label>
+      {/if}
       {#if st.last_error}<div class="small err">Last problem: {st.last_error}</div>{/if}
     {:else if st.permission === 'denied'}
       <div class="small muted">Photo access has not been allowed yet; you will be asked when you turn this on.</div>
     {/if}
   </div>
 {/if}
+
+<Sheet open={preview !== null} title="Back up the Photos library" onclose={() => (preview = null)} width={420}>
+  {#if preview}
+    <div class="stack">
+      <div>
+        {plural(preview.photos, 'photo')} and {plural(preview.videos, 'video')}, {bytes(preview.bytes)}. They are copied into your
+        library on this Mac, so it needs about that much free space, and then to your other devices.
+      </div>
+      {#if preview.cloud_only > 0}
+        <div class="small muted">{plural(preview.cloud_only, 'original')} {preview.cloud_only === 1 ? 'is' : 'are'} in iCloud only. They are downloaded while this Mac is on mains power.</div>
+      {/if}
+      {#if preview.permission === 'limited'}
+        <div class="small paused">Only the photos you chose are shared with Shoebox, so only those are backed up. To back up everything, allow all photos in System Settings → Privacy &amp; Security → Photos.</div>
+      {/if}
+      <Button kind="primary" block disabled={busy} onclick={startPhotos}>Back up</Button>
+      <Button block onclick={() => (preview = null)}>Not now</Button>
+    </div>
+  {/if}
+</Sheet>
 
 <Sheet open={folders !== null} title="Folders to back up" onclose={() => (folders = null)} width={480}>
   {#if folders}

@@ -10,7 +10,7 @@ use anyhow::{anyhow, Result};
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 /// One photo or video in the camera roll.
@@ -173,9 +173,21 @@ pub trait PhotoSource: Send + Sync {
         Box::pin(async { Err(anyhow!("choosing photos is not available on this device")) })
     }
     /// A readable copy of the original of the [`Original::Library`] asset `id`, made without the
-    /// network; the caller deletes it.
+    /// network, alone in a new directory that the caller deletes with everything in it. A Live
+    /// Photo's video is written beside it under the same name stem (`IMG_0001.HEIC` and
+    /// `IMG_0001.MOV`), so the import pairs them as it does in a folder (P1-08).
     fn read_original(&self, _id: &str) -> BoxFuture<'_, Result<PathBuf>> {
         Box::pin(async { Err(anyhow!("this device has no photo library to read from")) })
+    }
+    /// [`PhotoSource::read_original`] for an original that is in the cloud only, downloading it
+    /// (iCloud "Optimize Storage"). Backup asks only on mains power (D3).
+    fn download_original(&self, _id: &str) -> BoxFuture<'_, Result<PathBuf>> {
+        Box::pin(async { Err(anyhow!("this device cannot download originals")) })
+    }
+    /// What the person backs up from here: `camera_roll` (a phone's gallery) or `photos_library`
+    /// (the Photos app on a Mac), for the settings screen.
+    fn kind(&self) -> &'static str {
+        "camera_roll"
     }
     /// A poster frame (JPEG) for the video `id` (its file `path`, for an [`Original::File`]
     /// asset), made by the system's own thumbnailer; `None` where there is none.
@@ -236,6 +248,13 @@ struct FakeState {
     /// The file behind each [`Original::Library`] asset, which only [`PhotoSource::read_original`]
     /// reads.
     library_files: BTreeMap<String, PathBuf>,
+    /// A Live Photo's video, by asset id.
+    library_videos: BTreeMap<String, PathBuf>,
+    reads: u64,
+    /// Originals downloaded from the cloud so far, by asset id.
+    downloads: Vec<String>,
+    /// What [`PhotoSource::kind`] says.
+    kind: &'static str,
 }
 
 impl FakePhotoSource {
@@ -257,6 +276,10 @@ impl FakePhotoSource {
                 unshare_on_request: vec![],
                 hide_on_request: vec![],
                 library_files: BTreeMap::new(),
+                library_videos: BTreeMap::new(),
+                reads: 0,
+                downloads: vec![],
+                kind: "camera_roll",
             }),
         }
     }
@@ -296,6 +319,32 @@ impl FakePhotoSource {
             .library_files
             .insert(id.into(), path);
         self.insert(asset);
+    }
+
+    /// A Live Photo in the library: the still at `still` and its video at `video`.
+    pub fn put_library_live(
+        &self,
+        id: &str,
+        still: impl Into<PathBuf>,
+        video: impl Into<PathBuf>,
+        modified_ms: i64,
+    ) {
+        self.put_library(id, still, modified_ms);
+        self.state
+            .lock()
+            .unwrap()
+            .library_videos
+            .insert(id.into(), video.into());
+    }
+
+    /// Act as a Mac's Photos library rather than a phone's camera roll.
+    pub fn set_photos_library(&self) {
+        self.state.lock().unwrap().kind = "photos_library";
+    }
+
+    /// Originals downloaded so far, by asset id.
+    pub fn downloads(&self) -> Vec<String> {
+        self.state.lock().unwrap().downloads.clone()
     }
 
     fn insert(&self, asset: Asset) {
@@ -377,6 +426,44 @@ impl FakePhotoSource {
     }
 }
 
+impl FakePhotoSource {
+    /// A library original (and a Live Photo's video beside it) in a directory of its own, as
+    /// PhotoKit's reads are; `network` also takes one that is in the cloud only.
+    fn read_library(&self, id: &str, network: bool) -> Result<PathBuf> {
+        let (src, video, n) = {
+            let mut s = self.state.lock().unwrap();
+            let local = s.assets.iter().find_map(|(a, _)| match a.original {
+                Original::Library { local } if a.id == id => Some(local),
+                _ => None,
+            });
+            match local {
+                None => return Err(anyhow!("{id} is not in the library")),
+                Some(false) if !network => return Err(anyhow!("{id} is not on this device")),
+                Some(false) => s.downloads.push(id.into()),
+                Some(true) => {}
+            }
+            s.reads += 1;
+            let src = s
+                .library_files
+                .get(id)
+                .cloned()
+                .ok_or_else(|| anyhow!("{id} is not in the library"))?;
+            (src, s.library_videos.get(id).cloned(), s.reads)
+        };
+        let dir = self.dir.join(format!("read-{n}"));
+        std::fs::create_dir_all(&dir)?;
+        let name = src.file_name().ok_or_else(|| anyhow!("no file name"))?;
+        let copy = dir.join(name);
+        std::fs::copy(&src, &copy)?;
+        if let Some(v) = video {
+            let stem = Path::new(name).file_stem().unwrap_or_default();
+            let ext = v.extension().unwrap_or_default();
+            std::fs::copy(&v, dir.join(stem).with_extension(ext))?;
+        }
+        Ok(copy)
+    }
+}
+
 impl PhotoSource for FakePhotoSource {
     fn permission(&self) -> BoxFuture<'_, Result<Permission>> {
         Box::pin(async move { Ok(self.state.lock().unwrap().permission) })
@@ -429,29 +516,14 @@ impl PhotoSource for FakePhotoSource {
     }
     fn read_original(&self, id: &str) -> BoxFuture<'_, Result<PathBuf>> {
         let id = id.to_string();
-        Box::pin(async move {
-            let src = {
-                let s = self.state.lock().unwrap();
-                let local = s
-                    .assets
-                    .iter()
-                    .any(|(a, _)| a.id == id && a.original == Original::Library { local: true });
-                if !local {
-                    return Err(anyhow!("{id} is not on this device"));
-                }
-                s.library_files
-                    .get(&id)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("{id} is not in the library"))?
-            };
-            std::fs::create_dir_all(&self.dir)?;
-            let name = src.file_name().ok_or_else(|| anyhow!("no file name"))?;
-            let copy = self
-                .dir
-                .join(format!("original-{id}-{}", name.to_string_lossy()));
-            std::fs::copy(&src, &copy)?;
-            Ok(copy)
-        })
+        Box::pin(async move { self.read_library(&id, false) })
+    }
+    fn download_original(&self, id: &str) -> BoxFuture<'_, Result<PathBuf>> {
+        let id = id.to_string();
+        Box::pin(async move { self.read_library(&id, true) })
+    }
+    fn kind(&self) -> &'static str {
+        self.state.lock().unwrap().kind
     }
     fn read_picked(&self, handle: &str) -> BoxFuture<'_, Result<PathBuf>> {
         let src = PathBuf::from(handle);

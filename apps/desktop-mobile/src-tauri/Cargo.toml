@@ -42,6 +42,7 @@ tauri-app = [
     "dep:objc2-app-kit",
     "dep:objc2-foundation",
     "dep:objc2-vision",
+    "dep:swift-rs",
 ]
 # Platform keystore (macOS Keychain, Windows Credential Manager, Secret Service).
 keyring = ["dep:keyring"]
@@ -114,6 +115,9 @@ http-body-util = "0.1"
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true , features = [] }
+# The Swift runtime's link paths for ShoeboxPhotos on macOS (P1-04, `build.rs`); the version Tauri
+# already locks.
+swift-rs = { version = "1", optional = true, features = ["build"] }
 
 # Like the workspace (no unsafe code), except that the JNI entry point of the Android background
 # bridge needs `#[no_mangle]` and the macOS share picker calls AppKit; those two modules opt in.

@@ -5,7 +5,16 @@ export type BackupStatus = { policy: BackupPolicy,
 /**
  * `granted`, `limited`, `denied` or `unavailable` (no camera roll on this device).
  */
-permission: string, imported: number, pending: number, 
+permission: string, 
+/**
+ * What is backed up from here: `camera_roll` (a phone's gallery), `photos_library` (the
+ * Photos app on a Mac), or empty when there is nothing.
+ */
+source: string, 
+/**
+ * Photos waiting because their original is in iCloud only: downloaded on mains power.
+ */
+cloud_waiting: number, imported: number, pending: number, 
 /**
  * Why it is waiting right now, if it is.
  */

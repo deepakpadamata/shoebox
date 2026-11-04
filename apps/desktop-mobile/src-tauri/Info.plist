@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged by Tauri into the macOS app's Info.plist. -->
+<plist version="1.0">
+<dict>
+	<!-- P1-04: the Photos library as a backup source, asked for only when the person turns it on. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Shoebox copies the photos and videos in your Photos library into your Shoebox library, so they are backed up on your other devices.</string>
+</dict>
+</plist>

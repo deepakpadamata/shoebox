@@ -48,6 +48,9 @@ jobs:
       - run: cargo build --workspace
       - run: scripts/ci-cargo-test.sh --workspace --no-fail-fast
       - run: scripts/test-install-keeper.sh
+      - name: ShoeboxPhotos (PhotoKit) unit tests
+        if: runner.os == 'macOS'
+        run: apps/desktop-mobile/native/ShoeboxPhotos/test.sh
 
   licenses:
     runs-on: ubuntu-latest

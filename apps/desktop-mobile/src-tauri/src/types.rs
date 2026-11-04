@@ -448,6 +448,11 @@ ts_type! {
         pub policy: BackupPolicy,
         /// `granted`, `limited`, `denied` or `unavailable` (no camera roll on this device).
         pub permission: String,
+        /// What is backed up from here: `camera_roll` (a phone's gallery), `photos_library` (the
+        /// Photos app on a Mac), or empty when there is nothing.
+        pub source: String,
+        /// Photos waiting because their original is in iCloud only: downloaded on mains power.
+        pub cloud_waiting: u32,
         pub imported: u32,
         pub pending: u32,
         /// Why it is waiting right now, if it is.
@@ -457,6 +462,20 @@ ts_type! {
         /// Photos gone from the gallery all at once, waiting for the person to say whether
         /// to delete them from the library too.
         pub gallery_deletions_held: u32,
+    }
+}
+
+ts_type! {
+    /// What backing up would take, before it is turned on (the Photos library on a Mac, P1-04).
+    pub struct BackupPreview {
+        pub photos: u32,
+        pub videos: u32,
+        /// Bytes of the originals, those in iCloud only included.
+        pub bytes: f64,
+        /// Originals in iCloud only, downloaded on mains power.
+        pub cloud_only: u32,
+        /// `granted` or `limited` (only the photos the person chose).
+        pub permission: String,
     }
 }
 

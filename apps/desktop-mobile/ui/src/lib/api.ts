@@ -13,6 +13,7 @@ import type { AlbumInfo } from '../bindings/AlbumInfo';
 import type { AppEvent } from '../bindings/AppEvent';
 import type { AppState } from '../bindings/AppState';
 import type { BackupFolder } from '../bindings/BackupFolder';
+import type { BackupPreview } from '../bindings/BackupPreview';
 import type { BackupPolicy } from '../bindings/BackupPolicy';
 import type { BackupScope } from '../bindings/BackupScope';
 import type { BackupReport } from '../bindings/BackupReport';
@@ -50,7 +51,7 @@ import type { WebLinksInfo } from '../bindings/WebLinksInfo';
 
 export type {
   AboutInfo, AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
-  AlbumInfo, AppEvent, BackupFolder, BackupPolicy, BackupScope, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, Health, ImportSummary,
+  AlbumInfo, AppEvent, BackupFolder, BackupPolicy, BackupPreview, BackupScope, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, Health, ImportSummary,
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, FaceOut, PeopleList, PersonCard, SearchChip, SearchIndexer, SearchPage, SearchStatus, SearchSuggestion, Settings, TransferItem, Transfers, WebLinkCheck, WebLinkInfo, WebLinksInfo,
 };
 
@@ -231,6 +232,8 @@ export const api = {
   backupConfigure: (policy: BackupPolicy) => call<BackupStatus>('backup_configure', { policy }),
   backupRun: () => call<BackupReport>('backup_run'),
   backupFolders: () => call<BackupFolder[]>('backup_folders'),
+  /** What backing up the Photos library would take (asks for access first). */
+  backupPreview: () => call<BackupPreview>('backup_preview'),
   sharedAlbums: () => call<SharedAlbumInfo[]>('shared_albums'),
   sharedCreate: (name: string) => call<SharedAlbumInfo>('shared_create', { name }),
   sharedInvite: (album: string, role: string, days = 7) => call<InviteOut>('shared_invite', { album, role, days }),

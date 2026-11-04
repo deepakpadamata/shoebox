@@ -95,11 +95,11 @@ Not measured: a Pi 5 (none at hand); the Mac and nest with every other device of
 
 ## Not met yet
 
-* **Mobile memory under 300 MB during a 100k-photo sync: not met.** The library state costs about
-  5–7 KB per photo per replica in memory (100,000 photos ≈ 500–700 MB), because every photo record is
-  held in full. A phone with 4 GB survives it, a 2 GB phone may not. The fix is a windowed/lazy state
-  (keep ids, dates and flags in memory, load records on demand); it is a design change in
-  `LibraryState`, ticketed here rather than patched.
+* **Mobile memory under 300 MB during a 100k-photo sync: not met.** Measured in `phone-memory.md`: a
+  replica that has received 100k photos (6 holdings each) holds 1.22 GB, with a peak of 2.1 GB. About
+  a quarter of that is `LibraryState` and most of the rest is Loro's document, which is dominated by
+  the one-record-per-blob holdings. A windowed state is not enough on its own. The budget also needs
+  holdings replicated in buckets and a sync that folds in chunks.
 * **A 600 GB keeper sync with interruption and resume:** not run (no such disk or corpus was
   available). The per-blob resume is tested at small scale; the large-scale claim "at most one
   restart-induced re-download of any chunk" is inferred from iroh-blobs' range resume, not measured.

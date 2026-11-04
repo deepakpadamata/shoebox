@@ -33,6 +33,7 @@ hex = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
+cap = { version = "0.1", features = ["stats"] }
 hex.workspace = true
 shoebox-testkit.workspace = true
 shoebox-core = { workspace = true, features = ["testing"] }

@@ -1,5 +1,5 @@
 # Shoebox Cloud on Cloudflare: see docs/notes/cloud-deploy.md. `npm run deploy` builds and uploads it.
-name = "shoebox-cloud"
+name = "shoebox"
 main = "build/index.js"
 compatibility_date = "2026-10-15"
 
@@ -39,5 +39,5 @@ CLOSED = "false"
 # trailing dot, as iroh asks for `relay.example.org.`).
 CSP_CONNECT = ""
 
-# Serve it on your own domain (otherwise it is at https://shoebox-cloud.<your subdomain>.workers.dev):
+# Serve it on your own domain (otherwise it is at https://shoebox.<your subdomain>.workers.dev):
 # routes = [{ pattern = "view.example.org", custom_domain = true }]

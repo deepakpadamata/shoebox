@@ -37,7 +37,7 @@ You need a Cloudflare account, Node 20+, Rust with the `wasm32-unknown-unknown` 
    `QUOTA_GIB`, `SHARE_DAILY_GIB`, `CLOSED` and `CSP_CONNECT` are in `[vars]` with their defaults.
 5. **Deploy.** `npm run deploy`. It builds the viewer and the Worker (`scripts/build-cloud-worker.sh`; the first build
    installs worker-build into `target/tools`) and uploads both. The service is at
-   `https://shoebox-cloud.<your subdomain>.workers.dev`.
+   `https://shoebox.<your subdomain>.workers.dev`.
 6. **Your own domain** (optional): uncomment `routes` in `wrangler.toml` with a hostname in a zone on the same account
    and deploy again; Cloudflare makes the DNS record and the certificate.
 7. **Point the apps at it**: the library's cloud address in Settings, or `SHOEBOX_TEST_CLOUD_URL` for the check below.

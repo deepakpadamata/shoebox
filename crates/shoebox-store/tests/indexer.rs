@@ -9,6 +9,7 @@ use shoebox_core::merge::Lww;
 use shoebox_core::model::{
     BlobKind, BlobRef, ExifSummary, IndexerStatus, PhotoId, PhotoRecord, Role, ShardKind,
 };
+use shoebox_core::policy::{index_owner, IndexCandidate};
 use shoebox_core::store::LibraryStore;
 use shoebox_node::{Always, IndexGate, IndexerConfig, LibraryNode, Protection};
 use shoebox_search::encoder::TestEncoder;
@@ -248,8 +249,17 @@ async fn a_stopped_indexer_and_a_phone_that_never_charges_are_covered_after_48_h
         !dead_share.is_empty(),
         "the dead keeper's share is left at first"
     );
+    // Except those the rendezvous gives keeper 0 itself: the phone imported them, but they are
+    // also keeper 0's share (device ids differ every run, so that is about one photo in ten runs).
+    let candidates = [(&nodes[0], 10), (&nodes[1], 1_000)].map(|(n, weight)| IndexCandidate {
+        device: n.device(),
+        weight,
+    });
+    let keeper0 = nodes[0].device();
     assert!(
-        own.iter().all(|p| !cov.contains_key(p)),
+        own.iter()
+            .filter(|p| index_owner(p, ShardKind::Vec8, &candidates) != Some(keeper0))
+            .all(|p| !cov.contains_key(p)),
         "the phone's own photos wait for it"
     );
 

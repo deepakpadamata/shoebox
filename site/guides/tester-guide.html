@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tester Guide · Shoebox</title>
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="top"><a class="brand" href="../index.html"><img src="../icon.svg" alt="" width="26" height="26">Shoebox</a><nav><a href="../index.html#downloads">Download</a><a href="user-guide.html">Guides</a></nav></header>
+<main class="doc">
+<h1>Shoebox 0.1 · tester guide</h1>
+<p>Thank you for trying Shoebox. It keeps your photos on your own devices and copies them between those devices, with no cloud account involved. This preview exists to find out what breaks, so every problem you report helps.</p>
+<h2>What to install where</h2>
+<p>Everything is on the release page for <code>v0.1.0</code>. Each file has a SHA-256 checksum in <code>SHA256SUMS</code>, and that file is signed (<code>SHA256SUMS.minisig</code>).</p>
+<table><thead><tr><th>Device</th><th>File</th><th>Notes</th></tr></thead><tbody><tr><td>Mac (Apple silicon or Intel)</td><td><code>Shoebox_0.1.0_universal.dmg</code></td><td>Signed and notarised: it opens without warnings.</td></tr><tr><td>Android phone (arm64, Android 7 or later; HEIC photos need 9)</td><td><code>Shoebox_0.1.0_android-arm64.apk</code></td><td>Allow installing from your browser or file manager when Android asks.</td></tr><tr><td>Windows</td><td><code>.msi</code> or <code>-setup.exe</code></td><td><strong>Not signed yet:</strong> SmartScreen warns on first run (<em>More info → Run anyway</em>). Not tried on a real machine.</td></tr><tr><td>Linux desktop</td><td><code>.AppImage</code>, <code>.deb</code> or <code>.rpm</code></td><td>Not tried on a real machine.</td></tr><tr><td>Always-on box (a home server, a NAS, an old laptop)</td><td>the keeper: `curl -fsSL &lt;release url&gt;/install-keeper.sh \</td><td>sh`</td><td>Linux x86_64 and aarch64, or macOS. See <a href="keeper-guide.html">the keeper guide</a>.</td></tr></tbody></table>
+<p><strong>Please have at least one keeper</strong>, or a computer that is on most of the time. A photo counts as backed up once a second device holds it. A phone alone only has its own copy.</p>
+<h2>The first ten minutes</h2>
+<ol><li>Install the app on the device with the most photos and choose <em>Create a library</em>. Write the recovery phrase on paper: it is the only way back in if every device is lost.</li><li>Add your other devices: <em>Devices → Add a device</em>. On the phone or the second computer, choose <em>Join</em> and scan the QR code, or type the six-digit code.</li><li>Turn on backup:</li><li>on Android, <em>Back up camera roll</em> (camera photos by default, <em>Choose folders</em> for more);</li><li>on a Mac, <em>Settings → Back up the Photos library</em>, or <em>Import</em> for folders.</li><li>Watch <em>Devices</em>: the card on top says what is moving and how long is left.</li></ol>
+<p><a href="user-guide.html">The user guide</a> explains the ideas (keepers, companions, viewers, Recently Deleted, shared albums).</p>
+<h2>Known limits in 0.1</h2>
+<ul><li><strong>No iPhone or iPad app yet.</strong> iPhone photos can still come in from a Mac's Photos library or as files.</li><li><strong>The keeper has been run on x86_64 Linux only.</strong> The aarch64 build (Raspberry Pi) and a keeper on macOS are built but not tried.</li><li><strong>Memory on phones with a large library:</strong> about 2–2.5 KB per photo for the library itself, so about 250 MB at 100,000 photos. The <em>first</em> sync of a large library needs several hundred MB more while it runs. A phone with 4 GB or more is fine; older phones with 2 GB may struggle above about 50,000 photos.</li><li><strong>The Mac's Photos library backup has not yet run against a real library</strong> (only against a test library). Tell us how it goes, especially with iCloud Photos turned on.</li><li><strong>Windows and Linux desktops are untested</strong> on real machines, and the Windows installer is unsigned.</li><li><strong>Search by meaning (what is in a photo) needs its model on the device:</strong></li><li>a phone gets the text model in the app;</li><li>the image model comes from a computer or keeper, which index photos while idle or charging.</li><li><strong>Shared links on the web (Shoebox Cloud)</strong> are only available if the service is running for your group. Ask whoever gave you this build.</li></ul>
+<h2>When something goes wrong</h2>
+<ol><li>Note what you did, what you expected and what happened instead. A screenshot helps.</li><li>Make a diagnostics report on the device where it happened: <em>Settings → Help → Create a diagnostics report</em>. It holds versions, counts and recent errors. It does not hold photos, names, places or file names, and nothing is sent by itself. Copy it or save it.</li><li>On a keeper, run <code>shoebox-keeper status</code> and include the output.</li><li>Send both to the feedback channel you were given.</li></ol>
+<p>If the app will not start at all, include the device, its system version and the version of Shoebox (<em>Settings → About</em> on another device, or the name of the file you installed).</p>
+<h2>Updating</h2>
+<p><em>Settings → About → Check for new versions</em> (the keeper's <code>status</code>) says when a newer build is out. Nothing installs by itself: download it from the release page as before. Your library and settings are kept.</p>
+</main>
+<footer>Shoebox collects no data. <a href="../index.html">Home</a></footer>
+</body>
+</html>

@@ -36,9 +36,10 @@ SHARE_DAILY_GIB = "1"
 # "true" refuses libraries that have not registered, except those in LIBRARIES (hex ids, space-separated).
 CLOSED = "false"
 LIBRARIES = ""
-# Hosts the viewer page may connect to, space-separated: relays, for Live links (write each with and without a
-# trailing dot, as iroh asks for `relay.example.org.`).
-CSP_CONNECT = ""
+# Hosts the viewer page may connect to, space-separated: for Live links, n0's address lookup (dns.iroh.link) and
+# relays, which the apps use by default. Write each with and without a trailing dot, as iroh asks for
+# `relay.example.org.`. Empty, Live links cannot open.
+CSP_CONNECT = "https://*.iroh.link https://*.iroh.link. wss://*.iroh.link wss://*.iroh.link."
 
 # Serve it on your own domain (otherwise it is at https://shoebox.<your subdomain>.workers.dev):
 # routes = [{ pattern = "view.example.org", custom_domain = true }]

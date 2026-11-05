@@ -2,7 +2,9 @@
 
 ## 0.1.0 (unreleased): testers' preview
 
-The first build for other people's devices (macOS, Android, the keeper on Linux). Written up for testers in R1-12.
+The first build for other people's devices (macOS, Android, the keeper on Linux). What to install where, the known
+limits and how to report a problem: [the tester guide](docs/guides/tester-guide.md); how Shoebox works: [the user
+guide](docs/guides/user-guide.md).
 
 - **Search** (epic S1), on every device and with no other device needed: dates, places, cameras, albums, videos,
   screenshots and favourites as chips; words matched against what is in the photos (OpenCLIP, 8 bits), labels, text
@@ -39,10 +41,8 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
   *Back up camera roll → Choose folders* lists every folder with photos in it to pick from, or every folder (A-102).
 - Android: opening the app while a background backup is running no longer closes the app; the background run stops
   and hands over. Debug builds put the background run's log tail in its report (`adb logcat -s ShoeboxBurst`).
-- Long videos play on Android (they never started: the WebView re-applies byte ranges to the app's own URL scheme,
-  so videos now come from a loopback server inside the app, A-098), video pieces are 4 MB instead of the whole file,
-  and reading them is about 20 times faster. A video the device cannot play says so instead of offering "Get
-  original" again.
+- Long videos play on Android (they never started), video pieces are 4 MB instead of the whole file, and reading them
+  is about 20 times faster. A video the device cannot play says so instead of offering "Get original" again.
 - Videos play in the viewer on every device: while waiting it loaded the video's "preview" (the video itself, as
   videos have no still preview yet) as an image, and that image failing removed the video that had started
   playing. The viewer now shows the poster frame or nothing while waiting, and only the element showing the original

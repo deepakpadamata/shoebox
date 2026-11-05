@@ -7,7 +7,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 BINDGEN="${WASM_BINDGEN:-}"
 if [ -z "$BINDGEN" ]; then
-  if [ -x target/tools/bin/wasm-bindgen ]; then BINDGEN=target/tools/bin/wasm-bindgen; else BINDGEN="$(command -v wasm-bindgen)"; fi
+  if [ -x target/tools/bin/wasm-bindgen ]; then BINDGEN=target/tools/bin/wasm-bindgen; else BINDGEN="$(command -v wasm-bindgen || true)"; fi
+fi
+if [ -z "$BINDGEN" ]; then
+  echo "build-viewer: wasm-bindgen not found; install it with" >&2
+  echo "  cargo install wasm-bindgen-cli --version 0.2.129 --locked --root target/tools" >&2
+  exit 1
 fi
 cargo build -p shoebox-web --release --target wasm32-unknown-unknown
 # The Live-link client (iroh in the browser, 1.5 MB gzipped) is a separate module the page loads only for Live links.

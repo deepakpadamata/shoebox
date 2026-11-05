@@ -95,7 +95,8 @@ The first build takes a while (Rust and the viewer's WebAssembly). Caddy gets th
 `cloud-data` volume; the image can be built alone with `docker build -f deploy/selfhost/Dockerfile .` from the
 repository root.
 
-**Without Docker**: build with `cargo build --release -p shoebox-cloud` and `scripts/build-viewer.sh`, then follow the
+**Without Docker**: build with `cargo build --release -p shoebox-cloud` and `scripts/build-viewer.sh` (which needs the
+`wasm32-unknown-unknown` target and `wasm-bindgen-cli` 0.2.129, see the script's header), then follow the
 comments at the top of `deploy/selfhost/shoebox-cloud.service`. Put Caddy (`reverse_proxy 127.0.0.1:8080`) or another
 TLS proxy in front, and keep `SHOEBOX_TRUST_PROXY=true` only while the proxy sets `X-Forwarded-For` itself.
 

@@ -190,17 +190,23 @@ background. These are synthetic images: real photos are not measured.
 | recognition (6-19 boxes, 9-13 ms each) | 135 ms | 261 ms |
 | **both** | **237 ms** | **334 ms** |
 
-**The S25 was not measured: no phone was connected.** The Android binary builds
-(`cargo build --release --target aarch64-linux-android -p shoebox-ml --example ocr_spike`, NDK linker) and is ready.
-To measure: `adb push` the binary, the three files in `models/build/` and the image folder to `/data/local/tmp`, run it,
-and read `det_ms` and `rec_ms`. The other models run 5-13 times slower on the S25 than on this Mac (table under
-*Measurements*), which would put a photo with text at roughly 1.2-3 s.
+**S25 (Snapdragon 8 Elite), measured 2026-11-06** with the same binary built for Android (`--target aarch64-linux-android`,
+NDK linker), run through `adb shell` from `/data/local/tmp`, the phone on USB power at about 33 °C, one run over the same
+50 images (13 lines a photo at the median):
+
+| | median | p95 |
+|---|---|---|
+| detection | 455 ms | |
+| recognition | 489 ms | |
+| **both** | **941 ms** | **1565 ms** (max 1697 ms) |
+
+About 4× slower than the Mac. Plans are built once per input shape and shared (47 of the 50 photos ran on a plan already
+built). Not measured: a long run (heat, throttling), real photos (less text than these images, so likely faster), and
+rotated crops (they add time).
 
 **Verdict on the gate** (tract runs both models; the text agrees with the reference; an S25 photo with text in about a
-second or less): the first two hold on the Mac. The third is not known; the estimate is above it by 1-3×. That is
-acceptable for work done overnight while charging (only screenshots and photos labelled as documents, signs and the
-like are read), but it is not the "about a second" the plan asked for, so the S25 run decides whether S2-03 goes on
-as planned or with the faster paths (NNAPI, fewer or smaller boxes, the v6 mobile models).
+second or less): all three hold. S2-03 goes on as planned, with no faster path needed. Only screenshots and photos
+labelled as documents, signs and the like are read, so a phone spends this time on a small share of its photos.
 
 ## Labels (S1-13)
 

@@ -164,6 +164,11 @@ DATA = [
         "notice": "From the OpenCV model zoo (https://github.com/opencv/opencv_zoo), by Yaoyao Zhong and Weihong Deng, Apache-2.0.",
     },
     {
+        "name": "PP-OCRv5 text detection and recognition (ocr-det-ppocrv5-mobile.onnx, ocr-rec-ppocrv5-latin.onnx, ocr-dict-ppocrv5-latin.txt)",
+        "license": "Apache-2.0",
+        "notice": "PaddleOCR PP-OCRv5 mobile models (https://github.com/PaddlePaddle/PaddleOCR), Copyright (c) PaddlePaddle Authors, Apache-2.0; the files are PaddlePaddle's official ONNX exports, unchanged, and the character list is taken from the recogniser's inference.yml.",
+    },
+    {
         "name": "CLIP tokenizer vocabulary (crates/shoebox-search/data/clip-merges.txt)",
         "license": "MIT",
         "notice": "From OpenAI CLIP (https://github.com/openai/CLIP), Copyright (c) 2021 OpenAI, MIT.",

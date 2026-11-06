@@ -86,7 +86,7 @@ Search runs entirely on the device that searches; only the one-time indexing is 
   anyone takes over a photo still unindexed after 48 hours. A keeper indexes always, a desktop on power when idle, a
   phone while charging.
 - **Models**: OpenCLIP ViT-B/32 at 8 bits (the text side in every build, the image side on indexing devices; phones
-  fetch it as a blob by its compiled-in hash), YuNet and SFace for faces, the system's OCR (Apple Vision on macOS),
+  fetch it as a blob by its compiled-in hash), YuNet and SFace for faces, text reading by Apple Vision on macOS and PP-OCRv5 elsewhere,
   all run with `tract` (`shoebox-ml`). See `docs/notes/search-models.md`.
 - **On each device**: the query is parsed into filters and words; filters select photos from `facts.idx`; words rank
   by keywords (labels, text, places, albums, names) and by meaning (the text model's vector against the 8-bit

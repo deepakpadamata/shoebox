@@ -49,8 +49,37 @@ pub const FACE_EMBED: ModelFile = ModelFile {
     url: "https://github.com/deepakpadamata/shoebox/releases/download/models-v1/face-embed-sface.onnx",
 };
 
+pub const OCR_DET: ModelFile = ModelFile {
+    name: "ocr-det-ppocrv5-mobile.onnx",
+    blake3: [4, 105, 82, 251, 2, 240, 182, 200, 130, 90, 135, 226, 211, 91, 90, 45, 56, 150, 95, 46, 202, 163, 100, 20, 141, 62, 88, 236, 222, 50, 204, 63],
+    size: 4826518,
+    url: "https://github.com/deepakpadamata/shoebox/releases/download/models-v1/ocr-det-ppocrv5-mobile.onnx",
+};
+
+pub const OCR_REC: ModelFile = ModelFile {
+    name: "ocr-rec-ppocrv5-latin.onnx",
+    blake3: [128, 203, 215, 126, 133, 99, 11, 63, 224, 41, 174, 247, 216, 44, 254, 80, 187, 205, 227, 148, 64, 177, 83, 222, 251, 191, 224, 60, 67, 244, 230, 210],
+    size: 8042023,
+    url: "https://github.com/deepakpadamata/shoebox/releases/download/models-v1/ocr-rec-ppocrv5-latin.onnx",
+};
+
+pub const OCR_DICT: ModelFile = ModelFile {
+    name: "ocr-dict-ppocrv5-latin.txt",
+    blake3: [193, 200, 188, 29, 115, 66, 96, 28, 248, 196, 216, 187, 196, 75, 174, 93, 254, 215, 80, 168, 95, 242, 90, 157, 234, 147, 84, 73, 2, 214, 38, 106],
+    size: 2616,
+    url: "https://github.com/deepakpadamata/shoebox/releases/download/models-v1/ocr-dict-ppocrv5-latin.txt",
+};
+
 /// Every file, for keeping and sharing them.
-pub const ALL: &[ModelFile] = &[CLIP_TEXT, CLIP_IMAGE, FACE_DETECT, FACE_EMBED];
+pub const ALL: &[ModelFile] = &[
+    CLIP_TEXT,
+    CLIP_IMAGE,
+    FACE_DETECT,
+    FACE_EMBED,
+    OCR_DET,
+    OCR_REC,
+    OCR_DICT,
+];
 
 /// How the image–text model's inputs are prepared (part of its id).
 pub const CLIP_PREPROCESS: &str = "openclip-vit-b-32-laion2b_s34b_b79k; image: 256 px square thumbnail, shortest side to 224 (bicubic), centre crop, mean 0.48145466,0.4578275,0.40821073, std 0.26862954,0.26130258,0.27577711; text: CLIP BPE 49408, 77 tokens; weight-only int8; L2-normalised 512-d";

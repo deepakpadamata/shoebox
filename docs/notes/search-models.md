@@ -130,7 +130,7 @@ tract and checked against OpenCV 4.10 on COCO photos: the same faces and scores,
 Detection takes about 15 ms a photo on the Mac. Faces under 40 px or scoring under 0.8 are skipped. Not measured: recall
 on a labelled set, same-person accuracy on the owner's photos.
 
-## Text in photos on a phone (S2-03 spike)
+## Text in photos (S2-03)
 
 Epic S2 makes a phone with no computer or keeper read the text in its own photos. The engine would be PP-OCRv5 from
 PaddleOCR on tract, the runtime the other models already use. This section is the spike: does it run, is it as
@@ -143,7 +143,7 @@ and recognised text are not on the list. The owner's rule is that it is used onl
 the open one.
 
 **The files**, from PaddlePaddle's own repositories on Hugging Face at pinned commits (Apache-2.0), fetched and checked
-by `scripts/fetch_ocr_models.py` (SHA-256 pins):
+by `cargo xtask models` (BLAKE3 pins; the spike checked SHA-256, the same files) into `models/build/`, with the dictionary written by `scripts/ocr_dict.py`:
 
 | File | Repository, commit | Size |
 |---|---|---|
@@ -154,14 +154,13 @@ by `scripts/fetch_ocr_models.py` (SHA-256 pins):
 No conversion is needed: Paddle publishes ONNX files. PP-OCRv6 (tiny, small, medium) has since appeared in the same
 organisation; the spike kept v5, which is what was decided.
 
-**What the spike does** (`crates/shoebox-ml/examples/ocr_spike.rs`; PaddleOCR's own pre- and post-processing for these
+**What the spike did** (an example, replaced by the engine's `ocr_check`; PaddleOCR's own pre- and post-processing for these
 models): detection on the image with its long side set to 960 and both sides a multiple of 32, DB post-processing
 (threshold 0.3, box score 0.6, unclip 1.5); recognition of each box at 48 px high and at least 320 wide, greedy CTC.
 Two things about tract: the exported graphs carry symbolic shape annotations that clash with a fixed input, so the
 model is loaded with `with_ignore_value_info(true)`; and a plan is built for each input shape the first time it is
 used (290 ms for the first photo, 1.1 s over all 50 in the run below, three detection shapes), so an engine should keep
-a small set of shapes. Not done: rotated boxes (PaddleOCR crops a rotated rectangle; the spike's boxes are axis-aligned)
-and turning vertical text.
+a small set of shapes. The spike left out rotated boxes (PaddleOCR crops a rotated rectangle) and turning vertical text; the engine has both.
 
 **Accuracy.** 50 generated images with known text (10 each of receipts, signs, phone screenshots, pages, posters; 509
 lines; slightly rotated, JPEG-compressed, with accents), made by `scripts/ocr_spike_eval.py`. Scored by the character
@@ -207,6 +206,32 @@ rotated crops (they add time).
 **Verdict on the gate** (tract runs both models; the text agrees with the reference; an S25 photo with text in about a
 second or less): all three hold. S2-03 goes on as planned, with no faster path needed. Only screenshots and photos
 labelled as documents, signs and the like are read, so a phone spends this time on a small share of its photos.
+
+### The engine (`shoebox_ml::PpOcr`)
+
+`crates/shoebox-ml/src/ocr.rs` implements `shoebox_search::ocr::Ocr` for the Android index job, Windows and Linux
+desktops and the keeper; the Mac keeps Apple Vision. It reads the stored bytes (JPEG, PNG, HEIC…), upright (EXIF
+orientation applied) at most 2048 px on the long side, so small print is read from the photo's own pixels while the
+detector sees it at 960. Beyond the spike it:
+- fits the smallest *rotated* rectangle round each region (convex hull and rotating calipers), grows it by the DB unclip,
+  and straightens it into an upright crop (bilinear), so tilted text is read as it lies;
+- turns a crop at least 1.5 times taller than wide by a quarter (vertical text, as PaddleOCR does);
+- drops a line scoring under 0.5 (PaddleOCR's `drop_score`) and joins the rest with newlines, top to bottom.
+
+Not done: PaddleOCR's optional text-line orientation model (text upside down, or turned a quarter the other way, is not
+read) and non-Latin scripts (a different recogniser file each).
+
+Plans are kept per input shape (at most 16 detection and 40 recognition plans, then cleared). The three files are in
+`ALL`, so every device that has them offers them like the other models, and a phone downloads them with the others
+from `models-v1` (the index job fetches them after the image and face models; text reading is skipped if any of the
+three is missing). They are in neither the image model's id nor the face model's, so adding them left both unchanged.
+
+Scored on the same 50 images (`ocr_check` + `scripts/ocr_spike_eval.py compare`): 85% of lines within 10% character
+error, against the spike's 83% and RapidOCR's 88%; pages 100% (were 93%: the rotated crops), screenshots 100%, signs 95%,
+posters 63% (ref 70%), receipts 40% (ref 50%; narrow lines of mixed digits and prices, to look at with real receipts).
+Median 270 ms a photo on the Mac (the spike: 237 ms); not timed again on the S25, where the spike took 941 ms. Tests (`crates/shoebox-ml/tests/ocr.rs`, which skip without the model files, as CI has
+none): the receipt fixture, line order, a photo tilted 12°, a photo turned a quarter, no text, not a picture, damaged
+model files.
 
 ## Labels (S1-13)
 

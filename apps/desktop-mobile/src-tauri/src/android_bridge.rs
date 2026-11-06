@@ -14,7 +14,7 @@ use crate::{AppCore, AppOptions};
 use anyhow::{anyhow, bail, Result};
 use futures::future::BoxFuture;
 use jni::objects::{GlobalRef, JClass, JObject, JString, JValue};
-use jni::sys::{jint, jlong, jstring};
+use jni::sys::{jboolean, jint, jlong, jstring};
 use jni::{JNIEnv, JavaVM};
 use serde::Deserialize;
 use serde_json::json;
@@ -313,9 +313,12 @@ fn run(
 }
 
 /// The indexing job (S1-11): runs only while the phone charges (WorkManager's constraints).
+/// `allow_download`: the phone may download a search model nobody offers (only on an unmetered
+/// network, S2-02).
 fn run_index(
     data_dir: String,
     budget_secs: u64,
+    allow_download: bool,
     backend: Arc<Backend>,
 ) -> Result<serde_json::Value> {
     let dir = PathBuf::from(&data_dir);
@@ -353,7 +356,7 @@ fn run_index(
             core.shutdown().await?;
             return Ok(json!({ "skipped": "no library on this device yet" }));
         }
-        let work = core.index_burst(Duration::from_secs(budget_secs));
+        let work = core.index_burst(Duration::from_secs(budget_secs), allow_download);
         let app_opening = async {
             while !APP_OPENING.load(Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_millis(200)).await;
@@ -374,6 +377,7 @@ pub extern "system" fn Java_org_shoebox_desktop_NativeBridge_runIndex(
     _class: JClass,
     data_dir: JString,
     budget_secs: jint,
+    allow_download: jboolean,
     backend: JObject,
 ) -> jstring {
     let result = (|| -> Result<serde_json::Value> {
@@ -383,7 +387,12 @@ pub extern "system" fn Java_org_shoebox_desktop_NativeBridge_runIndex(
             obj: env.new_global_ref(&backend)?,
         });
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_index(data_dir, budget_secs.max(30) as u64, backend)
+            run_index(
+                data_dir,
+                budget_secs.max(30) as u64,
+                allow_download != 0,
+                backend,
+            )
         }))
         .map_err(|_| anyhow!("the indexing run panicked"))?
     })();

@@ -7,9 +7,11 @@ use anyhow::Result;
 use shoebox_core::store::LibraryStore;
 use shoebox_ml::files::{locate, search_dirs};
 use shoebox_ml::{ClipImage, ClipText, SFace, YuNet};
-use shoebox_node::{FaceModels, IndexGate, IndexerConfig, LibraryNode};
+use shoebox_node::{FaceModels, IndexGate, IndexerConfig, LibraryNode, ModelSources};
 use shoebox_search::encoder::{ImageEncoder, TextEncoder};
-use shoebox_search::models::{ALL, CLIP_IMAGE, CLIP_MODEL, FACES_MODEL, FACE_DETECT, FACE_EMBED};
+use shoebox_search::models::{
+    ModelFile, ALL, CLIP_IMAGE, CLIP_MODEL, FACES_MODEL, FACE_DETECT, FACE_EMBED,
+};
 use shoebox_store::Library;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -106,26 +108,56 @@ impl AppCore {
     }
 
     /// One bounded indexing run (the Android job that runs while charging): catch up with the
-    /// other devices, get the image model from one that offers it, index this device's photos
-    /// until the budget runs out or nothing is left, and publish what was done.
-    pub async fn index_burst(self: &Arc<Self>, budget: Duration) -> Result<serde_json::Value> {
+    /// other devices, get the image model (this phone's own folder, then a device that offers
+    /// it, then, if `allow_download`, the release), index this device's photos until the budget
+    /// runs out or nothing is left, and publish what was done.
+    pub async fn index_burst(
+        self: &Arc<Self>,
+        budget: Duration,
+        allow_download: bool,
+    ) -> Result<serde_json::Value> {
         let started = Instant::now();
         let ln = self.ln().await?;
         let _ = self.sync_burst(budget / 4).await;
         if !SearchSettings::load(self.data_dir()).index {
             return Ok(serde_json::json!({ "skipped": "indexing is off on this device" }));
         }
-        let Some(bytes) = ln.model_bytes(&CLIP_IMAGE).await? else {
-            return Ok(serde_json::json!({ "skipped": "no device offers the image model yet" }));
+        let sources = self.model_sources(allow_download);
+        let image = ln.model_bytes_from(&CLIP_IMAGE, &sources).await;
+        let faces = match image {
+            // Faces are a bonus: a download that fails here is tried again next time.
+            Ok(Some(_)) => {
+                let d = ln.model_bytes_from(&FACE_DETECT, &sources).await;
+                let e = ln.model_bytes_from(&FACE_EMBED, &sources).await;
+                match (d, e) {
+                    (Ok(Some(d)), Ok(Some(e))) => Some((d, e)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        clear_download_progress(self.data_dir());
+        let bytes = match image {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => {
+                return Ok(serde_json::json!({
+                    "skipped": if allow_download {
+                        "the image model is not available"
+                    } else {
+                        "no device offers the image model, and a download waits for Wi-Fi"
+                    }
+                }));
+            }
+            Err(e) => {
+                return Ok(serde_json::json!({
+                    "skipped": format!("could not get the image model: {e:#}")
+                }));
+            }
         };
         let encoder =
             tokio::task::spawn_blocking(move || ClipImage::from_bytes(&bytes, CLIP_MODEL))
                 .await??;
-        // Faces too, when a desktop or keeper offers the face models.
-        if let (Some(d), Some(e)) = (
-            ln.model_bytes(&FACE_DETECT).await?,
-            ln.model_bytes(&FACE_EMBED).await?,
-        ) {
+        if let Some((d, e)) = faces {
             let loaded = tokio::task::spawn_blocking(move || {
                 Ok::<_, anyhow::Error>((YuNet::from_bytes(&d)?, SFace::from_bytes(&e)?))
             })
@@ -164,6 +196,78 @@ impl AppCore {
 }
 
 impl AppCore {
+    /// Where a model file may come from on this device (S2-02): its own folders, and (when
+    /// `allow_download`) the release, into the data folder's `models/`. Progress goes to a file
+    /// the app's Settings reads, since the indexing job runs in a process of its own.
+    fn model_sources(&self, allow_download: bool) -> ModelSources {
+        let data = self.data_dir().to_path_buf();
+        let last = Arc::new(Mutex::new(0u64));
+        ModelSources {
+            dirs: model_dirs(&self.opts.model_dirs, &data),
+            download_to: allow_download.then(|| data.join("models")),
+            progress: Some(Arc::new({
+                let data = data.clone();
+                move |file: &ModelFile, done, total| {
+                    let mut last = last.lock().unwrap();
+                    // About once a megabyte, and at the end.
+                    if done >= *last + (1 << 20) || done == total {
+                        *last = done;
+                        write_download_progress(&data, file.name, done, total);
+                    }
+                }
+            })),
+        }
+    }
+}
+
+const DOWNLOAD_FILE: &str = "model-download.json";
+/// A progress file older than this belongs to a job that was killed.
+const DOWNLOAD_STALE: Duration = Duration::from_secs(90);
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DownloadFile {
+    name: String,
+    done: u64,
+    total: u64,
+    at_ms: u64,
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+fn write_download_progress(dir: &std::path::Path, name: &str, done: u64, total: u64) {
+    let f = DownloadFile {
+        name: name.to_string(),
+        done,
+        total,
+        at_ms: now_ms(),
+    };
+    if let Ok(json) = serde_json::to_vec(&f) {
+        let _ = std::fs::write(dir.join(DOWNLOAD_FILE), json);
+    }
+}
+
+fn clear_download_progress(dir: &std::path::Path) {
+    let _ = std::fs::remove_file(dir.join(DOWNLOAD_FILE));
+}
+
+/// The model being downloaded now, if a job reported progress lately.
+fn download_progress(dir: &std::path::Path) -> Option<crate::types::ModelDownload> {
+    let f: DownloadFile =
+        serde_json::from_slice(&std::fs::read(dir.join(DOWNLOAD_FILE)).ok()?).ok()?;
+    (now_ms().saturating_sub(f.at_ms) < DOWNLOAD_STALE.as_millis() as u64).then_some(
+        crate::types::ModelDownload {
+            name: f.name,
+            done: f.done as f64,
+            total: f.total as f64,
+        },
+    )
+}
+
+impl AppCore {
     /// How much of the library search covers on this device, and who is indexing (S1-16).
     pub async fn search_status(&self) -> Result<crate::types::SearchStatus> {
         let ln = self.ln().await?;
@@ -198,6 +302,7 @@ impl AppCore {
             held_bytes: s.held_bytes as f64,
             index_here: SearchSettings::load(self.data_dir()).index,
             indexing: p.running && !p.paused,
+            model_download: download_progress(self.data_dir()),
         })
     }
 

@@ -193,6 +193,17 @@ ts_type! {
         pub index_here: bool,
         /// Indexing is running on this device now.
         pub indexing: bool,
+        /// A search model being downloaded now (S2-02), as the indexing job reports it.
+        pub model_download: Option<ModelDownload>,
+    }
+}
+
+ts_type! {
+    /// A search model this device is downloading because no device of the library offers it (S2-02).
+    pub struct ModelDownload {
+        pub name: String,
+        pub done: f64,
+        pub total: f64,
     }
 }
 

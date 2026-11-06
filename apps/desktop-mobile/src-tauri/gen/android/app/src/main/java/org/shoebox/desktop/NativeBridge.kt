@@ -15,11 +15,12 @@ object NativeBridge {
     external fun runBurst(dataDir: String, budgetSecs: Int, backend: PhotoBackend, lastNotifiedMs: Long): String
 
     /**
-     * Index this phone's photos for search by meaning for at most `budgetSecs` (S1-11), fetching
-     * the image model from a desktop or keeper the first time. Returns a JSON report.
+     * Index this phone's photos for search by meaning for at most `budgetSecs` (S1-11). The image
+     * model comes from this phone's own folder, then a desktop or keeper that offers it, then,
+     * when `allowDownload` (an unmetered network), from the release (S2-02). Returns a JSON report.
      */
     @JvmStatic
-    external fun runIndex(dataDir: String, budgetSecs: Int, backend: PhotoBackend): String
+    external fun runIndex(dataDir: String, budgetSecs: Int, allowDownload: Boolean, backend: PhotoBackend): String
 
     /**
      * Hand Rust the decoder it reads HEIC and AVIF with (`HeifDecoder`): call it once per process,

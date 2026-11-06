@@ -5,6 +5,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.Lifecycle
@@ -117,6 +119,17 @@ class BurstWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
     }
 }
 
+/**
+ * Whether the phone is on a network the user does not pay for by the byte (Wi-Fi, or a mobile
+ * plan marked unmetered). Search models (about 135 MB) are downloaded only then (S2-02).
+ */
+fun onUnmeteredNetwork(ctx: Context): Boolean {
+    val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+    val caps = cm.getNetworkCapabilities(cm.activeNetwork ?: return false) ?: return false
+    return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+}
+
 /** Indexes this phone's photos for search while it charges; stops when WorkManager says so. */
 class IndexWorker(private val ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
@@ -126,7 +139,7 @@ class IndexWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
         val report = try {
             ModelAssets.install(ctx)
             NativeBridge.registerImageDecoder(HeifDecoder)
-            NativeBridge.runIndex(ctx.dataDir.absolutePath, BackgroundSync.INDEX_BUDGET_SECS, PhotoBackend(ctx))
+            NativeBridge.runIndex(ctx.dataDir.absolutePath, BackgroundSync.INDEX_BUDGET_SECS, onUnmeteredNetwork(ctx), PhotoBackend(ctx))
         } catch (e: Throwable) {
             Log.e("ShoeboxIndex", "indexing failed", e)
             return Result.retry()

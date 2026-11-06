@@ -191,6 +191,7 @@ async fn a_phone_gets_a_model_file_from_a_desktop_and_a_wrong_file_is_refused() 
         name: "test-model.onnx",
         blake3: *blake3::hash(&bytes).as_bytes(),
         size: bytes.len() as u64,
+        url: "",
     };
     let path = dir.path().join(file.name);
     std::fs::write(&path, &bytes).unwrap();
@@ -223,6 +224,7 @@ async fn a_phone_gets_a_model_file_from_a_desktop_and_a_wrong_file_is_refused() 
         name: "other.onnx",
         blake3: [9; 32],
         size: 13,
+        url: "",
     };
     assert!(nodes[0].share_model(&other, &wrong).await.is_err());
     c.shutdown().await;

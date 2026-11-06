@@ -61,7 +61,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: models
-          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py') }}
+          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py', 'scripts/ocr_dict.py') }}
       - name: Search models match the hashes compiled in (S1-08)
         run: cargo xtask models --check
 
@@ -82,7 +82,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: models
-          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py') }}
+          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py', 'scripts/ocr_dict.py') }}
       - name: Search models match the hashes compiled in (S1-08)
         run: cargo xtask models --check
       - name: The files are on the fixed models release (S2-02)
@@ -92,7 +92,7 @@ jobs:
             --title "Search models ($MODELS_TAG)" --prerelease \
             --notes "The search models the app downloads once when no other device of the library has them. Each file is checked against the hash built into the app. Nothing here is for people to download by hand."
           have=$(gh release view "$MODELS_TAG" --json assets -q '.assets[].name')
-          for f in models/build/*.onnx; do
+          for f in models/build/*.onnx models/build/*.txt; do
             name=$(basename "$f")
             if printf '%s\n' "$have" | grep -qx "$name"; then
               echo "$name is already on $MODELS_TAG"
@@ -119,7 +119,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: models
-          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py') }}
+          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py', 'scripts/ocr_dict.py') }}
       - name: Search models match the hashes compiled in (S1-08)
         run: cargo xtask models --check
       # zig is the C and C++ compiler for the musl targets: libheif and libde265 (HEIC, I1-02) are C++,
@@ -174,7 +174,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: models
-          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py') }}
+          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py', 'scripts/ocr_dict.py') }}
       - name: Search models match the hashes compiled in (S1-08)
         run: cargo xtask models --check
       - uses: taiki-e/install-action@v2
@@ -232,7 +232,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: models
-          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py') }}
+          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py', 'scripts/ocr_dict.py') }}
       - name: Search models match the hashes compiled in (S1-08)
         run: cargo xtask models --check
       - name: Android NDK

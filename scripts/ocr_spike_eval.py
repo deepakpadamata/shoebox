@@ -6,7 +6,7 @@
     #    PP-OCRv5 files with PaddleOCR's own settings for them (`inference.yml`)
     uv run --quiet --no-project --with rapidocr --with onnxruntime --with pyyaml --with pillow \
         python -I scripts/ocr_spike_eval.py reference <image-dir> <models/build> <reference.jsonl>
-    # 3. what the tract spike printed (cargo run --release -p shoebox-ml --example ocr_spike), scored
+    # 3. what the tract spike printed (cargo run --release -p shoebox-ml --example ocr_check), scored
     python3 -I scripts/ocr_spike_eval.py compare <image-dir> <tract.jsonl> <reference.jsonl>
 
 The images are made here and stay untracked: their text is known, so both readers are scored against

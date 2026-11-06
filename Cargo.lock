@@ -7168,6 +7168,7 @@ dependencies = [
  "image",
  "serde_json",
  "shoebox-core",
+ "shoebox-media",
  "shoebox-search",
  "tract-onnx",
 ]

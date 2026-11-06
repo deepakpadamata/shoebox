@@ -217,6 +217,10 @@ class IndexWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
             return Result.retry()
         }
         Log.i("ShoeboxIndex", report)
+        // The system restarted this job while the native run of the last start is still going
+        // (constraints that flap, a charger that reports full and charging by turns): come back
+        // once that run has ended, rather than counting this as done.
+        if (report.contains("already going")) return Result.retry()
         // More to do and still fine to do it: carry on at once rather than in half an hour.
         val after = IndexProgress.read(dir)
         if (!report.contains("\"skipped\"") && after != null && !after.done && after.left > 0 && !isStopped && !tooHot() && charging()) {

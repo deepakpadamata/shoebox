@@ -34,6 +34,10 @@ pub trait Harness: Send + Sync + 'static {
 
     /// How to dial `device`'s replicas in this world.
     fn peer_addr(&self, device: EndpointId) -> PeerAddr;
+
+    /// Wait a moment (backends that talk over a network: endpoints that have just started take a
+    /// moment to see each other). Backends that sync in memory have nothing to wait for.
+    async fn pause(&self, _millis: u64) {}
 }
 
 /// Run every scenario, panicking (with the scenario name logged) on the first failure.
@@ -181,15 +185,23 @@ async fn pair<H: Harness>(h: &H) -> (Node<H>, Node<H>) {
     )
 }
 
+/// Both ways, retrying a peer that is not yet reachable: two endpoints that have just started on
+/// one machine can take a moment to see each other, and a fresh CI runner has shown that as
+/// `Unreachable` (three times in a row of runs on unrelated changes). A real failure still shows
+/// after the last attempt.
 async fn sync_both<H: Harness>(h: &H, a: &Node<H>, b: &Node<H>) {
-    a.store
-        .sync_with(&h.peer_addr(b.dev))
-        .await
-        .expect("a syncs with b");
-    b.store
-        .sync_with(&h.peer_addr(a.dev))
-        .await
-        .expect("b syncs with a");
+    for attempt in 1..=5 {
+        let first = a.store.sync_with(&h.peer_addr(b.dev)).await;
+        let second = b.store.sync_with(&h.peer_addr(a.dev)).await;
+        match (first, second) {
+            (Ok(_), Ok(_)) => return,
+            (first, second) if attempt == 5 => {
+                first.expect("a syncs with b");
+                second.expect("b syncs with a");
+            }
+            _ => h.pause(300).await,
+        }
+    }
 }
 
 async fn timeline<L: LibraryStore>(s: &L) -> Vec<PhotoId> {

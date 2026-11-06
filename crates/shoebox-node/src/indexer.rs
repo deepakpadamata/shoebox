@@ -103,6 +103,9 @@ pub struct IndexProgress {
     pub paused: bool,
     /// Why it is not indexing (gate closed), if so.
     pub waiting: Option<String>,
+    /// The last pass found nothing left for this device to do: pictures, text and faces (S2-04).
+    /// False until a pass has run, and while the gate is closed or indexing is paused.
+    pub caught_up: bool,
 }
 
 #[derive(Default)]
@@ -112,6 +115,10 @@ pub(crate) struct IndexerState {
     wake: Notify,
     buffer: Mutex<Buffer>,
     progress: Mutex<IndexProgress>,
+    /// Photos this run could not read for a kind of work (0 pictures, 1 text, 2 faces), so a
+    /// photo that cannot be decoded is not tried on every pass and does not keep a phone awake.
+    /// Forgotten on restart.
+    failed: Mutex<HashSet<(u8, PhotoId)>>,
     /// This device's text reader (S1-14), if it has one.
     ocr: Mutex<Option<Arc<dyn Ocr>>>,
     /// Read text waiting for the next shard.
@@ -353,8 +360,17 @@ impl<L: LibraryStore> LibraryNode<L> {
         let mut own = vec![];
         let mut share = vec![];
         for p in photos {
-            if done.contains(&p.id) || p.thumb.hash == p.original.hash {
-                continue; // indexed, or a video still without its poster frame (A-104)
+            if done.contains(&p.id)
+                || p.thumb.hash == p.original.hash
+                || self
+                    .inner
+                    .indexer
+                    .failed
+                    .lock()
+                    .unwrap()
+                    .contains(&(0, p.id))
+            {
+                continue; // indexed, or a video still without its poster frame (A-104), or unreadable
             }
             let imported_ms = p.favorite.hlc.physical_ms.min(p.deleted_at.hlc.physical_ms);
             let due = now.saturating_sub(imported_ms.max(since_ms)) >= grace;
@@ -460,7 +476,15 @@ impl<L: LibraryStore> LibraryNode<L> {
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?
         {
-            if read.contains(&p.id) {
+            if read.contains(&p.id)
+                || self
+                    .inner
+                    .indexer
+                    .failed
+                    .lock()
+                    .unwrap()
+                    .contains(&(1, p.id))
+            {
                 continue;
             }
             let screenshot = shoebox_search::facts::PhotoFacts::of(&p).is_screenshot();
@@ -507,7 +531,10 @@ impl<L: LibraryStore> LibraryNode<L> {
                     o.1.get_or_insert_with(Instant::now);
                     o.0.push((id, text));
                 }
-                Err(e) => debug!("could not read text in {id}: {e}"),
+                Err(e) => {
+                    debug!("could not read text in {id}: {e}");
+                    self.inner.indexer.failed.lock().unwrap().insert((1, id));
+                }
             }
         }
         Ok(true)
@@ -546,7 +573,16 @@ impl<L: LibraryStore> LibraryNode<L> {
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?
         {
-            if done.contains(&p.id) || p.original.mime.starts_with("video/") {
+            if done.contains(&p.id)
+                || p.original.mime.starts_with("video/")
+                || self
+                    .inner
+                    .indexer
+                    .failed
+                    .lock()
+                    .unwrap()
+                    .contains(&(2, p.id))
+            {
                 continue;
             }
             let imported_ms = p.favorite.hlc.physical_ms.min(p.deleted_at.hlc.physical_ms);
@@ -591,7 +627,10 @@ impl<L: LibraryStore> LibraryNode<L> {
                     f.1.get_or_insert_with(Instant::now);
                     f.0.push((id, faces));
                 }
-                Err(e) => debug!("could not look for faces in {id}: {e:#}"),
+                Err(e) => {
+                    debug!("could not look for faces in {id}: {e:#}");
+                    self.inner.indexer.failed.lock().unwrap().insert((2, id));
+                }
             }
         }
         Ok(true)
@@ -749,6 +788,8 @@ async fn index_loop<L: LibraryStore>(
         }
         let open = gate.may_index();
         st.progress.lock().unwrap().waiting = (!open).then(|| "waiting for power and idle".into());
+        // Whether this pass found anything to do (S2-04: `caught_up`).
+        let mut busy = false;
         if !ln.indexer_paused() && open {
             match ln.index_work(model, &cfg, since).await {
                 Ok((work, indexed, total)) => {
@@ -760,6 +801,7 @@ async fn index_loop<L: LibraryStore>(
                         p.mine_left = work.len();
                         p.photos_per_min = rate;
                     }
+                    busy |= !work.is_empty();
                     for chunk in work.chunks(cfg.batch.max(1)) {
                         if ln.indexer_paused() || !gate.may_index() {
                             break;
@@ -797,7 +839,10 @@ async fn index_loop<L: LibraryStore>(
                                     b.rows.push((id, v, l));
                                     done += 1;
                                 }
-                                Ok((id, Err(e))) => debug!("could not index {id}: {e:#}"),
+                                Ok((id, Err(e))) => {
+                                    debug!("could not index {id}: {e:#}");
+                                    st.failed.lock().unwrap().insert((0, id));
+                                }
                                 Err(e) => warn!("an encoder task failed: {e}"),
                             }
                         }
@@ -829,7 +874,10 @@ async fn index_loop<L: LibraryStore>(
             if let Some(engine) = engine {
                 if !ln.indexer_paused() && gate.may_index() {
                     match ln.read_some_text(&cfg, since, engine).await {
-                        Ok(true) => st.wake.notify_one(),
+                        Ok(true) => {
+                            busy = true;
+                            st.wake.notify_one()
+                        }
                         Ok(false) => {}
                         Err(e) => warn!("could not read text in photos: {e:#}"),
                     }
@@ -851,7 +899,10 @@ async fn index_loop<L: LibraryStore>(
                 }
                 if !ln.indexer_paused() && gate.may_index() {
                     match ln.find_some_faces(&cfg, since, faces).await {
-                        Ok(true) => st.wake.notify_one(),
+                        Ok(true) => {
+                            busy = true;
+                            st.wake.notify_one()
+                        }
                         Ok(false) => {}
                         Err(e) => warn!("could not look for faces: {e:#}"),
                     }
@@ -870,6 +921,7 @@ async fn index_loop<L: LibraryStore>(
                 warn!("could not compact index shards: {e:#}");
             }
         }
+        st.progress.lock().unwrap().caught_up = open && !ln.indexer_paused() && !busy;
         let wait = {
             let inner = ln.inner.clone();
             let tick = cfg.tick;

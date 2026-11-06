@@ -179,19 +179,42 @@ impl AppCore {
             Arc::new(encoder) as Arc<dyn ImageEncoder>,
             Arc::new(shoebox_node::Always),
         );
-        loop {
+        // Run until this device has nothing left to do (pictures, text, faces), the budget is
+        // spent, or the Android side asks it to stop (too hot, unplugged): `index-stop`.
+        let stop = index_stop_path(self.data_dir());
+        let _ = std::fs::remove_file(&stop);
+        let caught_up = loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
             let p = ln.index_progress();
-            if p.mine_left == 0 || started.elapsed() >= budget {
-                break;
+            write_index_progress(self.data_dir(), &p, false);
+            if p.caught_up {
+                break true;
             }
-        }
+            if started.elapsed() >= budget || stop.exists() {
+                break false;
+            }
+        };
+        let _ = std::fs::remove_file(&stop);
         ln.pause_indexer();
         let published = ln.flush_index().await?;
+        // Group faces and compact shards when this device is the one the rule picks (S2-01), so a
+        // phone on its own finishes the whole job in one run.
+        if caught_up {
+            if let Err(e) = ln.regroup_people(FACES_MODEL, false).await {
+                tracing::warn!("could not group faces: {e:#}");
+            }
+            if let Err(e) = ln.compact_shards(false).await {
+                tracing::warn!("could not compact index shards: {e:#}");
+            }
+        }
         let _ = self.sync_burst(Duration::from_secs(20)).await;
-        Ok(
-            serde_json::json!({ "indexed": published, "progress": format!("{:?}", ln.index_progress()) }),
-        )
+        let p = ln.index_progress();
+        write_index_progress(self.data_dir(), &p, caught_up);
+        Ok(serde_json::json!({
+            "indexed": published,
+            "caught_up": caught_up,
+            "progress": format!("{p:?}"),
+        }))
     }
 }
 
@@ -265,6 +288,31 @@ fn download_progress(dir: &std::path::Path) -> Option<crate::types::ModelDownloa
             total: f.total as f64,
         },
     )
+}
+
+/// Where an indexing run on Android tells the notification how far it has got (it runs in its own
+/// process, like the model download): `{"indexed", "total", "left", "done"}`.
+pub fn index_progress_path(dir: &std::path::Path) -> PathBuf {
+    dir.join("index-progress.json")
+}
+
+/// A file the Android job creates to ask a run to stop (the phone is too hot or unplugged).
+pub fn index_stop_path(dir: &std::path::Path) -> PathBuf {
+    dir.join("index-stop")
+}
+
+fn write_index_progress(dir: &std::path::Path, p: &shoebox_node::IndexProgress, done: bool) {
+    let json = serde_json::json!({
+        "indexed": p.indexed,
+        "total": p.total,
+        "left": p.total.saturating_sub(p.indexed),
+        "done": done,
+    });
+    let path = index_progress_path(dir);
+    let part = path.with_extension("part");
+    if std::fs::write(&part, json.to_string()).is_ok() {
+        let _ = std::fs::rename(&part, &path);
+    }
 }
 
 impl AppCore {

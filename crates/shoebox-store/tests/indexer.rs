@@ -679,3 +679,55 @@ async fn faces_are_grouped_by_one_phone_unless_an_always_on_device_is_there() {
     }
     c.shutdown().await;
 }
+
+/// An encoder that cannot read photos whose first pixel is dark (stands in for a photo that
+/// will not decode).
+struct Picky;
+
+impl shoebox_search::encoder::ImageEncoder for Picky {
+    fn model(&self) -> shoebox_core::model::ModelId {
+        ENC.model()
+    }
+    fn dims(&self) -> usize {
+        64
+    }
+    fn encode_image(
+        &self,
+        image: &shoebox_search::encoder::Rgb,
+    ) -> Result<Vec<f32>, shoebox_search::encoder::EncodeError> {
+        if image.data[0] < 40 {
+            return Err(shoebox_search::encoder::EncodeError("unreadable".into()));
+        }
+        ENC.encode_image(image)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_indexer_says_when_it_has_caught_up_even_with_a_photo_it_cannot_read() {
+    let c = Cluster::with_roles(&[Role::Companion]).await.unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    let total = 40u32;
+    photos(&nodes, &[0], EndpointId([77; 32]), 0..total).await;
+    assert!(!nodes[0].index_progress().caught_up, "nothing has run yet");
+    nodes[0].start_indexer(phone(20), Arc::new(Picky), Arc::new(Always));
+    wait_until(Duration::from_secs(60), || async {
+        nodes[0].index_progress().caught_up
+    })
+    .await
+    .expect("caught up, though some photos cannot be read");
+    nodes[0].flush_index().await.unwrap();
+    let covered = coverage(&nodes[0]).await.len();
+    // Photos the encoder refused (first pixel under 40) are not covered, and are not retried.
+    let unreadable = (0..total).filter(|i| (i * 37 % 256) < 40).count();
+    assert!(
+        unreadable > 0 && covered == total as usize - unreadable,
+        "{covered} covered"
+    );
+    nodes[0].pause_indexer();
+    wait_until(Duration::from_secs(10), || async {
+        !nodes[0].index_progress().caught_up
+    })
+    .await
+    .expect("a paused indexer is not caught up");
+    c.shutdown().await;
+}

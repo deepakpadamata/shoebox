@@ -13,7 +13,7 @@ guide](docs/guides/user-guide.md).
   index shards every device holds. A library with no keeper and no computer, one phone or phones only, shares the same
   work among the phones as they charge, instead of waiting two days for photos they did not import. A phone with no
   computer or keeper to get the search models from downloads them once on Wi-Fi, checked against the hashes built into
-  the app. *Settings → Search* and `shoebox-keeper index` say how much is covered.
+  the app. On Android the indexing job now carries on until the phone has nothing left to do (a long run with a progress notification when there are many photos waiting, paused when the phone is hot or unplugged), then groups faces and compacts. *Settings → Search* and `shoebox-keeper index` say how much is covered.
 - **People**: faces found and grouped on your own devices; name, merge, hide, *this is me*, "not Ana". On or off for
   the whole library.
 - **More formats**: GIF, WebP, BMP and TIFF photos (an animated GIF or WebP shows its first frame; the original plays

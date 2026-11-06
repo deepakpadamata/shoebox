@@ -26,8 +26,9 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -183,25 +184,30 @@ class IndexWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
         val budget = if (foreground) LONG_BUDGET_SECS else BackgroundSync.INDEX_BUDGET_SECS
         val stop = File(dir, "index-stop")
         val report = try {
-            coroutineScope {
-                val watch = launch(Dispatchers.Default) {
-                    while (isActive) {
-                        delay(10_000)
-                        if (tooHot() || !charging()) {
-                            runCatching { stop.writeText("stop") }
-                        }
-                        if (foreground) IndexProgress.read(dir)?.let { runCatching { setForeground(foregroundInfo(it)) } }
+            // Not a child of this worker's job: when WorkManager cancels the worker (unplugged,
+            // constraints lost) this must still run, because the native run is not cancellable.
+            val watcher = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            watcher.launch {
+                var ticks = 0
+                while (isActive) {
+                    delay(2_000)
+                    if (isStopped || (ticks % 5 == 0 && (tooHot() || !charging()))) {
+                        runCatching { stop.writeText("stop") }
                     }
-                }
-                try {
-                    withContext(Dispatchers.IO) {
-                        ModelAssets.install(ctx)
-                        NativeBridge.registerImageDecoder(HeifDecoder)
-                        NativeBridge.runIndex(dir.absolutePath, budget, onUnmeteredNetwork(ctx), PhotoBackend(ctx))
+                    if (foreground && ticks % 5 == 0) {
+                        IndexProgress.read(dir)?.let { runCatching { setForeground(foregroundInfo(it)) } }
                     }
-                } finally {
-                    watch.cancel()
+                    ticks++
                 }
+            }
+            try {
+                withContext(Dispatchers.IO) {
+                    ModelAssets.install(ctx)
+                    NativeBridge.registerImageDecoder(HeifDecoder)
+                    NativeBridge.runIndex(dir.absolutePath, budget, onUnmeteredNetwork(ctx), PhotoBackend(ctx))
+                }
+            } finally {
+                watcher.cancel()
             }
         } catch (e: Throwable) {
             Log.e("ShoeboxIndex", "indexing failed", e)
@@ -214,11 +220,6 @@ class IndexWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
             BackgroundSync.indexAgain(ctx)
         }
         return Result.success()
-    }
-
-    /** WorkManager cancels the worker (unplugged, constraints lost): the run is in native code and must be told. */
-    override fun onStopped() {
-        runCatching { File(ctx.dataDir, "index-stop").writeText("stop") }
     }
 
     private fun foregroundInfo(p: IndexProgress): ForegroundInfo {

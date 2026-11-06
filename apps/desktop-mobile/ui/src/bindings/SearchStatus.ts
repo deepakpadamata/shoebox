@@ -51,6 +51,14 @@ waiting: string | null,
  */
 caught_up: boolean, 
 /**
+ * An indexing run is going (the background job's, or the user's Index now).
+ */
+run_active: boolean, 
+/**
+ * Why the last Index now run did not run or stopped, if it did not finish.
+ */
+last_run: string | null, 
+/**
  * A search model being downloaded now (S2-02), as the indexing job reports it.
  */
 model_download: ModelDownload | null, };

@@ -6,6 +6,7 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
 limits and how to report a problem: [the tester guide](docs/guides/tester-guide.md); how Shoebox works: [the user
 guide](docs/guides/user-guide.md).
 
+- Settings → Search on a phone has an **Index now** button (and **Stop indexing**): it indexes at once, charging or not, until everything is done, for as long as the app stays open, so the 16-minutes-an-hour background limit no longer decides how fast a phone catches up when you ask it to. A run now publishes what it has read every 15 s, so the progress bars move and a run that is stopped or killed keeps its work.
 - **Search** (epic S1), on every device and with no other device needed: dates, places, cameras, albums, videos,
   screenshots and favourites as chips; words matched against what is in the photos (OpenCLIP, 8 bits), labels, text
   read from photos (Apple Vision on the Mac; PP-OCRv5, an open model that runs on the device, on Android, Windows and the Linux keeper) and people's names; *Similar photos* in the viewer. Indexing is shared out between the

@@ -15,6 +15,7 @@ use shoebox_search::models::{
 };
 use shoebox_store::Library;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -52,7 +53,63 @@ pub fn model_dirs(extra: &[PathBuf], data_dir: &std::path::Path) -> Vec<PathBuf>
     search_dirs(&dirs)
 }
 
+/// Set while an indexing run (the background job's, or the user's "Index now") is going in this
+/// process. WorkManager can start the job again while the native run of the first is still
+/// going, since native code cannot be cancelled; a second run would delete the first one's
+/// `index-stop` file and pause its indexer under it.
+static INDEX_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// How the last "Index now" run ended, for Settings.
+static LAST_RUN: Mutex<Option<String>> = Mutex::new(None);
+
+pub struct IndexRun;
+
+impl IndexRun {
+    pub fn begin() -> Option<Self> {
+        (!INDEX_RUNNING.swap(true, Ordering::SeqCst)).then_some(Self)
+    }
+}
+
+impl Drop for IndexRun {
+    fn drop(&mut self) {
+        INDEX_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// The longest an "Index now" run goes on; it ends sooner when everything is done.
+const MANUAL_BUDGET: Duration = Duration::from_secs(12 * 3600);
+
 impl AppCore {
+    /// The user asked for indexing now (Settings → Search): run until this device has nothing
+    /// left, with no power or idle gate, for as long as the app's process lives. Returns false
+    /// when a run is already going.
+    pub fn index_now(self: &Arc<Self>) -> bool {
+        let Some(run) = IndexRun::begin() else {
+            return false;
+        };
+        *LAST_RUN.lock().unwrap() = None;
+        let core = self.clone();
+        tokio::spawn(async move {
+            let _run = run;
+            let note = match core.index_burst(MANUAL_BUDGET, false).await {
+                Ok(v) => v
+                    .get("skipped")
+                    .and_then(|s| s.as_str())
+                    .map(|s| format!("Indexing did not start: {s}")),
+                Err(e) => Some(format!("Indexing stopped: {e:#}")),
+            };
+            *LAST_RUN.lock().unwrap() = note;
+        });
+        true
+    }
+
+    /// Ask the run `index_now` started to stop.
+    pub fn stop_index_now(&self) {
+        if INDEX_RUNNING.load(Ordering::SeqCst) {
+            let _ = std::fs::write(index_stop_path(self.data_dir()), b"stop");
+        }
+    }
+
     /// Set up search by meaning for `ln`: the text model, the model files offered to the other
     /// devices, and (on a desktop) the indexer.
     pub(crate) async fn start_search_models(&self, ln: &LibraryNode<Library>) {
@@ -223,8 +280,17 @@ impl AppCore {
         // spent, or the Android side asks it to stop (too hot, unplugged): `index-stop`.
         let stop = index_stop_path(self.data_dir());
         let _ = std::fs::remove_file(&stop);
+        let mut flushed = Instant::now();
         let caught_up = loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
+            // Publish what has been read so far, so the counts in Settings move and a run that
+            // is killed keeps its work: text and face rows otherwise wait for a full shard.
+            if flushed.elapsed() >= Duration::from_secs(15) {
+                flushed = Instant::now();
+                if let Err(e) = ln.flush_index().await {
+                    tracing::warn!("could not publish index shards: {e:#}");
+                }
+            }
             let p = ln.index_progress();
             write_index_progress(self.data_dir(), &p, false);
             if p.caught_up {
@@ -399,6 +465,8 @@ impl AppCore {
             stage: p.stage.to_string(),
             waiting: p.waiting.clone(),
             caught_up: p.caught_up,
+            run_active: INDEX_RUNNING.load(Ordering::SeqCst),
+            last_run: LAST_RUN.lock().unwrap().clone(),
             model_download: download_progress(self.data_dir()),
         })
     }

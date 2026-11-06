@@ -54,7 +54,12 @@
   // Search on this device (S1-16).
   let search = $state<SearchStatus | null>(null);
   let rebuilding = $state(false);
-  onMount(() => { api.searchStatus().then((st) => (search = st)).catch(() => {}); });
+  onMount(() => {
+    const refresh = () => api.searchStatus().then((st) => (search = st)).catch(() => {});
+    refresh();
+    const timer = setInterval(refresh, 3000);
+    return () => clearInterval(timer);
+  });
   const pct = (n: number, of: number) => (of === 0 ? 100 : Math.floor((n * 100) / of));
   // Replacing the recovery phrase: the current one in, the new kit out (shown once).
   let replaceOpen = $state(false);
@@ -177,6 +182,17 @@
           onchange={(v) => save(async () => { await api.setSearchIndexing(v); search = await api.searchStatus(); }, v ? 'Indexing on' : 'Indexing off')} />
           {viewport.mobile ? 'Index photos while charging' : 'Index photos on power when idle'}</label>
         <p class="small muted" style="margin:0">Indexing lets your devices find photos by what is in them. It is shared out between the devices that do it; turned off here, the others take this device's share.</p>
+        {#if viewport.mobile && search.meaning && search.index_here}
+          <div class="row-flex">
+            {#if search.run_active}
+              <Button size="sm" kind="ghost" onclick={() => save(async () => { await api.stopIndexNow(); }, 'Stopping…')}>Stop indexing</Button>
+            {:else}
+              <Button size="sm" onclick={() => save(async () => { if (!(await api.indexNow())) toast('Indexing is already running'); search = await api.searchStatus(); }, 'Indexing started')}>Index now</Button>
+            {/if}
+            <span class="tiny muted grow">{search.run_active ? 'Runs until everything is indexed. Keep the phone plugged in and the app open.' : 'Starts now, whether or not the phone is charging, until everything is indexed.'}</span>
+          </div>
+          {#if search.last_run && !search.run_active}<div class="small">{search.last_run}</div>{/if}
+        {/if}
         {#if processingHeadline(search)}<div class="small"><b>{processingHeadline(search)}</b></div>{/if}
         {#each processingRows(search) as r (r.key)}
           <div class="proc">

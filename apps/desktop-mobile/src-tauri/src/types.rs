@@ -209,6 +209,10 @@ ts_type! {
         pub waiting: Option<String>,
         /// This device has nothing left to do.
         pub caught_up: bool,
+        /// An indexing run is going (the background job's, or the user's Index now).
+        pub run_active: bool,
+        /// Why the last Index now run did not run or stopped, if it did not finish.
+        pub last_run: Option<String>,
         /// A search model being downloaded now (S2-02), as the indexing job reports it.
         pub model_download: Option<ModelDownload>,
     }

@@ -19,7 +19,8 @@
 
 use crate::ids::{EndpointId, Timestamp};
 use crate::model::{
-    BlobKind, BlobRef, IndexShard, MotionRecord, PhotoId, PhotoRecord, Role, ShardKind, SharedItem,
+    BlobKind, BlobRef, IndexShard, IndexerStatus, MotionRecord, PhotoId, PhotoRecord, Role,
+    ShardKind, SharedItem,
 };
 
 /// Above this many photos a Viewer keeps only the binary codes for search by meaning, not the
@@ -156,12 +157,39 @@ pub fn index_plan<'a>(
     plan
 }
 
-/// A device that shares the indexing backlog (an always-on indexer), weighted by its speed.
+/// A device that shares the indexing backlog, weighted by its speed (see [`share_candidates`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IndexCandidate {
     pub device: EndpointId,
     /// Photos per minute; 0 = takes no share.
     pub weight: u32,
+}
+
+/// The devices that share the indexing backlog (and the work only one device does: grouping
+/// faces, compacting shards), from the statuses every device has. `accepts` says which statuses
+/// can do the job at all (the model, the kind).
+///
+/// Always-on indexers (a keeper, a desktop set to index while plugged in) take it when there
+/// are any that are indexing now. With none, every device that is indexing takes a share by its
+/// speed: a phone on its own, or two phones, share the work as they charge instead of leaving it
+/// for the 48-hour takeover. A paused device (rate 0) takes no share either way.
+pub fn share_candidates(
+    statuses: &[IndexerStatus],
+    accepts: impl Fn(&IndexerStatus) -> bool,
+) -> Vec<IndexCandidate> {
+    let working: Vec<&IndexerStatus> = statuses
+        .iter()
+        .filter(|s| s.photos_per_min > 0 && accepts(s))
+        .collect();
+    let always: Vec<&IndexerStatus> = working.iter().copied().filter(|s| s.always_on).collect();
+    let chosen = if always.is_empty() { working } else { always };
+    chosen
+        .into_iter()
+        .map(|s| IndexCandidate {
+            device: s.device,
+            weight: s.photos_per_min,
+        })
+        .collect()
 }
 
 /// Which candidate indexes `photo` for `kind` (epic S1 §5.2): weighted rendezvous hashing. Each
@@ -256,6 +284,62 @@ pub fn rank_holders<D: Ord + Clone>(candidates: &mut [Candidate<D>]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn status(device: u8, rate: u32, always_on: bool, model: u8) -> IndexerStatus {
+        IndexerStatus {
+            device: EndpointId([device; 32]),
+            models: vec![crate::model::ModelId([model; 32])],
+            kinds: vec![ShardKind::Vec8],
+            photos_per_min: rate,
+            always_on,
+            hlc: crate::hlc::Hlc::GENESIS,
+        }
+    }
+
+    fn devices(c: &[IndexCandidate]) -> Vec<u8> {
+        let mut d: Vec<u8> = c.iter().map(|c| c.device.0[0]).collect();
+        d.sort_unstable();
+        d
+    }
+
+    #[test]
+    fn always_on_indexers_take_the_backlog_when_there_are_any() {
+        let s = [
+            status(1, 20, true, 7),
+            status(2, 5, false, 7),
+            status(3, 9, true, 7),
+        ];
+        let c = share_candidates(&s, |s| s.models.contains(&crate::model::ModelId([7; 32])));
+        assert_eq!(devices(&c), vec![1, 3]);
+        assert_eq!(c.iter().find(|c| c.device.0[0] == 3).unwrap().weight, 9);
+    }
+
+    #[test]
+    fn with_none_always_on_every_working_indexer_shares_by_speed() {
+        let s = [status(1, 20, false, 7), status(2, 5, false, 7)];
+        let c = share_candidates(&s, |_| true);
+        assert_eq!(devices(&c), vec![1, 2]);
+    }
+
+    #[test]
+    fn a_paused_or_unsuitable_device_takes_no_share() {
+        // The only always-on device is paused: the phones take over.
+        let s = [
+            status(1, 0, true, 7),
+            status(2, 5, false, 7),
+            status(3, 5, false, 8),
+        ];
+        let c = share_candidates(&s, |s| s.models.contains(&crate::model::ModelId([7; 32])));
+        assert_eq!(devices(&c), vec![2]);
+        // Nobody can do it: nobody owns anything.
+        let none = share_candidates(&s, |_| false);
+        assert!(none.is_empty());
+        assert_eq!(
+            index_owner(&Blake3Hash([1; 32]), ShardKind::Vec8, &none),
+            None
+        );
+    }
+
     use crate::hlc::Hlc;
     use crate::ids::Blake3Hash;
     use crate::ids::EndpointId;

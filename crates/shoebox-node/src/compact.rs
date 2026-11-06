@@ -14,7 +14,7 @@ use crate::library_node::LibraryNode;
 use anyhow::Result;
 use shoebox_core::ids::Blake3Hash;
 use shoebox_core::model::{ModelId, PhotoId, ShardKind};
-use shoebox_core::policy::{index_owner, IndexCandidate};
+use shoebox_core::policy::{index_owner, share_candidates};
 use shoebox_core::store::{LibraryStore, Page, TimeRange};
 use shoebox_search::labels::{LABELS_VERSION, MIN_PROBABILITY};
 use shoebox_search::ocr::OCR_MARK;
@@ -44,17 +44,8 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// is compacted whoever would normally do it (tests, `shoebox-keeper index compact`).
     pub async fn compact_shards(&self, force: bool) -> Result<CompactReport> {
         let me = self.device();
-        let candidates: Vec<IndexCandidate> = self
-            .store()
-            .indexer_statuses()
-            .await?
-            .into_iter()
-            .filter(|s| s.always_on && s.photos_per_min > 0)
-            .map(|s| IndexCandidate {
-                device: s.device,
-                weight: s.photos_per_min,
-            })
-            .collect();
+        let statuses = self.store().indexer_statuses().await?;
+        let candidates = share_candidates(&statuses, |_| true);
         let view = self.shard_view().await?;
         let mut groups: BTreeMap<(ModelId, ShardKind, bool), Vec<Blake3Hash>> = BTreeMap::new();
         for h in &view.live {

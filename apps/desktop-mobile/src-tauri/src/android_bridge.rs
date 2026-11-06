@@ -33,6 +33,26 @@ pub static APP_OPENING: AtomicBool = AtomicBool::new(false);
 static APP_CORE: std::sync::Mutex<Option<(std::sync::Weak<AppCore>, tokio::runtime::Handle)>> =
     std::sync::Mutex::new(None);
 
+/// Set while a background indexing run is going in this process. WorkManager can start the same
+/// job again (it stops and restarts a job when a constraint flaps) while the native run of the
+/// first is still going, since native code cannot be cancelled; a second run would delete the
+/// first one's `index-stop` file and pause its indexer under it.
+static INDEX_RUNNING: AtomicBool = AtomicBool::new(false);
+
+struct IndexRun;
+
+impl IndexRun {
+    fn begin() -> Option<Self> {
+        (!INDEX_RUNNING.swap(true, Ordering::SeqCst)).then_some(Self)
+    }
+}
+
+impl Drop for IndexRun {
+    fn drop(&mut self) {
+        INDEX_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Called once by the app when its core is open.
 pub fn set_app_core(core: &Arc<AppCore>, runtime: tokio::runtime::Handle) {
     *APP_CORE.lock().unwrap() = Some((Arc::downgrade(core), runtime));
@@ -334,6 +354,9 @@ fn run_index(
 ) -> Result<serde_json::Value> {
     let dir = PathBuf::from(&data_dir);
     crate::diagnostics::init_logging();
+    let Some(_run) = IndexRun::begin() else {
+        return Ok(json!({ "skipped": "an indexing run is already going" }));
+    };
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)

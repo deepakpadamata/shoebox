@@ -27,6 +27,9 @@ pub struct Built {
     pub constant: &'static str,
     /// Weight-only int8 (`scripts/quantize_clip.py`), or shipped as published.
     pub quantize: bool,
+    /// The recogniser's character list, one per line, taken from its `inference.yml`
+    /// (`scripts/ocr_dict.py`).
+    pub dict: bool,
 }
 
 /// Where the release workflow publishes the built files (`models/build/*`): one fixed release, so
@@ -61,6 +64,23 @@ pub const SOURCES: &[Source] = &[
         url: "https://huggingface.co/opencv/face_recognition_sface/resolve/3d7082438a6e4551e840c9b2bb60b71e8da4b524/face_recognition_sface_2021dec.onnx",
         blake3: "584d0f5792e9e776ab5e5bf3f559f2310ff8fdd3b39f94dd364751046592b512",
     },
+    // Text in photos (S2-03): PaddleOCR's PP-OCRv5 mobile detection and Latin recognition
+    // (Apache-2.0), the official ONNX files at pinned commits, and the recogniser's config.
+    Source {
+        path: "ocr/PP-OCRv5_mobile_det.onnx",
+        url: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.onnx",
+        blake3: "046952fb02f0b6c8825a87e2d35b5a2d38965f2ecaa364148d3e58ecde32cc3f",
+    },
+    Source {
+        path: "ocr/latin_PP-OCRv5_mobile_rec.onnx",
+        url: "https://huggingface.co/PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx/resolve/89d3a50e2c27e2e7cceeab0e944c25c807d5db4f/inference.onnx",
+        blake3: "80cbd77e85630b3fe029aef7d82cfe50bbcde39440b153defbbfe03c43f4e6d2",
+    },
+    Source {
+        path: "ocr/latin_PP-OCRv5_mobile_rec.yml",
+        url: "https://huggingface.co/PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx/resolve/89d3a50e2c27e2e7cceeab0e944c25c807d5db4f/inference.yml",
+        blake3: "8b270c12fa650d0a2fdd7f42aeb13fea0bc86ad754529d532f108f9649e64bf4",
+    },
 ];
 
 pub const BUILT: &[Built] = &[
@@ -69,24 +89,49 @@ pub const BUILT: &[Built] = &[
         from: "clip/textual/model.onnx",
         constant: "CLIP_TEXT",
         quantize: true,
+        dict: false,
     },
     Built {
         name: "clip-image-int8.onnx",
         from: "clip/visual/model.onnx",
         constant: "CLIP_IMAGE",
         quantize: true,
+        dict: false,
     },
     Built {
         name: "face-detect-yunet.onnx",
         from: "faces/face_detection_yunet_2023mar.onnx",
         constant: "FACE_DETECT",
         quantize: false,
+        dict: false,
     },
     Built {
         name: "face-embed-sface.onnx",
         from: "faces/face_recognition_sface_2021dec.onnx",
         constant: "FACE_EMBED",
         quantize: false,
+        dict: false,
+    },
+    Built {
+        name: "ocr-det-ppocrv5-mobile.onnx",
+        from: "ocr/PP-OCRv5_mobile_det.onnx",
+        constant: "OCR_DET",
+        quantize: false,
+        dict: false,
+    },
+    Built {
+        name: "ocr-rec-ppocrv5-latin.onnx",
+        from: "ocr/latin_PP-OCRv5_mobile_rec.onnx",
+        constant: "OCR_REC",
+        quantize: false,
+        dict: false,
+    },
+    Built {
+        name: "ocr-dict-ppocrv5-latin.txt",
+        from: "ocr/latin_PP-OCRv5_mobile_rec.yml",
+        constant: "OCR_DICT",
+        quantize: false,
+        dict: true,
     },
 ];
 
@@ -155,6 +200,28 @@ fn build(b: &Built, dir: &Path, root: &Path) -> Result<PathBuf, String> {
         return Ok(out);
     }
     std::fs::create_dir_all(out.parent().unwrap()).map_err(|e| e.to_string())?;
+    if b.dict {
+        let ok = Command::new("uv")
+            .args([
+                "run",
+                "--quiet",
+                "--no-project",
+                "--with",
+                "pyyaml==6.0.2",
+                "python",
+                "-I",
+            ])
+            .arg(root.join("scripts/ocr_dict.py"))
+            .arg(dir.join("src").join(b.from))
+            .arg(&out)
+            .status()
+            .map_err(|e| format!("uv (https://docs.astral.sh/uv/) is needed to build models: {e}"))?
+            .success();
+        if !ok {
+            return Err(format!("building {} failed", b.name));
+        }
+        return Ok(out);
+    }
     if !b.quantize {
         std::fs::copy(dir.join("src").join(b.from), &out).map_err(|e| e.to_string())?;
         return Ok(out);
@@ -191,9 +258,10 @@ pub fn render(files: &[(&Built, String, u64)]) -> String {
         let bytes: Vec<u8> = (0..32)
             .map(|i| u8::from_str_radix(&hash[2 * i..2 * i + 2], 16).unwrap())
             .collect();
+        // The text reader's files are in neither id: a search index does not depend on them.
         if b.constant.starts_with("FACE") {
             faces.update(&bytes);
-        } else {
+        } else if b.constant.starts_with("CLIP") {
             model.update(&bytes);
         }
         let _ = write!(

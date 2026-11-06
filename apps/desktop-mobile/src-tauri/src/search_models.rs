@@ -6,11 +6,12 @@ use crate::core::AppCore;
 use anyhow::Result;
 use shoebox_core::store::LibraryStore;
 use shoebox_ml::files::{locate, search_dirs};
-use shoebox_ml::{ClipImage, ClipText, SFace, YuNet};
+use shoebox_ml::{ClipImage, ClipText, PpOcr, SFace, YuNet};
 use shoebox_node::{FaceModels, IndexGate, IndexerConfig, LibraryNode, ModelSources};
 use shoebox_search::encoder::{ImageEncoder, TextEncoder};
 use shoebox_search::models::{
-    ModelFile, ALL, CLIP_IMAGE, CLIP_MODEL, FACES_MODEL, FACE_DETECT, FACE_EMBED,
+    ModelFile, ALL, CLIP_IMAGE, CLIP_MODEL, FACES_MODEL, FACE_DETECT, FACE_EMBED, OCR_DET,
+    OCR_DICT, OCR_REC,
 };
 use shoebox_store::Library;
 use std::path::PathBuf;
@@ -73,6 +74,19 @@ impl AppCore {
         }
         #[cfg(all(feature = "tauri-app", target_os = "macos"))]
         ln.set_ocr(Arc::new(crate::ocr_macos::VisionOcr));
+        // Everywhere else, PP-OCRv5 (S2-03), when its files are here.
+        #[cfg(not(target_os = "macos"))]
+        {
+            let d = dirs.clone();
+            match tokio::task::spawn_blocking(move || PpOcr::locate(&d)).await {
+                Ok(Ok(Some(e))) => ln.set_ocr(Arc::new(e)),
+                Ok(Ok(None)) => {
+                    tracing::info!("the text models are not installed: no text reading here")
+                }
+                Ok(Err(e)) => tracing::warn!("could not load the text models: {e:#}"),
+                Err(e) => tracing::warn!("could not load the text models: {e}"),
+            }
+        }
         let Some(path) = locate(&CLIP_IMAGE, &dirs) else {
             tracing::info!("{} is not installed: no indexing here", CLIP_IMAGE.name);
             return;
@@ -136,6 +150,19 @@ impl AppCore {
             }
             _ => None,
         };
+        // Text reading is a bonus too (S2-03): all three files, or none.
+        let text = match image {
+            Ok(Some(_)) => {
+                let det = ln.model_bytes_from(&OCR_DET, &sources).await;
+                let rec = ln.model_bytes_from(&OCR_REC, &sources).await;
+                let dict = ln.model_bytes_from(&OCR_DICT, &sources).await;
+                match (det, rec, dict) {
+                    (Ok(Some(a)), Ok(Some(b)), Ok(Some(c))) => Some((a, b, c)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
         clear_download_progress(self.data_dir());
         let bytes = match image {
             Ok(Some(bytes)) => bytes,
@@ -168,6 +195,16 @@ impl AppCore {
                     embedder: Arc::new(embedder),
                     model: FACES_MODEL,
                 });
+            }
+        }
+        if let Some((det, rec, dict)) = text {
+            let loaded = tokio::task::spawn_blocking(move || {
+                PpOcr::from_bytes(&det, &rec, &String::from_utf8(dict.to_vec())?)
+            })
+            .await?;
+            match loaded {
+                Ok(e) => ln.set_ocr(Arc::new(e)),
+                Err(e) => tracing::warn!("could not load the text models: {e:#}"),
             }
         }
         ln.start_indexer(

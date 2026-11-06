@@ -6,6 +6,8 @@
 pub mod clip;
 pub mod faces;
 pub mod files;
+pub mod ocr;
 
 pub use clip::{ClipImage, ClipText};
 pub use faces::{SFace, YuNet};
+pub use ocr::PpOcr;

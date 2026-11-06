@@ -4,7 +4,7 @@
 
 use crate::daemon::KeeperOptions;
 use shoebox_ml::files::{locate, search_dirs};
-use shoebox_ml::{ClipImage, ClipText, SFace, YuNet};
+use shoebox_ml::{ClipImage, ClipText, PpOcr, SFace, YuNet};
 use shoebox_node::{Always, FaceModels, IndexerConfig, LibraryNode};
 use shoebox_search::encoder::{ImageEncoder, TextEncoder};
 use shoebox_search::models::{ALL, CLIP_IMAGE, CLIP_MODEL, FACES_MODEL, FACE_DETECT, FACE_EMBED};
@@ -55,6 +55,16 @@ pub(crate) async fn start(ln: &LibraryNode<Library>, opts: &KeeperOptions) {
             }),
             (Err(e), _) | (_, Err(e)) => warn!("could not load the face models: {e:#}"),
         }
+    }
+    // Text in photos (S2-03): PP-OCRv5, when its three files are installed.
+    let d = dirs.clone();
+    match tokio::task::spawn_blocking(move || PpOcr::locate(&d)).await {
+        Ok(Ok(Some(e))) => ln.set_ocr(Arc::new(e)),
+        Ok(Ok(None)) => {
+            info!("the text models are not installed: this keeper reads no text in photos")
+        }
+        Ok(Err(e)) => warn!("could not load the text models: {e:#}"),
+        Err(e) => warn!("could not load the text models: {e}"),
     }
     let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
     let cfg = IndexerConfig {

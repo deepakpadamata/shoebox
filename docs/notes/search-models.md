@@ -229,7 +229,7 @@ three is missing). They are in neither the image model's id nor the face model's
 Scored on the same 50 images (`ocr_check` + `scripts/ocr_spike_eval.py compare`): 85% of lines within 10% character
 error, against the spike's 83% and RapidOCR's 88%; pages 100% (were 93%: the rotated crops), screenshots 100%, signs 95%,
 posters 63% (ref 70%), receipts 40% (ref 50%; narrow lines of mixed digits and prices, to look at with real receipts).
-Median 270 ms a photo on the Mac (the spike: 237 ms); not timed again on the S25, where the spike took 941 ms. Tests (`crates/shoebox-ml/tests/ocr.rs`, which skip without the model files, as CI has
+Median 270 ms a photo on the Mac (the spike: 237 ms); on the S25 (2026-11-06, USB power, 36 °C) the engine takes a median 1184 ms, p95 2423 ms, max 2640 ms (the spike: 941 ms; the rotated crops and the extra lines kept cost about a quarter more), with the same accuracy as on the Mac. Tests (`crates/shoebox-ml/tests/ocr.rs`, which skip without the model files, as CI has
 none): the receipt fixture, line order, a photo tilted 12°, a photo turned a quarter, no text, not a picture, damaged
 model files.
 

@@ -194,7 +194,13 @@ class IndexWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
                     delay(2_000)
                     // The app was opened: it is in the same process and the person comes first.
                     val opened = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-                    if (isStopped || opened || (ticks % 5 == 0 && (tooHot() || !charging()))) {
+                    val check = ticks % 5 == 0
+                    val hot = check && tooHot()
+                    val unplugged = check && !charging()
+                    if (isStopped || opened || hot || unplugged) {
+                        if (!stop.exists()) {
+                            Log.i("ShoeboxIndex", "asking the run to stop: stopped=$isStopped appOpened=$opened tooHot=$hot unplugged=$unplugged")
+                        }
                         runCatching { stop.writeText("stop") }
                     }
                     if (foreground && ticks % 5 == 0) {
@@ -212,6 +218,10 @@ class IndexWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
             } finally {
                 watcher.cancel()
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // The system stopped the job (too hot, constraints lost); the native run was asked to stop.
+            Log.i("ShoeboxIndex", "the system stopped the job")
+            throw e
         } catch (e: Throwable) {
             Log.e("ShoeboxIndex", "indexing failed", e)
             return Result.retry()

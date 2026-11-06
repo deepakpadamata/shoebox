@@ -93,6 +93,20 @@ Not measured: a Pi 5 (none at hand); the Mac and nest with every other device of
   as one name in suggestions.
 * **"Syncing…" with no network:** say "Offline" instead.
 
+### A phone on its own, the S25 (S2, 2026-11-07)
+
+A library of 3,161 photos made on the phone, then 500 more added (1600 x 1200 JPEGs); debug build, on USB power, screen off.
+
+* **Pictures: 3,161 in one sitting at 60 to 125 photos a minute** while text and faces took turns; the 500 added later went at
+  about 100 a minute with the app's process alive in the background (the job borrows the app's core).
+* **Faces: 2,909 photos in about 35 minutes**, about 85 a minute, in "Index now" runs.
+* **Text: 118 photos** that may hold text (screenshots, documents, signs); 8 of them cannot be read and are skipped.
+* **Battery 35 to 38 degrees C** while indexing; 44 at import. The phone's charge held at 98 to 100 percent on a USB port.
+* **Stops, tried with the run going:** unplugged (`dumpsys battery unplug`) stopped the run in about 4 seconds with
+  its work kept; the app opened stopped it at once; a severe thermal status (`cmd thermalservice override-status 4`) stopped
+  the job. A run publishes what it has read every 15 seconds, so a stop or a kill loses at most that much.
+* **Not measured:** a whole night on a real charger with the screen off, and a library of 20,000 or more photos.
+
 ## Not met yet
 
 * **Mobile memory under 300 MB during a 100k-photo sync: not met during the first sync.** A replica at

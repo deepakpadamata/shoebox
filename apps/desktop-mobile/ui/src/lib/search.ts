@@ -142,6 +142,18 @@ export function coverageLine(st: { total: number; content: number; meaning: bool
   return `What is in the photos: ${st.content.toLocaleString()} of ${st.total.toLocaleString()} so far · ${who}${eta}`;
 }
 
+/** Settings → Search on a phone that is the only one indexing (S2-05): how long it will take, in
+ * nights of charging (taken as six hours each), since the rate counts only the minutes it runs.
+ * Empty when other devices share the work, or nothing is left. */
+export function phoneAloneLine(st: { total: number; content: number; meaning: boolean; indexers: { this_device: boolean; photos_per_min: number }[] } | null): string {
+  if (!st || !st.meaning || st.content >= st.total) return '';
+  const working = st.indexers.filter((i) => i.photos_per_min > 0);
+  if (working.length !== 1 || !working[0].this_device) return '';
+  const minutes = (st.total - st.content) / working[0].photos_per_min;
+  const nights = Math.max(1, Math.ceil(minutes / (6 * 60)));
+  return `This phone is indexing on its own while it charges: ${(st.total - st.content).toLocaleString()} photos left, about ${nights === 1 ? 'one night' : `${nights} nights`}.`;
+}
+
 export function duration(secs: number): string {
   if (secs < 90) return 'a minute';
   if (secs < 3600) return `${Math.round(secs / 60)} min`;

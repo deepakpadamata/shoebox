@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import { api, type AboutInfo, type SearchStatus, type Settings } from '../lib/api';
   import { viewport } from '../lib/viewport.svelte';
+  import { phoneAloneLine } from '../lib/search';
   import { app, fail, refreshState, toast } from '../lib/store.svelte';
   import Button from '../components/Button.svelte';
   import List from '../components/List.svelte';
@@ -181,6 +182,7 @@
           {#if !search.meaning}<br />This device searches by words and labels: the model for searching by meaning is not installed.{/if}
           {#if search.model_download}<br />Downloading search models: {pct(search.model_download.done, search.model_download.total)}% of {(search.model_download.total / 1e6).toFixed(0)} MB ({search.model_download.name}). It happens once, on Wi-Fi.{/if}
         </div>
+        {#if phoneAloneLine(search)}<div class="small muted">{phoneAloneLine(search)}</div>{/if}
         {#each search.indexers as i}
           <div class="small muted">{i.this_device ? 'This device' : i.name || 'A device'}: {i.photos_per_min.toLocaleString()} photos a minute{i.reads_text ? ', reads text' : ''}</div>
         {/each}

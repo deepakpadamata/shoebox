@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { addRecent, chipIcon, clearRecent, complete, debounce, groupSuggestions, lastWord, loadRecent, queryFromParam, removeChip, searchPath, step, coverageLine } from './search';
+import { addRecent, chipIcon, clearRecent, complete, debounce, groupSuggestions, lastWord, loadRecent, queryFromParam, removeChip, searchPath, step, coverageLine, phoneAloneLine } from './search';
 
 function memory() {
   const m = new Map<string, string>();
@@ -115,5 +115,20 @@ describe('coverageLine', () => {
   });
   it('says what a device without the text model searches by', () => {
     expect(coverageLine(st({ meaning: false }))).toContain('labels and text in photos');
+  });
+});
+
+describe('phoneAloneLine', () => {
+  const st = (o: object) => ({ total: 1000, content: 0, meaning: true, indexers: [{ this_device: true, photos_per_min: 100 }], ...o });
+  it('counts nights of charging for a phone indexing on its own', () => {
+    expect(phoneAloneLine(st({}))).toContain('1,000 photos left, about one night');
+    expect(phoneAloneLine(st({ total: 100000, indexers: [{ this_device: true, photos_per_min: 150 }] }))).toContain('about 2 nights');
+  });
+  it('is empty when others share the work, when nothing is left or it cannot search by meaning', () => {
+    expect(phoneAloneLine(st({ indexers: [{ this_device: true, photos_per_min: 100 }, { this_device: false, photos_per_min: 400 }] }))).toBe('');
+    expect(phoneAloneLine(st({ indexers: [{ this_device: false, photos_per_min: 400 }] }))).toBe('');
+    expect(phoneAloneLine(st({ content: 1000 }))).toBe('');
+    expect(phoneAloneLine(st({ meaning: false }))).toBe('');
+    expect(phoneAloneLine(null)).toBe('');
   });
 });

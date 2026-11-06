@@ -51,6 +51,10 @@ waiting: string | null,
  */
 caught_up: boolean, 
 /**
+ * Photos this device could not read, by kind (not counted as waiting).
+ */
+skipped_pictures: number, skipped_text: number, skipped_faces: number, 
+/**
  * An indexing run is going (the background job's, or the user's Index now).
  */
 run_active: boolean, 

@@ -136,12 +136,21 @@ describe('phoneAloneLine', () => {
 describe('processing status', () => {
   const base = {
     total: 1000, content: 1000, labelled: 990, text_wanted: 100, text_wanted_read: 40, faces: 400, faces_wanted: 900,
-    people_on: true, meaning: true, index_here: true, indexing: true, stage: '', waiting: null as string | null, caught_up: false,
+    people_on: true, meaning: true, index_here: true, indexing: true, stage: '', waiting: null as string | null, caught_up: false, skipped_pictures: 0, skipped_text: 0, skipped_faces: 0,
     indexers: [{ name: 'S25', this_device: true, photos_per_min: 120, reads_text: true, finds_faces: true, device_id: 'aa' }],
   };
+  it('does not count photos that match no label, or that could not be read, as waiting', () => {
+    const rows = processingRows({ ...base, indexing: false, text_wanted_read: 92, text_wanted: 100, skipped_text: 8 });
+    expect(rows[1].state).toBe('done');
+    expect(rows[1].note).toContain('10 photos matched no label');
+    expect(rows[2].state).toBe('done');
+    expect(rows[2].note).toContain('8 photos could not be read');
+    const more = processingRows({ ...base, indexing: false, text_wanted_read: 90, text_wanted: 100, skipped_text: 8 });
+    expect(more[2].state).toBe('waiting');
+  });
   it('shows each kind with what is done and what is pending', () => {
     const rows = processingRows({ ...base, stage: 'text' });
-    expect(rows.map((r) => [r.key, r.state])).toEqual([['content', 'done'], ['labels', 'waiting'], ['text', 'working'], ['faces', 'waiting']]);
+    expect(rows.map((r) => [r.key, r.state])).toEqual([['content', 'done'], ['labels', 'done'], ['text', 'working'], ['faces', 'waiting']]);
     expect(rows[2].note).toContain('60 left');
     expect(rows[3].note).toContain('500 left');
   });

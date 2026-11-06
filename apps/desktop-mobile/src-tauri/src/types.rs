@@ -209,6 +209,10 @@ ts_type! {
         pub waiting: Option<String>,
         /// This device has nothing left to do.
         pub caught_up: bool,
+        /// Photos this device could not read, by kind (not counted as waiting).
+        pub skipped_pictures: u32,
+        pub skipped_text: u32,
+        pub skipped_faces: u32,
         /// An indexing run is going (the background job's, or the user's Index now).
         pub run_active: bool,
         /// Why the last Index now run did not run or stopped, if it did not finish.

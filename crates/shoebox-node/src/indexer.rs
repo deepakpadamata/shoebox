@@ -109,6 +109,12 @@ pub struct IndexProgress {
     /// The last pass found nothing left for this device to do: pictures, text and faces (S2-04).
     /// False until a pass has run, and while the gate is closed or indexing is paused.
     pub caught_up: bool,
+    /// Photos this device tried and could not read since it started (a broken file, a format
+    /// the models cannot open), by kind. They are not tried again until the app restarts, so
+    /// they never count as waiting.
+    pub skipped_pictures: usize,
+    pub skipped_text: usize,
+    pub skipped_faces: usize,
 }
 
 #[derive(Default)]
@@ -242,7 +248,11 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 
     pub fn index_progress(&self) -> IndexProgress {
-        self.inner.indexer.progress.lock().unwrap().clone()
+        let mut p = self.inner.indexer.progress.lock().unwrap().clone();
+        let failed = self.inner.indexer.failed.lock().unwrap();
+        let count = |kind: u8| failed.iter().filter(|(k, _)| *k == kind).count();
+        (p.skipped_pictures, p.skipped_text, p.skipped_faces) = (count(0), count(1), count(2));
+        p
     }
 
     /// Publish whatever results are waiting as shards now (tests, shutdown).

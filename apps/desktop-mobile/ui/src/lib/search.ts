@@ -165,7 +165,7 @@ export type ProcessRow = {
 
 type Status = {
   total: number; content: number; labelled: number; text_wanted: number; text_wanted_read: number; faces: number; faces_wanted: number;
-  people_on: boolean; meaning: boolean; index_here: boolean; indexing: boolean; stage: string; waiting: string | null; caught_up: boolean;
+  people_on: boolean; meaning: boolean; index_here: boolean; indexing: boolean; stage: string; waiting: string | null; caught_up: boolean; skipped_pictures: number; skipped_text: number; skipped_faces: number;
   indexers: { name: string; this_device: boolean; photos_per_min: number; reads_text: boolean; finds_faces: boolean; device_id: string }[];
 };
 
@@ -177,6 +177,17 @@ const stageVerb: Record<string, string> = {
   compacting: 'tidying the search index',
 };
 
+/** Labels come with reading the picture: a photo that matches none of them is not waiting. */
+function labelsRow(st: Status, row: (...a: any[]) => ProcessRow): ProcessRow {
+  const label = 'Labels';
+  const left = Math.max(0, st.total - st.labelled);
+  const picturesDone = st.content + st.skipped_pictures >= st.total;
+  if (left > 0 && picturesDone) {
+    return { key: 'labels', label, done: st.labelled, total: st.total, state: 'done', note: `Done · ${left.toLocaleString()} ${left === 1 ? 'photo' : 'photos'} matched no label` };
+  }
+  return row('labels', label, st.labelled, st.total, 'pictures', null, 'no device is indexing right now', st.skipped_pictures);
+}
+
 /** Settings → Search: each kind of processing, how far it has got, and what is waiting (S2). */
 export function processingRows(st: Status | null): ProcessRow[] {
   if (!st || st.total === 0 || !st.meaning) return [];
@@ -185,9 +196,13 @@ export function processingRows(st: Status | null): ProcessRow[] {
     if (on.length === 0) return null;
     return on.slice(0, 2).map((i) => (i.this_device ? 'this device' : i.name || 'a device')).join(' and ');
   };
-  const row = (key: ProcessRow['key'], label: string, done: number, total: number, stage: string, kind: 'reads_text' | 'finds_faces' | null, nobody: string): ProcessRow => {
+  const row = (key: ProcessRow['key'], label: string, done: number, total: number, stage: string, kind: 'reads_text' | 'finds_faces' | null, nobody: string, skipped = 0): ProcessRow => {
     const left = Math.max(0, total - done);
     if (left === 0) return { key, label, done, total, state: 'done', note: 'Done' };
+    // What this device tried and could not read is not waiting: it is not tried again.
+    if (skipped > 0 && skipped >= left) {
+      return { key, label, done, total, state: 'done', note: `Done · ${left.toLocaleString()} ${left === 1 ? 'photo' : 'photos'} could not be read and ${left === 1 ? 'is' : 'are'} skipped` };
+    }
     if (st.indexing && st.stage === stage) return { key, label, done, total, state: 'working', note: `${left.toLocaleString()} left · this device is on it now` };
     const by = who(kind);
     if (!by) {
@@ -199,12 +214,12 @@ export function processingRows(st: Status | null): ProcessRow[] {
     return { key, label, done, total, state: 'waiting', note: `${left.toLocaleString()} left · ${why}` };
   };
   const rows = [
-    row('content', 'What is in each photo (search by meaning)', st.content, st.total, 'pictures', null, 'no device is indexing right now'),
-    row('labels', 'Labels', st.labelled, st.total, 'pictures', null, 'no device is indexing right now'),
-    row('text', 'Text in photos (screenshots, documents, signs…)', st.text_wanted_read, st.text_wanted, 'text', 'reads_text', 'no device here reads text yet'),
+    row('content', 'What is in each photo (search by meaning)', st.content, st.total, 'pictures', null, 'no device is indexing right now', st.skipped_pictures),
+    labelsRow(st, row),
+    row('text', 'Text in photos (screenshots, documents, signs…)', st.text_wanted_read, st.text_wanted, 'text', 'reads_text', 'no device here reads text yet', st.skipped_text),
   ];
   if (!st.people_on) rows.push({ key: 'faces', label: 'Faces and People', done: 0, total: 0, state: 'off', note: 'People is off for this library' });
-  else rows.push(row('faces', 'Faces and People', st.faces, st.faces_wanted, 'faces', 'finds_faces', 'no device is finding faces yet'));
+  else rows.push(row('faces', 'Faces and People', st.faces, st.faces_wanted, 'faces', 'finds_faces', 'no device is finding faces yet', st.skipped_faces));
   return rows;
 }
 

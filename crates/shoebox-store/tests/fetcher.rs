@@ -480,3 +480,73 @@ async fn the_video_of_a_live_photo_goes_to_keepers_and_is_streamed_to_viewers() 
     assert!(nodes[2].node().blobs().has(&video.hash).await.unwrap());
     c.shutdown().await;
 }
+
+/// S2-06: a motion photo's clip is in its original, not a blob of its own. A keeper gets it with
+/// the original; a viewer playing it fetches the original and reads the clip from it; a device
+/// that still stores the clip (an older build) serves it as a blob, and releases it afterwards.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_embedded_clip_reaches_other_devices_through_the_original() {
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Keeper, Role::Viewer])
+        .await
+        .unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    nodes[1].start_fetcher(fast());
+    nodes[2].start_fetcher(fast());
+
+    let tmp = tempfile::tempdir().unwrap();
+    let samples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/samples");
+    let dir = tmp.path().join("motion");
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = std::fs::read(samples.join("clip.mp4")).unwrap();
+    let mut file = std::fs::read(samples.join("photo-gps.jpg")).unwrap();
+    file.extend(&clip);
+    std::fs::write(dir.join("PXL_1.MP.jpg"), &file).unwrap();
+    let report = nodes[0]
+        .import_paths(&[dir], ImportOptions::default())
+        .await
+        .unwrap();
+    assert_eq!((report.imported.len(), report.with_video.len()), (1, 1));
+    let photo = report.imported[0];
+    let video = nodes[0]
+        .store()
+        .motion(&photo)
+        .await
+        .unwrap()
+        .unwrap()
+        .video;
+    assert!(!nodes[0].node().blobs().has(&video.hash).await.unwrap());
+
+    // The keeper gets the original and plays the clip from it; it never stores the clip.
+    wait_until(Duration::from_secs(90), || async {
+        nodes[1].node().blobs().kept(&photo).await.unwrap()
+    })
+    .await
+    .expect("the keeper fetches the original");
+    let got = nodes[1].clip_bytes(&photo).await.unwrap().unwrap();
+    assert_eq!(&got[..], &clip[..]);
+    assert!(!nodes[1].node().blobs().has(&video.hash).await.unwrap());
+    // No device advertises the clip as a blob.
+    assert!(nodes[0]
+        .store()
+        .holders(&video.hash)
+        .await
+        .unwrap()
+        .iter()
+        .all(|h| h.kind != BlobKind::Motion));
+
+    // The viewer holds nothing; playing fetches the original and cuts the clip from it.
+    wait_until(Duration::from_secs(60), || async {
+        nodes[2].store().motion(&photo).await.unwrap().is_some()
+    })
+    .await
+    .expect("the viewer knows the photo has a video");
+    assert!(!nodes[2].clip_available(&photo).await.unwrap());
+    nodes[2]
+        .fetch_now(&photo, BlobKind::Motion)
+        .await
+        .expect("a viewer can play the clip");
+    let got = nodes[2].clip_bytes(&photo).await.unwrap().unwrap();
+    assert_eq!(&got[..], &clip[..]);
+    assert!(!nodes[2].node().blobs().has(&video.hash).await.unwrap());
+    c.shutdown().await;
+}

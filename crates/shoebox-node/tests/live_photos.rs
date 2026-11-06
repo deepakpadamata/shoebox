@@ -199,7 +199,7 @@ async fn a_video_whose_picture_cannot_be_read_is_a_video() {
 }
 
 #[tokio::test]
-async fn a_motion_photo_keeps_its_video_as_a_blob() {
+async fn a_motion_photo_keeps_its_video_in_its_original() {
     let r = rig().await;
     let dir = r.dir.path().join("m");
     std::fs::create_dir_all(&dir).unwrap();
@@ -230,7 +230,20 @@ async fn a_motion_photo_keeps_its_video_as_a_blob() {
         (m.video.mime.as_str(), m.video.size),
         ("video/mp4", clip.len() as u64)
     );
-    assert!(r.ln.node().blobs().kept(&m.video.hash).await.unwrap());
+    // S2-06: the clip is in the original, not a blob of its own; it still plays from there.
+    assert!(!r.ln.node().blobs().has(&m.video.hash).await.unwrap());
+    assert!(r.ln.clip_available(&id).await.unwrap());
+    let bytes = r.ln.clip_bytes(&id).await.unwrap().unwrap();
+    assert_eq!(&bytes[..], &clip[..]);
+    let part = r.ln.read_clip(&id, 100..2100).await.unwrap().unwrap();
+    assert_eq!(&part[..], &clip[100..2100]);
+    // Past its end the read stops at the clip's end, not the file's.
+    let tail =
+        r.ln.read_clip(&id, clip.len() as u64 - 10..u64::MAX)
+            .await
+            .unwrap()
+            .unwrap();
+    assert_eq!(&tail[..], &clip[clip.len() - 10..]);
 
     let again =
         r.ln.import_paths(&[dir], ImportOptions::default())
@@ -260,4 +273,107 @@ async fn the_video_lives_and_goes_with_its_photo() {
     // Purged, it is released with the rest.
     r.ln.purge_deleted(&[id]).await.unwrap();
     assert!(!r.ln.node().blobs().kept(&video).await.unwrap());
+}
+
+/// A generated motion photo (the sample still with the sample clip appended) in `dir`.
+fn motion_photo(dir: &Path, name: &str, still: &str) -> (PathBuf, Vec<u8>, Vec<u8>) {
+    std::fs::create_dir_all(dir).unwrap();
+    let clip = std::fs::read(samples().join("clip.mp4")).unwrap();
+    let mut file = std::fs::read(samples().join(still)).unwrap();
+    file.extend(&clip);
+    let path = dir.join(name);
+    std::fs::write(&path, &file).unwrap();
+    (path, file, clip)
+}
+
+#[tokio::test]
+async fn a_referenced_motion_photo_plays_from_the_file_where_it_is() {
+    let r = rig().await;
+    let dir = r.dir.path().join("gallery");
+    let (path, file, clip) = motion_photo(&dir, "PXL_1.MP.jpg", "photo-gps.jpg");
+    let opts = ImportOptions {
+        mode: shoebox_node::ImportMode::Reference,
+        ..ImportOptions::default()
+    };
+    let report = r.ln.import_paths(&[dir], opts).await.unwrap();
+    let id = report.imported[0];
+    assert_eq!(report.with_video, vec![id]);
+    let blobs = r.ln.node().blobs();
+    let m = r.ln.store().motion(&id).await.unwrap().unwrap();
+    assert!(!blobs.has(&m.video.hash).await.unwrap(), "no clip blob");
+    assert!(
+        r.ln.is_in_place(&id).await.unwrap(),
+        "the original is the gallery file"
+    );
+    assert_eq!(&r.ln.clip_bytes(&id).await.unwrap().unwrap()[..], &clip[..]);
+    // The file going away: the clip cannot be read (an error for the caller to sort out, as for
+    // the original itself), and nothing was kept elsewhere.
+    std::fs::remove_file(&path).unwrap();
+    assert!(r.ln.read_clip(&id, 0..10).await.is_err());
+    let _ = file;
+}
+
+#[tokio::test]
+async fn a_paired_live_photo_video_is_referenced_in_place_too() {
+    let r = rig().await;
+    let (dir, _, _video) = live_pair(&r, "paired", "IMG_0001.MOV");
+    let opts = ImportOptions {
+        mode: shoebox_node::ImportMode::Reference,
+        ..ImportOptions::default()
+    };
+    let report = r.ln.import_paths(&[dir], opts).await.unwrap();
+    let id = report.imported[0];
+    let m = r.ln.store().motion(&id).await.unwrap().unwrap();
+    assert_eq!(m.source, MotionSource::Paired);
+    let blobs = r.ln.node().blobs();
+    assert!(
+        r.ln.is_in_place(&m.video.hash).await.unwrap(),
+        "the .MOV is read where it is"
+    );
+    assert!(blobs.has(&m.video.hash).await.unwrap());
+}
+
+#[tokio::test]
+async fn stored_clips_are_released_once_the_original_is_held() {
+    let r = rig().await;
+    let dir = r.dir.path().join("old");
+    let (_, _, clip) = motion_photo(&dir, "PXL_2.MP.jpg", "photo-gps.jpg");
+    let report =
+        r.ln.import_paths(&[dir], ImportOptions::default())
+            .await
+            .unwrap();
+    let id = report.imported[0];
+    let m = r.ln.store().motion(&id).await.unwrap().unwrap();
+    let blobs = r.ln.node().blobs();
+    // What an older build left behind: the clip as a blob of its own.
+    blobs
+        .add_bytes(clip.clone(), shoebox_node::Protection::Library)
+        .await
+        .unwrap();
+    assert!(blobs.kept(&m.video.hash).await.unwrap());
+
+    let released = r.ln.release_embedded_clips().await.unwrap();
+    assert_eq!(released, vec![m.video.hash]);
+    assert!(!blobs.kept(&m.video.hash).await.unwrap());
+    assert!(blobs.kept(&id).await.unwrap(), "the original stays");
+    // It still plays, from the original.
+    assert_eq!(&r.ln.clip_bytes(&id).await.unwrap().unwrap()[..], &clip[..]);
+    // Nothing left to release.
+    assert!(r.ln.release_embedded_clips().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_clip_that_is_a_photo_of_its_own_is_not_released() {
+    let r = rig().await;
+    let dir = r.dir.path().join("both");
+    let (_, _, clip) = motion_photo(&dir, "PXL_3.MP.jpg", "photo-gps.jpg");
+    std::fs::write(dir.join("alone.mp4"), &clip).unwrap();
+    let report =
+        r.ln.import_paths(&[dir], ImportOptions::default())
+            .await
+            .unwrap();
+    assert_eq!(report.imported.len(), 2, "{report:?}");
+    let clip_hash = Blake3Hash::of_bytes(&clip);
+    assert!(r.ln.release_embedded_clips().await.unwrap().is_empty());
+    assert!(r.ln.node().blobs().kept(&clip_hash).await.unwrap());
 }

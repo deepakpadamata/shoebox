@@ -27,11 +27,23 @@ impl AppCore {
                 (hash, mime)
             }
             (None, "motion") => {
+                let photo = parse_hash(id)?;
                 let m = self
-                    .motion(&parse_hash(id)?)
+                    .motion(&photo)
                     .await?
                     .ok_or_else(|| anyhow!("this photo has no video"))?;
-                (m.video.hash, m.video.mime)
+                // Stored as a blob, or a part of the photo's original: the player reads either
+                // through the handle, byte range by byte range.
+                let Some(handle) = self.ln().await?.clip_source(&photo).await? else {
+                    return Ok(None);
+                };
+                let size = self.blobs().handle_size(&handle).await?;
+                return Ok(size.map(|size| VideoSource {
+                    path: None,
+                    blob: handle.to_string(),
+                    mime: m.video.mime,
+                    size,
+                }));
             }
             (None, "original") => {
                 let rec = self
@@ -142,10 +154,10 @@ pub fn install(core: Arc<AppCore>) {
 /// Bytes `offset..offset + len` of blob `hash` (fewer at its end), checked against the hash as
 /// they are read.
 #[cfg(all(feature = "tauri-app", target_os = "android"))]
-fn read_blob(hash: &str, offset: u64, len: u64) -> Result<Vec<u8>> {
+fn read_blob(handle: &str, offset: u64, len: u64) -> Result<Vec<u8>> {
     let core = CORE.get().ok_or_else(|| anyhow!("the app is not open"))?;
-    let hash = parse_hash(hash)?;
-    tauri::async_runtime::block_on(core.blobs().open_range(&hash, offset..offset + len))
+    let handle: shoebox_node::BlobHandle = handle.parse()?;
+    tauri::async_runtime::block_on(core.blobs().read_handle(&handle, offset..offset + len))
         .map(|b| b.to_vec())
 }
 

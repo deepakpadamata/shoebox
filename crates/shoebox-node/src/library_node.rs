@@ -41,6 +41,8 @@ pub(crate) struct Inner<L: LibraryStore> {
     pub(crate) ingest: tokio::sync::RwLock<()>,
     pub(crate) membership: Mutex<crate::identity::Membership>,
     pub(crate) confirmations: Mutex<crate::freeup::Confirmations>,
+    /// Where each embedded motion-photo clip sits in its photo's original (found by reading it once).
+    pub(crate) clip_extents: Mutex<HashMap<shoebox_core::model::PhotoId, (u64, u64)>>,
     pub(crate) notice: Mutex<Option<shoebox_core::identity::EpochNotice>>,
     pub(crate) notice_acked: Mutex<std::collections::HashSet<EndpointId>>,
     pub(crate) invites: Arc<Mutex<crate::pairing::Invites>>,
@@ -104,6 +106,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 notice: Mutex::new(crate::rotation::load_notice(&data_dir)),
                 notice_acked: Default::default(),
                 confirmations: Mutex::new(crate::freeup::Confirmations::load(&data_dir)),
+                clip_extents: Mutex::new(HashMap::new()),
                 recovery_approval: Mutex::new(None),
                 admin_watch: Mutex::new(crate::identity::AdminWatch::load(&data_dir)),
                 epoch_lock: tokio::sync::Mutex::new(()),

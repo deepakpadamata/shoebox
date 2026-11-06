@@ -22,7 +22,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 
 pub use image::{DynamicImage, RgbImage};
-pub use motion::EmbeddedVideo;
+pub use motion::{find_embedded as find_embedded_video, EmbeddedVideo};
 pub use render::{set_platform_decoder, PlatformDecoder, PREVIEW_LONG_EDGE, THUMB_SIZE};
 pub use strip::{strip_location, StripError, Stripped};
 

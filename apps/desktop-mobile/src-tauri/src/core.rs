@@ -1260,7 +1260,7 @@ impl AppCore {
         };
         let motion = ln.store().motion(&id).await?;
         let has_motion = match &motion {
-            Some(m) => self.node.blobs().kept(&m.video.hash).await?,
+            Some(_) => ln.clip_available(&id).await?,
             None => false,
         };
         Ok(PhotoDetail {

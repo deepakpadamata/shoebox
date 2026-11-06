@@ -178,13 +178,15 @@ async fn maintenance_loop<L: LibraryStore>(
     cfg: MaintenanceConfig,
     wake: std::sync::Arc<tokio::sync::Notify>,
 ) {
+    // The first pass comes soon after start, so an upgrade that frees space (stored clips) does
+    // not wait an hour for it.
+    let mut wait = cfg.interval.min(Duration::from_secs(60));
     loop {
-        let triggered = tokio::time::timeout(cfg.interval, wake.notified())
-            .await
-            .is_ok();
+        let triggered = tokio::time::timeout(wait, wake.notified()).await.is_ok();
         if triggered {
             tokio::time::sleep(cfg.react_after).await;
         }
+        wait = cfg.interval;
         let Some(inner) = weak.upgrade() else { break };
         let ln = LibraryNode { inner };
         if let Err(e) = ln.purge_expired().await {
@@ -195,6 +197,9 @@ async fn maintenance_loop<L: LibraryStore>(
         }
         if let Err(e) = ln.release_previews().await {
             warn!("releasing previews failed: {e:#}");
+        }
+        if let Err(e) = ln.release_embedded_clips().await {
+            warn!("releasing stored clips failed: {e:#}");
         }
     }
 }

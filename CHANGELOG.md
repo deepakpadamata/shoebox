@@ -6,6 +6,7 @@ The first build for other people's devices (macOS, Android, the keeper on Linux)
 limits and how to report a problem: [the tester guide](docs/guides/tester-guide.md); how Shoebox works: [the user
 guide](docs/guides/user-guide.md).
 
+- A motion photo's video is no longer copied out of the photo: the photo's original already holds it, so it is read from there when played (on a phone, from the gallery file itself), and a clip an earlier build had copied is released once the original is held; another device that plays it fetches the original. On the S25 test install the blob store went from 5.08 GB to 1.86 GB after the upgrade (475 stored clips, 2.25 GB, and the first maintenance pass, now run a minute after start).
 - The copy of its data an upgrade makes first no longer includes the search models or the folders Android and its WebView rebuild (the S25 kept a second 114 MB of models), and a copy is deleted 14 days after it was made.
 - Settings → Search on a phone has an **Index now** button (and **Stop indexing**): it indexes at once, charging or not, until everything is done, for as long as the app stays open, so the 16-minutes-an-hour background limit no longer decides how fast a phone catches up when you ask it to. A run now publishes what it has read every 15 s, so the progress bars move and a run that is stopped or killed keeps its work.
 - **Search** (epic S1), on every device and with no other device needed: dates, places, cameras, albums, videos,

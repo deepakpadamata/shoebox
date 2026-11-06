@@ -894,7 +894,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 }
             }
             let motion = match self.store().motion(&p.id).await? {
-                Some(m) if m.video.size <= MAX_MOTION && blobs.has(&m.video.hash).await? => {
+                Some(m) if m.video.size <= MAX_MOTION && self.clip_available(&p.id).await? => {
                     // A motion photo's clip is stripped like any original.
                     self.stage_motion(s, p, &m.video.hash).await?
                 }
@@ -974,7 +974,18 @@ impl<L: LibraryStore> LibraryNode<L> {
         p: &PhotoRecord,
         hash: &Blake3Hash,
     ) -> Result<Option<Staged>> {
-        let _ = p;
+        // A clip read from the photo's original is staged from memory.
+        if !self.node().blobs().has(hash).await? {
+            let Some(bytes) = self.clip_bytes(&p.id).await? else {
+                return Ok(None);
+            };
+            return match shoebox_media::strip_location(&bytes) {
+                Ok(stripped) => Ok(Some(
+                    self.stage(s, Plain::Memory(stripped.bytes), false).await?,
+                )),
+                Err(_) => Ok(None),
+            };
+        }
         self.stage_stripped(s, hash, true).await
     }
 

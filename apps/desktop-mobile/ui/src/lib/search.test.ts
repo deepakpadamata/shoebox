@@ -147,9 +147,11 @@ describe('processing status', () => {
   });
   it('says who is on it, or that nobody is', () => {
     const none = processingRows({ ...base, indexing: false, indexers: [] });
-    expect(none[2].note).toContain('no device here reads text yet');
+    expect(none[2].note).toContain("this device's next indexing run");
+    const off = processingRows({ ...base, indexing: false, index_here: false, indexers: [] });
+    expect(off[2].note).toContain('no device here reads text yet');
     const other = processingRows({ ...base, indexing: false, indexers: [{ name: 'nest', this_device: false, photos_per_min: 300, reads_text: false, finds_faces: true, device_id: 'bb' }] });
-    expect(other[2].note).toContain('no device here reads text yet');
+    expect(other[2].note).toContain("this device's next indexing run");
     expect(other[3].note).toContain('nest is on it');
   });
   it('says why this device is not working', () => {

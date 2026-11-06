@@ -190,7 +190,10 @@ export function processingRows(st: Status | null): ProcessRow[] {
     if (left === 0) return { key, label, done, total, state: 'done', note: 'Done' };
     if (st.indexing && st.stage === stage) return { key, label, done, total, state: 'working', note: `${left.toLocaleString()} left · this device is on it now` };
     const by = who(kind);
-    if (!by) return { key, label, done, total, state: 'waiting', note: `${left.toLocaleString()} left · ${nobody}` };
+    if (!by) {
+      const note = st.index_here ? "waiting for this device's next indexing run" : nobody;
+      return { key, label, done, total, state: 'waiting', note: `${left.toLocaleString()} left · ${note}` };
+    }
     if (by !== 'this device' && !st.indexing) return { key, label, done, total, state: 'waiting', note: `${left.toLocaleString()} left · ${by} ${by.includes(' and ') ? 'are' : 'is'} on it` };
     const why = st.waiting ? `waiting: ${st.waiting}` : !st.index_here ? 'indexing is off here' : 'next in line';
     return { key, label, done, total, state: 'waiting', note: `${left.toLocaleString()} left · ${why}` };
@@ -219,7 +222,7 @@ export function processingHeadline(st: Status | null): string {
 export function deviceIndexLine(st: Status | null, deviceId: string, isThis: boolean): string {
   if (!st || !st.meaning) return '';
   const i = st.indexers.find((x) => x.device_id === deviceId);
-  if (!i) return isThis && !st.index_here ? 'Search indexing: off' : '';
+  if (!i) return isThis ? (st.index_here ? 'Search indexing: waits for its next run' : 'Search indexing: off') : '';
   const does = ['pictures', i.reads_text ? 'text' : '', i.finds_faces ? 'faces' : ''].filter(Boolean).join(', ');
   const now = isThis && st.indexing && st.stage ? ` · now ${stageVerb[st.stage] ?? 'indexing'}` : '';
   return `Search indexing: ${i.photos_per_min.toLocaleString()} photos a minute (${does})${now}`;

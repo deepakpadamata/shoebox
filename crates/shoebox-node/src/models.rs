@@ -11,10 +11,44 @@ use shoebox_core::ids::Blake3Hash;
 use shoebox_core::model::{BlobKind, BlobRef};
 use shoebox_core::store::LibraryStore;
 use shoebox_search::models::ModelFile;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tracing::warn;
 
 fn hash(file: &ModelFile) -> Blake3Hash {
     Blake3Hash(file.blake3)
+}
+
+/// Where a device may look for a model besides what its library offers (S2-02).
+#[derive(Clone, Default)]
+pub struct ModelSources {
+    /// Folders to look in first: the app's resources and its own `models/` folder.
+    pub dirs: Vec<PathBuf>,
+    /// Where to download a file nobody has to; `None` never downloads (a metered network, or a
+    /// device that is not to).
+    pub download_to: Option<PathBuf>,
+    /// Told how far a download has got: the file, bytes in hand, its size.
+    #[allow(clippy::type_complexity)]
+    pub progress: Option<Arc<dyn Fn(&ModelFile, u64, u64) + Send + Sync>>,
+}
+
+/// A copy of `file` in one of `dirs` that really is the model (size and hash checked).
+async fn local_copy(file: &ModelFile, dirs: &[PathBuf]) -> Option<(PathBuf, Bytes)> {
+    for dir in dirs {
+        let path = dir.join(file.name);
+        match tokio::fs::metadata(&path).await {
+            Ok(m) if m.len() == file.size => {}
+            _ => continue,
+        }
+        let Ok(bytes) = tokio::fs::read(&path).await else {
+            continue;
+        };
+        if *blake3::hash(&bytes).as_bytes() == file.blake3 {
+            return Some((path, bytes.into()));
+        }
+        warn!("{} is not the model it should be: ignored", path.display());
+    }
+    None
 }
 
 impl<L: LibraryStore> LibraryNode<L> {
@@ -61,23 +95,76 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// The model's bytes: from this device's store, or fetched from a device that offers it.
     /// `None` when this device does not hold it and nobody offers it (then it does not index).
     pub async fn model_bytes(&self, file: &ModelFile) -> Result<Option<Bytes>> {
+        self.model_bytes_from(file, &ModelSources::default()).await
+    }
+
+    /// The model's bytes, from the first place that has them:
+    ///
+    /// 1. this device's blob store;
+    /// 2. a copy in one of `sources.dirs` (then offered to the other devices);
+    /// 3. a device of the library that offers it;
+    /// 4. a download from the file's published address, when `sources.download_to` is set (then
+    ///    offered to the other devices too).
+    ///
+    /// `None` when none of those has it.
+    pub async fn model_bytes_from(
+        &self,
+        file: &ModelFile,
+        sources: &ModelSources,
+    ) -> Result<Option<Bytes>> {
         let h = hash(file);
-        if !self.node().blobs().has(&h).await? {
-            if !self.model_offered(file).await? {
-                return Ok(None);
-            }
-            let blob = BlobRef {
-                hash: h,
-                size: file.size,
-                mime: "application/onnx".into(),
-            };
-            self.fetch_blob_as_index(&blob).await?;
-            self.publish_holdings(vec![(h, BlobKind::Index)]).await?;
+        if self.node().blobs().has(&h).await? {
+            return self.stored_model(file).await.map(Some);
         }
-        let bytes = self.node().blobs().get(&h).await?;
+        if let Some((path, bytes)) = local_copy(file, &sources.dirs).await {
+            if let Err(e) = self.share_model(file, &path).await {
+                warn!("could not offer {}: {e:#}", file.name);
+            }
+            return Ok(Some(bytes));
+        }
+        if self.model_offered(file).await? {
+            match self.fetch_offered_model(file).await {
+                Ok(()) => return self.stored_model(file).await.map(Some),
+                // The device that offers it may be away: a download can still do.
+                Err(e) if sources.download_to.is_some() => {
+                    warn!("could not get {} from another device: {e:#}", file.name);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        let Some(dir) = &sources.download_to else {
+            return Ok(None);
+        };
+        let progress = sources.progress.clone();
+        let path = crate::model_download::download_model(file, dir, &move |done, total| {
+            if let Some(p) = &progress {
+                p(file, done, total);
+            }
+        })
+        .await?;
+        if let Err(e) = self.share_model(file, &path).await {
+            warn!("could not offer {}: {e:#}", file.name);
+        }
+        let bytes = tokio::fs::read(&path).await?;
+        Ok(Some(bytes.into()))
+    }
+
+    async fn fetch_offered_model(&self, file: &ModelFile) -> Result<()> {
+        let h = hash(file);
+        let blob = BlobRef {
+            hash: h,
+            size: file.size,
+            mime: "application/onnx".into(),
+        };
+        self.fetch_blob_as_index(&blob).await?;
+        self.publish_holdings(vec![(h, BlobKind::Index)]).await
+    }
+
+    async fn stored_model(&self, file: &ModelFile) -> Result<Bytes> {
+        let bytes = self.node().blobs().get(&hash(file)).await?;
         if bytes.len() as u64 != file.size {
             bail!("{} has the wrong size", file.name);
         }
-        Ok(Some(bytes))
+        Ok(bytes)
     }
 }

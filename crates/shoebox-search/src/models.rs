@@ -3,12 +3,14 @@
 
 use shoebox_core::model::ModelId;
 
-/// A model file: its name in the app's resources and `models/build/`, BLAKE3 and size.
+/// A model file: its name in the app's resources and `models/build/`, BLAKE3, size and the
+/// address of its published copy (the file is checked against the hash whatever served it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ModelFile {
     pub name: &'static str,
     pub blake3: [u8; 32],
     pub size: u64,
+    pub url: &'static str,
 }
 
 pub const CLIP_TEXT: ModelFile = ModelFile {
@@ -18,6 +20,8 @@ pub const CLIP_TEXT: ModelFile = ModelFile {
         70, 106, 180, 141, 38, 218, 42, 242, 105, 54, 17, 153,
     ],
     size: 64701540,
+    url:
+        "https://github.com/deepakpadamata/shoebox/releases/download/models-v1/clip-text-int8.onnx",
 };
 
 pub const CLIP_IMAGE: ModelFile = ModelFile {
@@ -27,24 +31,22 @@ pub const CLIP_IMAGE: ModelFile = ModelFile {
         232, 109, 96, 163, 213, 104, 146, 113, 105, 183, 163, 83, 184,
     ],
     size: 95974700,
+    url:
+        "https://github.com/deepakpadamata/shoebox/releases/download/models-v1/clip-image-int8.onnx",
 };
 
 pub const FACE_DETECT: ModelFile = ModelFile {
     name: "face-detect-yunet.onnx",
-    blake3: [
-        61, 89, 56, 196, 205, 90, 2, 220, 65, 111, 28, 209, 247, 252, 31, 102, 42, 34, 173, 195,
-        112, 71, 113, 18, 200, 113, 149, 69, 135, 230, 52, 49,
-    ],
+    blake3: [61, 89, 56, 196, 205, 90, 2, 220, 65, 111, 28, 209, 247, 252, 31, 102, 42, 34, 173, 195, 112, 71, 113, 18, 200, 113, 149, 69, 135, 230, 52, 49],
     size: 232589,
+    url: "https://github.com/deepakpadamata/shoebox/releases/download/models-v1/face-detect-yunet.onnx",
 };
 
 pub const FACE_EMBED: ModelFile = ModelFile {
     name: "face-embed-sface.onnx",
-    blake3: [
-        88, 77, 15, 87, 146, 233, 231, 118, 171, 94, 91, 243, 245, 89, 242, 49, 15, 248, 253, 211,
-        179, 159, 148, 221, 54, 71, 81, 4, 101, 146, 181, 18,
-    ],
+    blake3: [88, 77, 15, 87, 146, 233, 231, 118, 171, 94, 91, 243, 245, 89, 242, 49, 15, 248, 253, 211, 179, 159, 148, 221, 54, 71, 81, 4, 101, 146, 181, 18],
     size: 38696353,
+    url: "https://github.com/deepakpadamata/shoebox/releases/download/models-v1/face-embed-sface.onnx",
 };
 
 /// Every file, for keeping and sharing them.

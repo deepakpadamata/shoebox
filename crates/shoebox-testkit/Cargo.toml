@@ -10,7 +10,7 @@ publish = false
 [dependencies]
 shoebox-core.workspace = true
 shoebox-node.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["net", "io-util"] }
 tempfile.workspace = true
 anyhow.workspace = true
 

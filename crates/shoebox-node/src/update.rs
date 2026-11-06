@@ -42,7 +42,9 @@ pub fn newer(current: &str, other: &str) -> bool {
     }
 }
 
-fn client() -> Result<reqwest::Client> {
+/// An HTTP client builder with the TLS setup the app uses everywhere (rustls with ring and the
+/// bundled roots), a user agent that names only the app and its version, and nothing else.
+pub(crate) fn https_builder() -> Result<reqwest::ClientBuilder> {
     let roots = rustls::RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.into(),
     };
@@ -54,9 +56,11 @@ fn client() -> Result<reqwest::Client> {
     .with_no_client_auth();
     Ok(reqwest::Client::builder()
         .tls_backend_preconfigured(tls)
-        .timeout(TIMEOUT)
-        .user_agent(concat!("shoebox/", env!("CARGO_PKG_VERSION")))
-        .build()?)
+        .user_agent(concat!("shoebox/", env!("CARGO_PKG_VERSION"))))
+}
+
+fn client() -> Result<reqwest::Client> {
+    Ok(https_builder()?.timeout(TIMEOUT).build()?)
 }
 
 /// Fetch `feed` (a `release.json`). The placeholder feed is never contacted.

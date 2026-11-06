@@ -19,6 +19,7 @@ mod keys;
 mod library_node;
 mod limit;
 mod maintenance;
+mod model_download;
 mod models;
 mod node;
 mod pairing;
@@ -55,6 +56,8 @@ pub use indexer::{
 pub use keys::load_or_create_secret;
 pub use library_node::LibraryNode;
 pub use maintenance::MaintenanceConfig;
+pub use model_download::{download_model, download_model_from};
+pub use models::ModelSources;
 pub use node::{
     classify_addrs, classify_addrs_from, FetchReport, Node, NodeEvent, NodeEvents, PathKind,
     PeerAddr, PeerInfo, ALBUM_ALPN, HAS_ALPN, LORO_ALPN, PAIR_ALPN, PING_ALPN, RECOVER_ALPN,

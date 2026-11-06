@@ -5,6 +5,10 @@ name: Release
 # keeper for Linux x86_64/aarch64 (static) and macOS. One SHA256SUMS lists every file and is signed with minisign;
 # `scripts/install-keeper.sh` checks both. Look the draft over, then publish it by hand.
 #
+# The search models are not in the draft: a phone with no computer or keeper downloads them once from the fixed
+# `models-v1` release (the address compiled in from xtask/src/models.rs, S2-02). The `models` job puts any file that
+# release lacks there; it never replaces one, since a file is checked against its hash when it is used.
+#
 # Repository secrets (see docs/notes/release-signing.md for making each one):
 #   MINISIGN_SECRET_KEY, MINISIGN_PASSWORD                     the key whose public half is in install-keeper.sh
 #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD               Developer ID Application certificate (.p12, base64)
@@ -60,6 +64,42 @@ jobs:
           key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py') }}
       - name: Search models match the hashes compiled in (S1-08)
         run: cargo xtask models --check
+
+  models:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # Must match MODELS_RELEASE in xtask/src/models.rs. A changed model is a new release (models-v2) together
+      # with the new hashes in the app.
+      MODELS_TAG: models-v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('xtask/src/models.rs', 'scripts/quantize_clip.py') }}
+      - name: Search models match the hashes compiled in (S1-08)
+        run: cargo xtask models --check
+      - name: The files are on the fixed models release (S2-02)
+        run: |
+          grep -q "releases/download/$MODELS_TAG\"" xtask/src/models.rs || { echo "::error::MODELS_TAG does not match xtask/src/models.rs"; exit 1; }
+          gh release view "$MODELS_TAG" >/dev/null 2>&1 || gh release create "$MODELS_TAG" \
+            --title "Search models ($MODELS_TAG)" --prerelease \
+            --notes "The search models the app downloads once when no other device of the library has them. Each file is checked against the hash built into the app. Nothing here is for people to download by hand."
+          have=$(gh release view "$MODELS_TAG" --json assets -q '.assets[].name')
+          for f in models/build/*.onnx; do
+            name=$(basename "$f")
+            if printf '%s\n' "$have" | grep -qx "$name"; then
+              echo "$name is already on $MODELS_TAG"
+            else
+              gh release upload "$MODELS_TAG" "$f"
+            fi
+          done
 
   keeper:
     needs: check
@@ -238,7 +278,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [keeper, desktop, android]
+    needs: [keeper, desktop, android, models]
     runs-on: ubuntu-latest
     permissions:
       contents: write

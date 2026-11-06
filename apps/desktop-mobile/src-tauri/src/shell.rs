@@ -232,6 +232,12 @@ pub fn run() {
             // The system player reads videos held in the blob store through the core (`video.rs`).
             #[cfg(target_os = "android")]
             crate::video::install(core.clone());
+            // A background indexing run in this process borrows the core (S2-04).
+            #[cfg(target_os = "android")]
+            crate::android_bridge::set_app_core(
+                &core,
+                tauri::async_runtime::block_on(async { tokio::runtime::Handle::current() }),
+            );
             // Tray icon (M3-16): the app keeps syncing with its window closed; Quit ends it.
             #[cfg(desktop)]
             setup_tray(app)?;

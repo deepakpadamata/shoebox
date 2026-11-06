@@ -192,7 +192,9 @@ class IndexWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
                 var ticks = 0
                 while (isActive) {
                     delay(2_000)
-                    if (isStopped || (ticks % 5 == 0 && (tooHot() || !charging()))) {
+                    // The app was opened: it is in the same process and the person comes first.
+                    val opened = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                    if (isStopped || opened || (ticks % 5 == 0 && (tooHot() || !charging()))) {
                         runCatching { stop.writeText("stop") }
                     }
                     if (foreground && ticks % 5 == 0) {

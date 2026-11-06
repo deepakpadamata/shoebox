@@ -179,6 +179,9 @@ impl AppCore {
             Arc::new(encoder) as Arc<dyn ImageEncoder>,
             Arc::new(shoebox_node::Always),
         );
+        // On a core that has run before (the app's own, borrowed by the job) the indexer is
+        // already running, paused since the last run.
+        ln.resume_indexer();
         // Run until this device has nothing left to do (pictures, text, faces), the budget is
         // spent, or the Android side asks it to stop (too hot, unplugged): `index-stop`.
         let stop = index_stop_path(self.data_dir());

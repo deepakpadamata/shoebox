@@ -731,3 +731,29 @@ async fn the_indexer_says_when_it_has_caught_up_even_with_a_photo_it_cannot_read
     .expect("a paused indexer is not caught up");
     c.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_paused_indexer_resumes_for_the_next_run_on_the_same_node() {
+    // The Android job borrows the app's core: run, pause, then run again on the same node.
+    let c = Cluster::with_roles(&[Role::Companion]).await.unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    photos(&nodes, &[0], EndpointId([77; 32]), 0..30).await;
+    nodes[0].start_indexer(phone(20), Arc::new(ENC), Arc::new(Always));
+    wait_until(Duration::from_secs(60), || async {
+        nodes[0].index_progress().caught_up
+    })
+    .await
+    .expect("the first run catches up");
+    nodes[0].pause_indexer();
+    photos(&nodes, &[0], EndpointId([77; 32]), 30..60).await;
+    // A second `start_indexer` does nothing (it is running), so the run resumes it.
+    nodes[0].start_indexer(phone(20), Arc::new(ENC), Arc::new(Always));
+    nodes[0].resume_indexer();
+    wait_until(Duration::from_secs(60), || async {
+        nodes[0].flush_index().await.unwrap();
+        coverage(&nodes[0]).await.len() == 60 && nodes[0].index_progress().caught_up
+    })
+    .await
+    .expect("the second run indexes the photos added after the first");
+    c.shutdown().await;
+}

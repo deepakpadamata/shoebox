@@ -15,7 +15,7 @@ use crate::library_node::LibraryNode;
 use anyhow::{Context, Result};
 use shoebox_core::ids::{Blake3Hash, EndpointId};
 use shoebox_core::model::{IndexerStatus, ModelId, PhotoId, PhotoRecord, Role, ShardKind};
-use shoebox_core::policy::{index_owner, IndexCandidate};
+use shoebox_core::policy::{index_owner, share_candidates};
 use shoebox_core::store::{LibraryStore, Page, TimeRange};
 use shoebox_search::encoder::{ImageEncoder, Rgb};
 use shoebox_search::faces::{FaceDetector, FaceEmbedder, MIN_FACE_PX};
@@ -58,7 +58,9 @@ pub struct IndexerConfig {
     pub grace: Duration,
     /// Encoder threads (keeper: up to half the cores; desktop: half).
     pub threads: usize,
-    /// Shares the backlog (a keeper; a desktop set to index while plugged in).
+    /// Takes the backlog before any other device does (a keeper; a desktop set to index while
+    /// plugged in). Without any such device indexing, every indexing device shares it
+    /// (`share_candidates`).
     pub always_on: bool,
     /// Photos per minute to announce instead of the measured rate (tests).
     pub rate_override: Option<u32>,
@@ -339,19 +341,10 @@ impl<L: LibraryStore> LibraryNode<L> {
                 .iter()
                 .map(|(id, _, _)| *id),
         );
-        let candidates: Vec<IndexCandidate> = self
-            .store()
-            .indexer_statuses()
-            .await?
-            .into_iter()
-            .filter(|s| {
-                s.always_on && s.models.contains(&model) && s.kinds.contains(&ShardKind::Vec8)
-            })
-            .map(|s| IndexCandidate {
-                device: s.device,
-                weight: s.photos_per_min,
-            })
-            .collect();
+        let statuses = self.store().indexer_statuses().await?;
+        let candidates = share_candidates(&statuses, |s| {
+            s.models.contains(&model) && s.kinds.contains(&ShardKind::Vec8)
+        });
         let me = self.device();
         let now = self.inner.clock.now_ms();
         let grace = cfg.grace.as_millis() as u64;
@@ -456,17 +449,8 @@ impl<L: LibraryStore> LibraryNode<L> {
                 .iter()
                 .map(|(id, _)| *id),
         );
-        let candidates: Vec<IndexCandidate> = self
-            .store()
-            .indexer_statuses()
-            .await?
-            .into_iter()
-            .filter(|s| s.always_on && s.models.contains(&OCR_ENGINE))
-            .map(|s| IndexCandidate {
-                device: s.device,
-                weight: s.photos_per_min,
-            })
-            .collect();
+        let statuses = self.store().indexer_statuses().await?;
+        let candidates = share_candidates(&statuses, |s| s.models.contains(&OCR_ENGINE));
         let me = self.device();
         let now = self.inner.clock.now_ms();
         let grace = cfg.grace.as_millis() as u64;
@@ -551,17 +535,8 @@ impl<L: LibraryStore> LibraryNode<L> {
                 .iter()
                 .map(|(id, _)| *id),
         );
-        let candidates: Vec<IndexCandidate> = self
-            .store()
-            .indexer_statuses()
-            .await?
-            .into_iter()
-            .filter(|s| s.always_on && s.models.contains(&model))
-            .map(|s| IndexCandidate {
-                device: s.device,
-                weight: s.photos_per_min,
-            })
-            .collect();
+        let statuses = self.store().indexer_statuses().await?;
+        let candidates = share_candidates(&statuses, |s| s.models.contains(&model));
         let me = self.device();
         let now = self.inner.clock.now_ms();
         let grace = cfg.grace.as_millis() as u64;
@@ -868,7 +843,7 @@ async fn index_loop<L: LibraryStore>(
             }
             let faces = st.faces.lock().unwrap().clone();
             if let Some(faces) = faces {
-                if cfg.always_on && regrouped.is_none_or(|t| t.elapsed() >= REGROUP_EVERY) {
+                if regrouped.is_none_or(|t| t.elapsed() >= REGROUP_EVERY) {
                     regrouped = Some(Instant::now());
                     if let Err(e) = ln.regroup_people(faces.model, false).await {
                         warn!("could not group faces: {e:#}");
@@ -889,7 +864,7 @@ async fn index_loop<L: LibraryStore>(
                 }
             }
         }
-        if cfg.always_on && compacted.is_none_or(|t| t.elapsed() >= cfg.compact_every) {
+        if compacted.is_none_or(|t| t.elapsed() >= cfg.compact_every) {
             compacted = Some(Instant::now());
             if let Err(e) = ln.compact_shards(false).await {
                 warn!("could not compact index shards: {e:#}");
@@ -913,13 +888,6 @@ pub fn owners_of(
     statuses: &[IndexerStatus],
     model: ModelId,
 ) -> Option<EndpointId> {
-    let c: Vec<IndexCandidate> = statuses
-        .iter()
-        .filter(|s| s.always_on && s.models.contains(&model))
-        .map(|s| IndexCandidate {
-            device: s.device,
-            weight: s.photos_per_min,
-        })
-        .collect();
+    let c = share_candidates(statuses, |s| s.models.contains(&model));
     index_owner(photo, ShardKind::Vec8, &c)
 }

@@ -81,8 +81,10 @@ Search runs entirely on the device that searches; only the one-time indexing is 
   shard. A shard replaces older ones by listing them inside its blob; per photo, the shard with the lowest hash wins,
   so two devices indexing the same photo is harmless.
 - **Indexing** is shared without claims: each device does its own imports; the backlog goes to always-on indexers by
-  weighted rendezvous hashing over their `IndexerStatus` (`indexers/<device>`); anyone takes over a photo still
-  unindexed after 48 hours. A keeper indexes always, a desktop on power when idle, a phone while charging.
+  weighted rendezvous hashing over their `IndexerStatus` (`indexers/<device>`), or, when no always-on device is
+  indexing, to every device that is (`share_candidates`, A-124), so a phone on its own or phones only share it too;
+  anyone takes over a photo still unindexed after 48 hours. A keeper indexes always, a desktop on power when idle, a
+  phone while charging.
 - **Models**: OpenCLIP ViT-B/32 at 8 bits (the text side in every build, the image side on indexing devices; phones
   fetch it as a blob by its compiled-in hash), YuNet and SFace for faces, the system's OCR (Apple Vision on macOS),
   all run with `tract` (`shoebox-ml`). See `docs/notes/search-models.md`.

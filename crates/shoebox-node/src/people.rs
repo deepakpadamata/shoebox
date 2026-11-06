@@ -8,6 +8,7 @@ use crate::shards::PEOPLE_SNAPSHOT_KEY;
 use anyhow::Result;
 use shoebox_core::ids::{Blake3Hash, EndpointId};
 use shoebox_core::model::{BlobKind, BlobRef, ModelId, Person, PersonId, PhotoId, ShardKind};
+use shoebox_core::policy::share_candidates;
 use shoebox_core::store::{LibraryStore, Page, TimeRange};
 use shoebox_search::faces::FaceKey;
 use shoebox_search::people::{group, resolve, FaceIn, Snapshot, Who};
@@ -90,16 +91,14 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(Snapshot::decode(&self.node().blobs().get(&hash).await?))
     }
 
-    /// The device that groups faces: the always-on indexer with the lowest device id among
-    /// those that find faces with `model` (the same answer on every device).
+    /// The device that groups faces: the indexer with the lowest device id among those that find
+    /// faces with `model` (the same answer on every device). Always-on indexers come first; with
+    /// none, a phone on its own does it ([`share_candidates`]).
     pub async fn grouping_device(&self, model: ModelId) -> Result<Option<EndpointId>> {
-        Ok(self
-            .store()
-            .indexer_statuses()
-            .await?
+        let statuses = self.store().indexer_statuses().await?;
+        Ok(share_candidates(&statuses, |s| s.models.contains(&model))
             .into_iter()
-            .filter(|s| s.always_on && s.photos_per_min > 0 && s.models.contains(&model))
-            .map(|s| s.device)
+            .map(|c| c.device)
             .min())
     }
 

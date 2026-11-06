@@ -123,17 +123,30 @@ async fn coverage(n: &LibraryNode<Library>) -> BTreeMap<PhotoId, usize> {
 }
 
 async fn announce(n: &LibraryNode<Library>, weight: u32) {
+    announce_as(n, weight, true).await;
+}
+
+/// `always_on: false` is a phone (or a desktop set to index only while charging).
+async fn announce_as(n: &LibraryNode<Library>, weight: u32, always_on: bool) {
     n.store()
         .put_indexer_status(IndexerStatus {
             device: n.device(),
             models: vec![TestEncoder::MODEL],
             kinds: vec![ShardKind::Vec8, ShardKind::Vec1],
             photos_per_min: weight,
-            always_on: true,
+            always_on,
             hlc: shoebox_core::hlc::Hlc::GENESIS,
         })
         .await
         .unwrap();
+}
+
+/// What a phone runs: the same indexer, not always on.
+fn phone(weight: u32) -> IndexerConfig {
+    IndexerConfig {
+        always_on: false,
+        ..cfg(weight)
+    }
 }
 
 async fn statuses_seen(n: &LibraryNode<Library>, count: usize) -> bool {
@@ -482,5 +495,187 @@ async fn pausing_hands_the_share_to_the_others_and_the_status_counts_right() {
     assert_eq!(s.eta_secs, None);
     assert_eq!(s.indexers.len(), 1, "the paused one is not listed");
     assert!(s.held_bytes > 0);
+    c.shutdown().await;
+}
+
+// S2-01: a library with no always-on device (one phone, or phones only) still shares the work.
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_phones_and_no_keeper_share_the_backlog_by_speed() {
+    let c = Cluster::with_roles(&[Role::Companion, Role::Companion])
+        .await
+        .unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    let total = 300u32;
+    // Imported by a third device that is gone: nobody's own import, so all of it is backlog.
+    let ids = photos(&nodes, &[0, 1], EndpointId([77; 32]), 0..total).await;
+    let weights = [10u32, 30];
+    for (n, w) in nodes.iter().zip(weights) {
+        announce_as(n, w, false).await;
+    }
+    for n in &nodes {
+        wait_until(Duration::from_secs(30), || async {
+            statuses_seen(n, 2).await
+                && n.store()
+                    .photo(ids.last().unwrap())
+                    .await
+                    .unwrap()
+                    .is_some()
+        })
+        .await
+        .expect("statuses and photos reach both phones");
+    }
+    for (n, w) in nodes.iter().zip(weights) {
+        n.start_indexer(phone(w), Arc::new(ENC), Arc::new(Always));
+        n.start_fetcher(fetch());
+    }
+    // No 48-hour wait: the whole backlog is covered at once.
+    wait_until(Duration::from_secs(120), || async {
+        nodes[0].flush_index().await.unwrap();
+        coverage(&nodes[0]).await.len() == total as usize
+    })
+    .await
+    .expect("every photo indexed with no always-on device");
+    let records = nodes[0].store().index_shards().await.unwrap();
+    let made = |d: EndpointId| -> f64 {
+        records
+            .iter()
+            .filter(|r| r.made_by == d && r.kind == ShardKind::Vec8 && r.replaces.is_empty())
+            .map(|r| r.count as f64)
+            .sum::<f64>()
+            / f64::from(total)
+    };
+    for (n, want) in nodes.iter().zip([0.25, 0.75]) {
+        let got = made(n.device());
+        assert!(
+            (got - want).abs() < 0.12,
+            "{}: {got:.2} vs {want:.2}",
+            n.device()
+        );
+    }
+    c.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_phone_on_its_own_indexes_photos_it_did_not_import() {
+    let c = Cluster::with_roles(&[Role::Companion]).await.unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    let total = 60u32;
+    // A library moved here from elsewhere: every photo was imported by another device.
+    photos(&nodes, &[0], EndpointId([77; 32]), 0..total).await;
+    nodes[0].start_indexer(phone(20), Arc::new(ENC), Arc::new(Always));
+    wait_until(Duration::from_secs(60), || async {
+        nodes[0].flush_index().await.unwrap();
+        coverage(&nodes[0]).await.len() == total as usize
+    })
+    .await
+    .expect("a phone alone covers a backlog it did not import, without waiting 48 hours");
+    c.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn phones_without_a_keeper_still_compact_their_shards() {
+    let c = Cluster::with_roles(&[Role::Companion, Role::Companion])
+        .await
+        .unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    let total = 60u32;
+    let ids = photos(&nodes, &[0, 1], EndpointId([77; 32]), 0..total).await;
+    for n in &nodes {
+        announce_as(n, 20, false).await;
+    }
+    for n in &nodes {
+        wait_until(Duration::from_secs(30), || async {
+            statuses_seen(n, 2).await
+                && n.store()
+                    .photo(ids.last().unwrap())
+                    .await
+                    .unwrap()
+                    .is_some()
+        })
+        .await
+        .unwrap();
+    }
+    for n in &nodes {
+        n.start_indexer(
+            IndexerConfig {
+                shard_size: 4,
+                batch: 4,
+                // The test asks for compaction itself.
+                compact_every: Duration::from_secs(3600 * 24),
+                ..phone(20)
+            },
+            Arc::new(ENC),
+            Arc::new(Always),
+        );
+        n.start_fetcher(fetch());
+    }
+    for n in &nodes {
+        wait_until(Duration::from_secs(120), || async {
+            n.flush_index().await.unwrap();
+            coverage(n).await.len() == total as usize
+        })
+        .await
+        .expect("indexed and fetched on both phones");
+    }
+    assert!(live_count(&nodes[0], ShardKind::Vec8).await >= 6);
+    // Without force each device compacts only the groups it is responsible for (a group is a
+    // model and a kind, each with its own owner, so both phones may have some). With no
+    // always-on device the phones are the candidates; before S2-01 nobody was, and shards
+    // piled up for ever.
+    let (a, b) = tokio::join!(
+        nodes[0].compact_shards(false),
+        nodes[1].compact_shards(false)
+    );
+    let (a, b) = (a.unwrap().written, b.unwrap().written);
+    assert!(a + b > 0, "the phones compact their shards ({a}, {b})");
+    c.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn faces_are_grouped_by_one_phone_unless_an_always_on_device_is_there() {
+    let c = Cluster::with_roles(&[Role::Companion, Role::Companion, Role::Keeper])
+        .await
+        .unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    announce_as(&nodes[0], 5, false).await;
+    announce_as(&nodes[1], 8, false).await;
+    for n in &nodes {
+        wait_until(Duration::from_secs(30), || async {
+            statuses_seen(n, 2).await
+        })
+        .await
+        .unwrap();
+    }
+    // Phones only: the one with the lowest device id, the same answer on every device.
+    let lowest = nodes[0].device().min(nodes[1].device());
+    for n in &nodes {
+        assert_eq!(
+            n.grouping_device(TestEncoder::MODEL).await.unwrap(),
+            Some(lowest)
+        );
+    }
+    // A keeper that is indexing takes it over, whatever its id.
+    announce(&nodes[2], 50).await;
+    for n in &nodes {
+        wait_until(Duration::from_secs(30), || async {
+            statuses_seen(n, 3).await
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            n.grouping_device(TestEncoder::MODEL).await.unwrap(),
+            Some(nodes[2].device())
+        );
+    }
+    // A paused keeper hands it back to the phones.
+    announce(&nodes[2], 0).await;
+    for n in &nodes {
+        wait_until(Duration::from_secs(30), || async {
+            n.grouping_device(TestEncoder::MODEL).await.unwrap() == Some(lowest)
+        })
+        .await
+        .expect("a keeper that is not indexing does not hold the job");
+    }
     c.shutdown().await;
 }

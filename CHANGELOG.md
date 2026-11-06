@@ -10,7 +10,9 @@ guide](docs/guides/user-guide.md).
   screenshots and favourites as chips; words matched against what is in the photos (OpenCLIP, 8 bits), labels, text
   read from photos (macOS) and people's names; *Similar photos* in the viewer. Indexing is shared out between the
   devices that can do it (a keeper always, a computer on power when idle, a phone while charging) and published as
-  index shards every device holds. *Settings → Search* and `shoebox-keeper index` say how much is covered.
+  index shards every device holds. A library with no keeper and no computer, one phone or phones only, shares the same
+  work among the phones as they charge, instead of waiting two days for photos they did not import. *Settings →
+  Search* and `shoebox-keeper index` say how much is covered.
 - **People**: faces found and grouped on your own devices; name, merge, hide, *this is me*, "not Ana". On or off for
   the whole library.
 - **More formats**: GIF, WebP, BMP and TIFF photos (an animated GIF or WebP shows its first frame; the original plays

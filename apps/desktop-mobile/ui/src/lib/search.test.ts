@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { addRecent, chipIcon, clearRecent, complete, debounce, groupSuggestions, lastWord, loadRecent, queryFromParam, removeChip, searchPath, step, coverageLine, phoneAloneLine } from './search';
+import { addRecent, chipIcon, clearRecent, complete, debounce, groupSuggestions, lastWord, loadRecent, queryFromParam, removeChip, searchPath, step, coverageLine, deviceIndexLine, phoneAloneLine, processingHeadline, processingRows } from './search';
 
 function memory() {
   const m = new Map<string, string>();
@@ -130,5 +130,42 @@ describe('phoneAloneLine', () => {
     expect(phoneAloneLine(st({ content: 1000 }))).toBe('');
     expect(phoneAloneLine(st({ meaning: false }))).toBe('');
     expect(phoneAloneLine(null)).toBe('');
+  });
+});
+
+describe('processing status', () => {
+  const base = {
+    total: 1000, content: 1000, labelled: 990, text_wanted: 100, text_wanted_read: 40, faces: 400, faces_wanted: 900,
+    people_on: true, meaning: true, index_here: true, indexing: true, stage: '', waiting: null as string | null, caught_up: false,
+    indexers: [{ name: 'S25', this_device: true, photos_per_min: 120, reads_text: true, finds_faces: true, device_id: 'aa' }],
+  };
+  it('shows each kind with what is done and what is pending', () => {
+    const rows = processingRows({ ...base, stage: 'text' });
+    expect(rows.map((r) => [r.key, r.state])).toEqual([['content', 'done'], ['labels', 'waiting'], ['text', 'working'], ['faces', 'waiting']]);
+    expect(rows[2].note).toContain('60 left');
+    expect(rows[3].note).toContain('500 left');
+  });
+  it('says who is on it, or that nobody is', () => {
+    const none = processingRows({ ...base, indexing: false, indexers: [] });
+    expect(none[2].note).toContain('no device here reads text yet');
+    const other = processingRows({ ...base, indexing: false, indexers: [{ name: 'nest', this_device: false, photos_per_min: 300, reads_text: false, finds_faces: true, device_id: 'bb' }] });
+    expect(other[2].note).toContain('no device here reads text yet');
+    expect(other[3].note).toContain('nest is on it');
+  });
+  it('says why this device is not working', () => {
+    const rows = processingRows({ ...base, indexing: false, waiting: 'waiting for power and idle' });
+    expect(rows[2].note).toContain('waiting: waiting for power and idle');
+    expect(processingRows({ ...base, people_on: false })[3].state).toBe('off');
+    expect(processingRows({ ...base, meaning: false })).toEqual([]);
+  });
+  it('has a headline for what this device is doing', () => {
+    expect(processingHeadline({ ...base, stage: 'faces' })).toBe('This device is finding faces now.');
+    expect(processingHeadline({ ...base, index_here: false })).toBe('Indexing is off on this device.');
+    expect(processingHeadline({ ...base, caught_up: true })).toBe('This device has nothing left to do.');
+  });
+  it('describes a device on the Devices screen', () => {
+    expect(deviceIndexLine({ ...base, stage: 'text' }, 'aa', true)).toBe('Search indexing: 120 photos a minute (pictures, text, faces) · now reading text in photos');
+    expect(deviceIndexLine(base, 'zz', false)).toBe('');
+    expect(deviceIndexLine({ ...base, index_here: false, indexers: [] }, 'aa', true)).toBe('Search indexing: off');
   });
 });

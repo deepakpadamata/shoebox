@@ -375,6 +375,10 @@ impl AppCore {
             labelled: s.labelled as u32,
             text_read: s.text_read as u32,
             faces: s.faces as u32,
+            text_wanted: s.text_wanted as u32,
+            text_wanted_read: s.text_wanted_read as u32,
+            faces_wanted: s.faces_wanted as u32,
+            people_on: s.people_on,
             meaning: s.meaning,
             indexers: s
                 .indexers
@@ -384,12 +388,17 @@ impl AppCore {
                     photos_per_min: i.photos_per_min,
                     this_device: i.device == ln.device(),
                     reads_text: i.reads_text,
+                    finds_faces: i.finds_faces,
+                    device_id: hex::encode(i.device.0),
                 })
                 .collect(),
             eta_secs: s.eta_secs.map(|e| e.min(u64::from(u32::MAX)) as u32),
             held_bytes: s.held_bytes as f64,
             index_here: SearchSettings::load(self.data_dir()).index,
             indexing: p.running && !p.paused,
+            stage: p.stage.to_string(),
+            waiting: p.waiting.clone(),
+            caught_up: p.caught_up,
             model_download: download_progress(self.data_dir()),
         })
     }

@@ -3,4 +3,8 @@
 /**
  * A device that indexes photos for search, as the search status shows it.
  */
-export type SearchIndexer = { name: string, photos_per_min: number, this_device: boolean, reads_text: boolean, };
+export type SearchIndexer = { name: string, photos_per_min: number, this_device: boolean, reads_text: boolean, finds_faces: boolean, 
+/**
+ * The device's id, as the devices list has it.
+ */
+device_id: string, };

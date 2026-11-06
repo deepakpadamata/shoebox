@@ -154,6 +154,77 @@ export function phoneAloneLine(st: { total: number; content: number; meaning: bo
   return `This phone is indexing on its own while it charges: ${(st.total - st.content).toLocaleString()} photos left, about ${nights === 1 ? 'one night' : `${nights} nights`}.`;
 }
 
+export type ProcessRow = {
+  key: 'content' | 'labels' | 'text' | 'faces';
+  label: string;
+  done: number;
+  total: number;
+  state: 'done' | 'working' | 'waiting' | 'off';
+  note: string;
+};
+
+type Status = {
+  total: number; content: number; labelled: number; text_wanted: number; text_wanted_read: number; faces: number; faces_wanted: number;
+  people_on: boolean; meaning: boolean; index_here: boolean; indexing: boolean; stage: string; waiting: string | null; caught_up: boolean;
+  indexers: { name: string; this_device: boolean; photos_per_min: number; reads_text: boolean; finds_faces: boolean; device_id: string }[];
+};
+
+const stageVerb: Record<string, string> = {
+  pictures: 'reading what is in photos',
+  text: 'reading text in photos',
+  faces: 'finding faces',
+  grouping: 'grouping faces into people',
+  compacting: 'tidying the search index',
+};
+
+/** Settings → Search: each kind of processing, how far it has got, and what is waiting (S2). */
+export function processingRows(st: Status | null): ProcessRow[] {
+  if (!st || st.total === 0 || !st.meaning) return [];
+  const who = (kind: 'reads_text' | 'finds_faces' | null) => {
+    const on = st.indexers.filter((i) => (kind ? i[kind] : true));
+    if (on.length === 0) return null;
+    return on.slice(0, 2).map((i) => (i.this_device ? 'this device' : i.name || 'a device')).join(' and ');
+  };
+  const row = (key: ProcessRow['key'], label: string, done: number, total: number, stage: string, kind: 'reads_text' | 'finds_faces' | null, nobody: string): ProcessRow => {
+    const left = Math.max(0, total - done);
+    if (left === 0) return { key, label, done, total, state: 'done', note: 'Done' };
+    if (st.indexing && st.stage === stage) return { key, label, done, total, state: 'working', note: `${left.toLocaleString()} left · this device is on it now` };
+    const by = who(kind);
+    if (!by) return { key, label, done, total, state: 'waiting', note: `${left.toLocaleString()} left · ${nobody}` };
+    if (by !== 'this device' && !st.indexing) return { key, label, done, total, state: 'waiting', note: `${left.toLocaleString()} left · ${by} ${by.includes(' and ') ? 'are' : 'is'} on it` };
+    const why = st.waiting ? `waiting: ${st.waiting}` : !st.index_here ? 'indexing is off here' : 'next in line';
+    return { key, label, done, total, state: 'waiting', note: `${left.toLocaleString()} left · ${why}` };
+  };
+  const rows = [
+    row('content', 'What is in each photo (search by meaning)', st.content, st.total, 'pictures', null, 'no device is indexing right now'),
+    row('labels', 'Labels', st.labelled, st.total, 'pictures', null, 'no device is indexing right now'),
+    row('text', 'Text in photos (screenshots, documents, signs…)', st.text_wanted_read, st.text_wanted, 'text', 'reads_text', 'no device here reads text yet'),
+  ];
+  if (!st.people_on) rows.push({ key: 'faces', label: 'Faces and People', done: 0, total: 0, state: 'off', note: 'People is off for this library' });
+  else rows.push(row('faces', 'Faces and People', st.faces, st.faces_wanted, 'faces', 'finds_faces', 'no device is finding faces yet'));
+  return rows;
+}
+
+/** One line on what this device is doing about indexing right now. */
+export function processingHeadline(st: Status | null): string {
+  if (!st || !st.meaning) return '';
+  if (st.indexing && st.stage) return `This device is ${stageVerb[st.stage] ?? 'indexing'} now.`;
+  if (!st.index_here) return 'Indexing is off on this device.';
+  if (st.waiting) return `This device is waiting: ${st.waiting}.`;
+  if (st.indexing && st.caught_up) return 'This device has nothing left to do.';
+  return st.indexing ? 'This device is indexing.' : 'Indexing is paused on this device.';
+}
+
+/** The Devices screen: what a device does for search, if anything. */
+export function deviceIndexLine(st: Status | null, deviceId: string, isThis: boolean): string {
+  if (!st || !st.meaning) return '';
+  const i = st.indexers.find((x) => x.device_id === deviceId);
+  if (!i) return isThis && !st.index_here ? 'Search indexing: off' : '';
+  const does = ['pictures', i.reads_text ? 'text' : '', i.finds_faces ? 'faces' : ''].filter(Boolean).join(', ');
+  const now = isThis && st.indexing && st.stage ? ` · now ${stageVerb[st.stage] ?? 'indexing'}` : '';
+  return `Search indexing: ${i.photos_per_min.toLocaleString()} photos a minute (${does})${now}`;
+}
+
 export function duration(secs: number): string {
   if (secs < 90) return 'a minute';
   if (secs < 3600) return `${Math.round(secs / 60)} min`;

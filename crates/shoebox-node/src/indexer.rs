@@ -103,6 +103,9 @@ pub struct IndexProgress {
     pub paused: bool,
     /// Why it is not indexing (gate closed), if so.
     pub waiting: Option<String>,
+    /// What this device is doing now: "pictures", "text", "faces", "grouping", "compacting", or
+    /// "" when idle (S2-04 follow-up: the Settings screen says it).
+    pub stage: &'static str,
     /// The last pass found nothing left for this device to do: pictures, text and faces (S2-04).
     /// False until a pass has run, and while the gate is closed or indexing is paused.
     pub caught_up: bool,
@@ -790,6 +793,7 @@ async fn index_loop<L: LibraryStore>(
         st.progress.lock().unwrap().waiting = (!open).then(|| "waiting for power and idle".into());
         // Whether this pass found anything to do (S2-04: `caught_up`).
         let mut busy = false;
+        let set_stage = |stage: &'static str| st.progress.lock().unwrap().stage = stage;
         if !ln.indexer_paused() && open {
             match ln.index_work(model, &cfg, since).await {
                 Ok((work, indexed, total)) => {
@@ -802,6 +806,9 @@ async fn index_loop<L: LibraryStore>(
                         p.photos_per_min = rate;
                     }
                     busy |= !work.is_empty();
+                    if !work.is_empty() {
+                        set_stage("pictures");
+                    }
                     for chunk in work.chunks(cfg.batch.max(1)) {
                         if ln.indexer_paused() || !gate.may_index() {
                             break;
@@ -873,6 +880,7 @@ async fn index_loop<L: LibraryStore>(
             let engine = st.ocr.lock().unwrap().clone();
             if let Some(engine) = engine {
                 if !ln.indexer_paused() && gate.may_index() {
+                    set_stage("text");
                     match ln.read_some_text(&cfg, since, engine).await {
                         Ok(true) => {
                             busy = true;
@@ -893,11 +901,13 @@ async fn index_loop<L: LibraryStore>(
             if let Some(faces) = faces {
                 if regrouped.is_none_or(|t| t.elapsed() >= REGROUP_EVERY) {
                     regrouped = Some(Instant::now());
+                    set_stage("grouping");
                     if let Err(e) = ln.regroup_people(faces.model, false).await {
                         warn!("could not group faces: {e:#}");
                     }
                 }
                 if !ln.indexer_paused() && gate.may_index() {
+                    set_stage("faces");
                     match ln.find_some_faces(&cfg, since, faces).await {
                         Ok(true) => {
                             busy = true;
@@ -917,11 +927,19 @@ async fn index_loop<L: LibraryStore>(
         }
         if compacted.is_none_or(|t| t.elapsed() >= cfg.compact_every) {
             compacted = Some(Instant::now());
+            set_stage("compacting");
             if let Err(e) = ln.compact_shards(false).await {
                 warn!("could not compact index shards: {e:#}");
             }
         }
-        st.progress.lock().unwrap().caught_up = open && !ln.indexer_paused() && !busy;
+        {
+            let mut p = st.progress.lock().unwrap();
+            p.caught_up = open && !ln.indexer_paused() && !busy;
+            // Nothing was worked on this pass: say so (otherwise the stage stands until the next).
+            if !busy {
+                p.stage = "";
+            }
+        }
         let wait = {
             let inner = ln.inner.clone();
             let tick = cfg.tick;

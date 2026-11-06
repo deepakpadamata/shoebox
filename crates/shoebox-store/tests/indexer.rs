@@ -755,5 +755,15 @@ async fn a_paused_indexer_resumes_for_the_next_run_on_the_same_node() {
     })
     .await
     .expect("the second run indexes the photos added after the first");
+    let s = nodes[0].search_status().await.unwrap();
+    assert_eq!((s.total, s.content), (60, 60));
+    assert_eq!(s.faces_wanted, 60, "every photo is a face candidate");
+    assert!(s.text_wanted_read <= s.text_wanted);
+    assert!(!s.people_on || s.faces_wanted > 0);
+    assert_eq!(s.indexers.len(), 1);
+    assert!(
+        !s.indexers[0].finds_faces,
+        "this indexer has no face models"
+    );
     c.shutdown().await;
 }

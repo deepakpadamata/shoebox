@@ -10,6 +10,7 @@
 //! <data>/shares/<share id hex>/meta.postcard  who owns it, version, expiry, the cids it lists
 //! <data>/shares/<share id hex>/manifest       the sealed manifest
 //! <data>/reports/<share id hex>               a share taken down by a report
+//! <data>/invites/<blake3 of the code, hex>     an invite code: uses left, end date, note (the code itself is not kept)
 //! <data>/uploads/<token hex>                  an upload handed out and not yet committed
 //! <data>/tmp/                                 uploads in progress
 //! ```
@@ -106,14 +107,22 @@ pub struct Store {
     /// Where the bytes are when they are not in a bucket.
     disk: Option<PathBuf>,
     inner: Mutex<Inner>,
+    invite_lock: Mutex<()>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum StoreError {
     UnknownLibrary,
+    /// A library the service has not seen, while registration is closed: it needs an invite code.
+    RegistrationClosed,
+    /// The invite code is unknown, used up or past its end date.
+    InviteRefused,
     WrongRoot,
     TooManyCerts,
-    QuotaExceeded { used: u64, quota: u64 },
+    QuotaExceeded {
+        used: u64,
+        quota: u64,
+    },
     Conflict(&'static str),
     InUse(Vec<ShareId>),
     Missing(Vec<Cid>),
@@ -129,6 +138,36 @@ fn lib_key(lib: &[u8; 16], name: &str) -> String {
 fn share_key(id: &ShareId, name: &str) -> String {
     format!("shares/{}/{name}", hex::encode(id))
 }
+fn invite_key(id: &[u8; 32]) -> String {
+    format!("invites/{}", hex::encode(id))
+}
+
+/// Letters that cannot be mistaken for one another (Crockford's base 32).
+const INVITE_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/// An invite code as typed: upper case, without spaces or dashes, and the letters people confuse mapped.
+pub fn normalize_invite(code: &str) -> String {
+    code.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| match c.to_ascii_uppercase() {
+            'O' => '0',
+            'I' | 'L' => '1',
+            c => c,
+        })
+        .collect()
+}
+
+/// What the service keeps for an invite code: never the code, only its hash (the record's name).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Invite {
+    pub uses_left: u32,
+    pub created_ms: i64,
+    pub expires_ms: Option<i64>,
+    pub note: String,
+    /// Libraries that came in with it, hex.
+    pub used_by: Vec<String>,
+}
+
 fn report_key(id: &ShareId) -> String {
     format!("reports/{}", hex::encode(id))
 }
@@ -223,6 +262,7 @@ impl Store {
             meta,
             disk,
             inner: Mutex::new(inner),
+            invite_lock: Mutex::new(()),
         })
     }
 
@@ -311,6 +351,107 @@ impl Store {
         self.meta.delete(&report_key(id)).is_ok()
     }
 
+    // ---- invite codes (W1-10) ----
+
+    /// Make an invite code for `uses` new libraries; returns the code (shown once) and its id.
+    pub fn create_invite(
+        &self,
+        uses: u32,
+        expires_ms: Option<i64>,
+        note: &str,
+        now_ms: i64,
+    ) -> io::Result<(String, [u8; 32])> {
+        let mut r = [0u8; 15];
+        getrandom::fill(&mut r).expect("operating system randomness");
+        // 15 random bytes = 24 letters of 5 bits: 120 bits, written in four groups of six.
+        let mut bits: u128 = 0;
+        for b in r {
+            bits = (bits << 8) | u128::from(b);
+        }
+        let letters: String = (0..24)
+            .map(|i| INVITE_ALPHABET[((bits >> (5 * (23 - i))) & 31) as usize] as char)
+            .collect();
+        let code = letters
+            .as_bytes()
+            .chunks(6)
+            .map(|c| std::str::from_utf8(c).expect("ascii"))
+            .collect::<Vec<_>>()
+            .join("-");
+        let id = *blake3::hash(normalize_invite(&code).as_bytes()).as_bytes();
+        let invite = Invite {
+            uses_left: uses,
+            created_ms: now_ms,
+            expires_ms,
+            note: note.to_string(),
+            used_by: vec![],
+        };
+        self.meta.put(
+            &invite_key(&id),
+            &serde_json::to_vec(&invite).map_err(io::Error::other)?,
+        )?;
+        Ok((code, id))
+    }
+
+    pub fn invites(&self) -> Vec<([u8; 32], Invite)> {
+        let mut out: Vec<_> = self
+            .meta
+            .children("invites")
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|name| {
+                let id = hex_name::<32>(&name)?;
+                let bytes = self.meta.get(&invite_key(&id)).ok()??;
+                Some((id, serde_json::from_slice(&bytes).ok()?))
+            })
+            .collect();
+        out.sort_by_key(|(_, i): &([u8; 32], Invite)| i.created_ms);
+        out
+    }
+
+    /// Withdraw an invite code. False if there was none.
+    pub fn delete_invite(&self, id: &[u8; 32]) -> bool {
+        matches!(self.meta.get(&invite_key(id)), Ok(Some(_)))
+            && self.meta.delete(&invite_key(id)).is_ok()
+    }
+
+    /// Admit an unknown library with an invite code: the code loses a use only when the library is admitted.
+    pub fn admit_with_invite(
+        &self,
+        code: &str,
+        library: LibraryId,
+        root: RootPublicKey,
+        presented_admin: Option<&AdminCert>,
+        presented_device: &DeviceCert,
+        now_ms: i64,
+    ) -> Result<(), StoreError> {
+        let id = *blake3::hash(normalize_invite(code).as_bytes()).as_bytes();
+        // One redemption at a time, so the last use of a code goes to one library.
+        let _one = self.invite_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut invite: Invite = self
+            .meta
+            .get(&invite_key(&id))
+            .ok()
+            .flatten()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .ok_or(StoreError::InviteRefused)?;
+        if invite.uses_left == 0 || invite.expires_ms.is_some_and(|e| now_ms >= e) {
+            return Err(StoreError::InviteRefused);
+        }
+        self.admit(library, root, presented_admin, presented_device, true)?;
+        invite.uses_left -= 1;
+        invite.used_by.push(hex::encode(library.0));
+        let _ = self.meta.put(
+            &invite_key(&id),
+            &serde_json::to_vec(&invite).expect("an invite serializes"),
+        );
+        Ok(())
+    }
+
+    /// Has this library registered?
+    pub fn knows_library(&self, library: LibraryId) -> bool {
+        lock(&self.inner).libs.contains_key(&library.0)
+    }
+
     // ---- libraries and their certificates ----
 
     /// Check that a presented chain makes `device` a current member, and remember what it presented.
@@ -326,7 +467,7 @@ impl Store {
         let mut inner = lock(&self.inner);
         let known = inner.libs.contains_key(&library.0);
         if !known && !open {
-            return Err(StoreError::UnknownLibrary);
+            return Err(StoreError::RegistrationClosed);
         }
         let lib = inner.libs.entry(library.0).or_insert_with(|| Library {
             meta: LibMeta {

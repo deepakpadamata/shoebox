@@ -34,6 +34,16 @@ pub use cloud_keeper::{CloudBackupReport, CloudPolicy, CloudRestoreReport, CLOUD
 
 pub const CLOUD_SECRET_KEY: &str = "cloud-secret";
 pub const CLOUD_URL_KEY: &str = "cloud-url";
+/// The service address this library registered with (W1-10); another address means registering again.
+pub const CLOUD_REGISTERED_KEY: &str = "cloud-registered";
+
+/// What the service said to a library asking to register.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CloudRegistration {
+    Registered,
+    /// The service takes new libraries by invite, and none was given.
+    InviteNeeded,
+}
 const CIDS_FILE: &str = "cloud-cids.bin";
 /// Items sealed and uploaded together, so temporary ciphertext never piles up.
 const BATCH: usize = 64;
@@ -448,6 +458,47 @@ impl<L: LibraryStore> LibraryNode<L> {
             .setting(CLOUD_URL_KEY)
             .await?
             .and_then(|b| String::from_utf8(b).ok()))
+    }
+
+    /// Has this library registered with the service at its current address?
+    pub async fn cloud_registered(&self) -> Result<bool> {
+        let Some(url) = self.cloud_url().await? else {
+            return Ok(false);
+        };
+        Ok(self.store().setting(CLOUD_REGISTERED_KEY).await?.as_deref() == Some(url.as_bytes()))
+    }
+
+    /// Register this library with the service, with an invite code when it asks for one. A library it already
+    /// knows is simply registered. Every device of the library then knows (the mark is a library setting).
+    pub async fn register_cloud(&self, invite: Option<&str>) -> Result<CloudRegistration> {
+        let url = self
+            .cloud_url()
+            .await?
+            .context("no cloud address is set for this library")?;
+        let s = self.session().await?;
+        let body =
+            serde_json::to_vec(&serde_json::json!({ "invite": invite.unwrap_or("").trim() }))?;
+        let res = s
+            .call("POST", "/v1/library/register", body, now_i64(self.now_ms()))
+            .await?;
+        let status = res.status();
+        if status.is_success() {
+            self.store()
+                .put_setting(CLOUD_REGISTERED_KEY, url.into_bytes())
+                .await?;
+            return Ok(CloudRegistration::Registered);
+        }
+        let text = res.text().await.unwrap_or_default();
+        let error = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v["error"].as_str().map(str::to_string));
+        match error.as_deref() {
+            Some("invite-needed") => Ok(CloudRegistration::InviteNeeded),
+            Some("invite-refused") => {
+                bail!("that invite code is not valid, has been used up or has ended")
+            }
+            _ => bail!("registering with the service: it answered {status}: {text}"),
+        }
     }
 
     async fn session(&self) -> Result<Session> {

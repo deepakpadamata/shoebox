@@ -752,6 +752,10 @@ ts_type! {
         pub enabled: bool,
         /// The service's address, if one is set.
         pub url: Option<String>,
+        /// The library is registered with the service at that address (or it could not be asked just now).
+        pub registered: bool,
+        /// The service takes new libraries by invite: ask for a code.
+        pub invite_needed: bool,
         pub links: Vec<WebLinkInfo>,
     }
 }

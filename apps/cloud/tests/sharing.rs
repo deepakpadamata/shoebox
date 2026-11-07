@@ -13,7 +13,9 @@ use shoebox_core::model::*;
 use shoebox_core::share::{self, ShareKey, ShareLink};
 use shoebox_core::store::*;
 use shoebox_core::Hlc;
-use shoebox_node::{CloudPolicy, ImportOptions, LibraryNode, WebShareOptions, WEBVIEW_ALPN};
+use shoebox_node::{
+    CloudPolicy, CloudRegistration, ImportOptions, LibraryNode, WebShareOptions, WEBVIEW_ALPN,
+};
 use shoebox_store::{HybridBackend, Library};
 use shoebox_testkit::{wait_until, Cluster};
 use std::sync::Arc;
@@ -62,6 +64,8 @@ async fn world_in_bucket(photos_in_album: usize) -> World {
 /// Where the service keeps the bytes.
 enum Bytes {
     OnDisk,
+    /// On disk, with registration closed: a new library needs an invite code.
+    OnDiskClosed,
     FakeBucket,
     /// A real S3-compatible bucket (see [`real_bucket`]).
     Bucket(shoebox_cloud::s3::S3Config),
@@ -201,6 +205,10 @@ async fn world_with(photos_in_album: usize, role: Role, bytes: Bytes) -> World {
     config.clock = Arc::new(move || clock.now_ms() as i64);
     let bucket = match bytes {
         Bytes::OnDisk => None,
+        Bytes::OnDiskClosed => {
+            config.open_registration = false;
+            None
+        }
         Bytes::FakeBucket => {
             let clock = cluster.clock().clone();
             let b = common::start(Arc::new(move || clock.now_ms() as i64)).await;
@@ -333,6 +341,48 @@ async fn an_album_is_shared_and_opens_from_the_link_alone() {
     }
     // The library remembers the link, so any device can show it again.
     assert_eq!(w.node.web_shares(&w.album).await.unwrap(), vec![share]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_library_registers_with_an_invite_code_and_every_device_knows() {
+    let w = world_with(1, Role::Keeper, Bytes::OnDiskClosed).await;
+    let svc = w.svc.clone().unwrap();
+    // Not registered: the service asks for a code, and nothing can be uploaded.
+    assert!(!w.node.cloud_registered().await.unwrap());
+    assert_eq!(
+        w.node.register_cloud(None).await.unwrap(),
+        CloudRegistration::InviteNeeded
+    );
+    let e = w
+        .node
+        .create_web_share(&w.album, WebShareOptions::default())
+        .await
+        .unwrap_err();
+    assert!(format!("{e:#}").contains("invite"), "{e:#}");
+    // A wrong code is an error that says so.
+    let e = w.node.register_cloud(Some("nope")).await.unwrap_err();
+    assert!(format!("{e:#}").contains("not valid"), "{e:#}");
+
+    let (code, _) = svc.store.create_invite(1, None, "test", svc.now()).unwrap();
+    assert_eq!(
+        w.node.register_cloud(Some(&code)).await.unwrap(),
+        CloudRegistration::Registered
+    );
+    assert!(w.node.cloud_registered().await.unwrap());
+    w.node
+        .create_web_share(&w.album, WebShareOptions::default())
+        .await
+        .unwrap();
+    // Asking again needs no code, and another address means registering again.
+    assert_eq!(
+        w.node.register_cloud(None).await.unwrap(),
+        CloudRegistration::Registered
+    );
+    w.node
+        .set_cloud_url("https://elsewhere.example")
+        .await
+        .unwrap();
+    assert!(!w.node.cloud_registered().await.unwrap());
 }
 
 /// An end date `days` from now on the test's clock.
@@ -1226,6 +1276,13 @@ async fn with_a_deployed_service_a_link_opens_and_the_library_restores() {
 }
 
 async fn a_link_opens_and_the_library_restores(w: World) {
+    // A service closed to new libraries lets the test's library in with `SHOEBOX_TEST_INVITE` (one use per run).
+    if let Ok(code) = std::env::var("SHOEBOX_TEST_INVITE") {
+        assert_eq!(
+            w.node.register_cloud(Some(&code)).await.unwrap(),
+            CloudRegistration::Registered
+        );
+    }
     let share = w
         .node
         .create_web_share(

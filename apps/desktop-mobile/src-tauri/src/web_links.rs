@@ -5,7 +5,7 @@ use crate::types::*;
 use anyhow::{anyhow, ensure, Result};
 use shoebox_core::model::AlbumId;
 use shoebox_core::store::{LibraryStore, Page};
-use shoebox_node::{WebShare, WebShareOptions};
+use shoebox_node::{CloudRegistration, WebShare, WebShareOptions};
 
 fn album_id(s: &str) -> Result<AlbumId> {
     let bytes: [u8; 16] = hex::decode(s.trim())
@@ -70,6 +70,16 @@ impl AppCore {
         let album = album_id(album)?;
         let enabled = ln.cloud_enabled().await?;
         let url = ln.cloud_url().await?;
+        // A library set up before invites, or let in by the operator, registers here without a code. If the
+        // service cannot be reached, the sheet carries on and the next call says what is wrong.
+        let (mut registered, mut invite_needed) = (ln.cloud_registered().await?, false);
+        if enabled && url.is_some() && !registered {
+            match ln.register_cloud(None).await {
+                Ok(CloudRegistration::Registered) => registered = true,
+                Ok(CloudRegistration::InviteNeeded) => invite_needed = true,
+                Err(_) => registered = true,
+            }
+        }
         let mut links = vec![];
         if let Some(base) = &url {
             let reported = ln.reported_web_shares().await;
@@ -92,12 +102,19 @@ impl AppCore {
         Ok(WebLinksInfo {
             enabled,
             url,
+            registered,
+            invite_needed,
             links,
         })
     }
 
     /// Set the service's address and/or, once, the recovery phrase that gives the library its cloud secret.
-    pub async fn cloud_setup(&self, url: Option<String>, phrase: Option<String>) -> Result<()> {
+    pub async fn cloud_setup(
+        &self,
+        url: Option<String>,
+        phrase: Option<String>,
+        invite: Option<String>,
+    ) -> Result<()> {
         let ln = self.ln().await?;
         if let Some(phrase) = phrase.filter(|p| !p.trim().is_empty()) {
             ln.enable_cloud_with_phrase(&phrase)
@@ -106,6 +123,15 @@ impl AppCore {
         }
         if let Some(url) = url.filter(|u| !u.trim().is_empty()) {
             ln.set_cloud_url(&url).await?;
+        }
+        // Register now, so a service that wants an invite says so while the sheet is open. Without a code that
+        // is not an error: the sheet then asks for one.
+        if ln.cloud_enabled().await?
+            && ln.cloud_url().await?.is_some()
+            && !ln.cloud_registered().await?
+        {
+            let invite = invite.filter(|c| !c.trim().is_empty());
+            ln.register_cloud(invite.as_deref()).await?;
         }
         Ok(())
     }

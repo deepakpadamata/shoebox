@@ -33,6 +33,17 @@
   const ready = $derived(!!info && info.enabled && !!info.url);
   const changed = $derived(!!link && (live !== link.live || fullSize !== link.full_size || (link.expires_at ? expiry !== 'current' : expiry !== 'never')));
   const newAddress = $derived(!!link && live !== link.live);
+  // How long a link may run: kept online with full-size downloads, 30 days; from my devices, 90; otherwise until
+  // it is stopped. The library refuses anything longer.
+  const maxDays = $derived<number | null>(live ? 90 : fullSize ? 30 : null);
+  const keepsCurrent = $derived(!!link?.expires_at && (maxDays === null || link.expires_at - Date.now() <= maxDays * 86_400_000));
+
+  // After a change of kind, an end date the new kind does not allow becomes the longest one it does.
+  function fit() {
+    if (maxDays === null) return;
+    const ok = expiry === 'current' ? keepsCurrent : expiry !== 'never' && Number(expiry) <= maxDays;
+    if (!ok) expiry = String(maxDays);
+  }
 
   function adopt(l: WebLinkInfo | null) {
     live = l?.live ?? false;
@@ -44,7 +55,13 @@
     try {
       info = await api.webLinks(album);
       if (info.url) url = info.url;
-      if (!keepOptions) adopt(info.links.length ? [...info.links].sort((a, b) => b.created_at - a.created_at)[0] : null);
+      if (!keepOptions) {
+        adopt(info.links.length ? [...info.links].sort((a, b) => b.created_at - a.created_at)[0] : null);
+        // A link made before the limits, with no end date or a later one, gets the longest it may have now.
+        const before = expiry;
+        fit();
+        if (expiry !== before) { await Promise.resolve(); autoApply(); }
+      }
     } catch (e) { fail(e); }
   }
   async function loadCheck() {
@@ -176,19 +193,22 @@
       {/if}
 
       <div class="choice" role="radiogroup" aria-label="Where the photos are kept">
-        <label class:on={!live}><input type="radio" name="where" checked={!live} disabled={busy !== ''} onchange={() => (live = false)} /><b>Kept online</b><span class="small muted">Works even when all your devices are off. Uses storage with the service.</span></label>
-        <label class:on={live}><input type="radio" name="where" checked={live} disabled={busy !== ''} onchange={() => (live = true)} /><b>From my devices</b><span class="small muted">Free, and nothing is stored online, but it works only while a device of yours is on.</span></label>
+        <label class:on={!live}><input type="radio" name="where" checked={!live} disabled={busy !== ''} onchange={() => { live = false; fit(); }} /><b>Kept online</b><span class="small muted">Works even when all your devices are off. Uses storage with the service.</span></label>
+        <label class:on={live}><input type="radio" name="where" checked={live} disabled={busy !== ''} onchange={() => { live = true; fit(); }} /><b>From my devices</b><span class="small muted">Free, and nothing is stored online, but it works only while a device of yours is on.</span></label>
       </div>
-      <div class="row-flex"><span class="grow">Allow full-size downloads</span><Toggle checked={fullSize} label="Allow full-size downloads" onchange={(v) => { fullSize = v; void loadCheck(); autoApply(); }} /></div>
+      <div class="row-flex"><span class="grow">Allow full-size downloads</span><Toggle checked={fullSize} label="Allow full-size downloads" onchange={(v) => { fullSize = v; fit(); void loadCheck(); autoApply(); }} /></div>
       <label class="row-flex">Link works for
         <select class="input grow" value={expiry} disabled={busy !== ''} onchange={(e) => { expiry = e.currentTarget.value; autoApply(); }}>
-          {#if link?.expires_at}<option value="current">Until {dateTime(link.expires_at)}</option>{/if}
-          <option value="never">As long as I keep it</option>
+          {#if link?.expires_at && keepsCurrent}<option value="current">Until {dateTime(link.expires_at)}</option>{/if}
+          {#if maxDays === null}<option value="never">As long as I keep it</option>{/if}
           <option value="7">7 days from now</option>
           <option value="30">30 days from now</option>
-          <option value="90">90 days from now</option>
+          {#if maxDays === null || maxDays >= 90}<option value="90">90 days from now</option>{/if}
         </select>
       </label>
+      {#if maxDays !== null}
+        <p class="small muted">{live ? 'A link from your devices' : 'A link kept online with full-size downloads'} works for at most {maxDays} days. You can make a new one when it ends.</p>
+      {/if}
 
       {#if check && (!link || changed)}
         <p class="small muted">

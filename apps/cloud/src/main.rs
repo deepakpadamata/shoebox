@@ -29,6 +29,9 @@ struct Args {
     /// Refuse libraries that have not registered (a subscription is needed first).
     #[arg(long, env = "SHOEBOX_CLOSED")]
     closed: bool,
+    /// Library ids (hex, space- or comma-separated) admitted even while closed: the operator's own.
+    #[arg(long, env = "SHOEBOX_LIBRARIES", default_value = "")]
+    libraries: String,
     /// Behind a proxy we run: take the client address from `X-Forwarded-For`.
     #[arg(long, env = "SHOEBOX_TRUST_PROXY")]
     trust_proxy: bool,
@@ -74,6 +77,7 @@ async fn main() -> anyhow::Result<()> {
     config.library_quota = args.quota_gib * GIB;
     config.share_daily_bytes = args.share_daily_gib * GIB;
     config.open_registration = !args.closed;
+    config.allowed_libraries = shoebox_cloud::parse_library_ids(&args.libraries)?;
     config.trust_proxy = args.trust_proxy;
     config.csp_connect = args.csp_connect;
     config.admin_token = args.admin_token;

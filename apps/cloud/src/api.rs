@@ -161,7 +161,7 @@ fn authorize(
         auth.root,
         auth.admin.as_ref(),
         &auth.device,
-        s.config.open_registration,
+        s.config.open_registration || s.config.allowed_libraries.contains(&auth.library.0),
     )?;
     Ok(auth.library)
 }

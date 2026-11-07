@@ -76,5 +76,5 @@ pub use transfers::{Transfer, TransferSnapshot};
 pub use web_live::LiveReport;
 pub use web_share::{
     CloudBackupReport, CloudPolicy, CloudRestoreReport, RefreshReport, WebShare, WebShareOptions,
-    CLOUD_SECRET_KEY, CLOUD_URL_KEY,
+    CLOUD_FULL_SIZE_MAX_DAYS, CLOUD_SECRET_KEY, CLOUD_URL_KEY, LIVE_MAX_DAYS,
 };

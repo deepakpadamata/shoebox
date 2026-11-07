@@ -572,6 +572,16 @@ async fn a_closed_service_refuses_libraries_it_has_not_registered() {
         r.owner(&d, "GET", "/v1/usage", vec![]).await.0,
         StatusCode::FORBIDDEN
     );
+    // The operator's own library is let in while closed.
+    let r = rig_with(|c| {
+        c.open_registration = false;
+        c.allowed_libraries = vec![LIB.0];
+    });
+    let d = r.device(2, "nest");
+    assert_eq!(
+        r.owner(&d, "GET", "/v1/usage", vec![]).await.0,
+        StatusCode::OK
+    );
 }
 
 #[tokio::test]

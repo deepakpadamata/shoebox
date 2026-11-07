@@ -280,6 +280,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         album: &AlbumId,
         options: WebShareOptions,
     ) -> Result<WebShare> {
+        options.check(true, self.now_ms())?;
         let mut id = [0u8; 16];
         getrandom::fill(&mut id).map_err(|e| anyhow::anyhow!("randomness: {e}"))?;
         let dir = live_dir(&self.node().config().data_dir, &id);
@@ -318,6 +319,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         share_id: &[u8; 16],
         options: WebShareOptions,
     ) -> Result<WebShare> {
+        options.check(true, self.now_ms())?;
         let mut shares = self.web_live_shares(album).await?;
         let i = shares
             .iter()

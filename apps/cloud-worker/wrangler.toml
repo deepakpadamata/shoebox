@@ -33,8 +33,9 @@ S3_REGION = "auto"
 # Storage per library and bytes a link may serve a day, in GiB.
 QUOTA_GIB = "2"
 SHARE_DAILY_GIB = "1"
-# "true" refuses libraries that have not registered.
+# "true" refuses libraries that have not registered, except those in LIBRARIES (hex ids, space-separated).
 CLOSED = "false"
+LIBRARIES = ""
 # Hosts the viewer page may connect to, space-separated: relays, for Live links (write each with and without a
 # trailing dot, as iroh asks for `relay.example.org.`).
 CSP_CONNECT = ""

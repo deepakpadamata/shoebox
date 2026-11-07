@@ -41,6 +41,8 @@ pub struct Config {
     pub ip_requests_per_min: u32,
     /// Let an unknown library register with its first request. Off once registration needs a subscription.
     pub open_registration: bool,
+    /// Libraries admitted with their first request even while registration is closed (the operator's own).
+    pub allowed_libraries: Vec<[u8; 16]>,
     /// Take the client address from the last `X-Forwarded-For` entry (behind a proxy we run).
     pub trust_proxy: bool,
     /// How far a request's signed time may be from ours.
@@ -63,6 +65,19 @@ pub fn system_clock() -> Arc<dyn Fn() -> i64 + Send + Sync> {
     })
 }
 
+/// Library ids written as hex, separated by spaces or commas; anything that is not one is an error.
+pub fn parse_library_ids(text: &str) -> anyhow::Result<Vec<[u8; 16]>> {
+    text.split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let bytes = hex::decode(s).map_err(|_| anyhow::anyhow!("{s} is not a library id"))?;
+            bytes
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("{s} is not a library id (32 hex digits)"))
+        })
+        .collect()
+}
+
 impl Config {
     pub fn new(data_dir: PathBuf) -> Self {
         Self {
@@ -74,6 +89,7 @@ impl Config {
             share_requests_per_min: 600,
             ip_requests_per_min: 1200,
             open_registration: true,
+            allowed_libraries: vec![],
             trust_proxy: false,
             skew_ms: 5 * 60 * 1000,
             csp_connect: vec![],

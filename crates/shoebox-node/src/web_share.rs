@@ -50,6 +50,47 @@ pub struct WebShareOptions {
     pub expires_ms: Option<i64>,
 }
 
+/// The longest a link kept online may offer full-size downloads: originals are the costly bytes to hold and the
+/// ones most worth taking, so such a link always ends.
+pub const CLOUD_FULL_SIZE_MAX_DAYS: u32 = 30;
+/// The longest a Live link may run: it keeps a sealed copy of the album on the sharer's devices and serves it.
+pub const LIVE_MAX_DAYS: u32 = 90;
+const DAY_MS: i64 = 86_400_000;
+
+impl WebShareOptions {
+    /// The longest this kind of link may run, in days; `None` when it may run until it is stopped.
+    pub fn max_days(full_size: bool, live: bool) -> Option<u32> {
+        if live {
+            Some(LIVE_MAX_DAYS)
+        } else if full_size {
+            Some(CLOUD_FULL_SIZE_MAX_DAYS)
+        } else {
+            None
+        }
+    }
+
+    /// Refuse a link that would run longer than its kind allows (or forever when it must end), counted from `now`.
+    pub(crate) fn check(&self, live: bool, now_ms: u64) -> Result<()> {
+        let Some(max) = Self::max_days(self.full_size, live) else {
+            return Ok(());
+        };
+        let what = if live {
+            "a link from your devices"
+        } else {
+            "a link with full-size downloads"
+        };
+        let end = self
+            .expires_ms
+            .with_context(|| format!("{what} needs an end date, at most {max} days away"))?;
+        // A minute's slack for a date that was worked out just before.
+        ensure!(
+            end <= now_ms as i64 + i64::from(max) * DAY_MS + 60_000,
+            "{what} lasts at most {max} days"
+        );
+        Ok(())
+    }
+}
+
 /// One link to one album, as the library remembers it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebShare {
@@ -542,6 +583,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         album: &AlbumId,
         options: WebShareOptions,
     ) -> Result<WebShare> {
+        options.check(false, self.now_ms())?;
         let s = self.session().await?;
         let mut id = [0u8; 16];
         getrandom::fill(&mut id).map_err(|e| anyhow!("randomness: {e}"))?;
@@ -570,6 +612,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         share_id: &[u8; 16],
         options: WebShareOptions,
     ) -> Result<WebShare> {
+        options.check(false, self.now_ms())?;
         let mut shares = self.web_shares(album).await?;
         let i = shares
             .iter()

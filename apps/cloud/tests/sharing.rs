@@ -335,6 +335,67 @@ async fn an_album_is_shared_and_opens_from_the_link_alone() {
     assert_eq!(w.node.web_shares(&w.album).await.unwrap(), vec![share]);
 }
 
+/// An end date `days` from now on the test's clock.
+fn in_days(w: &World, days: i64) -> i64 {
+    w._cluster.clock().now_ms() as i64 + days * 86_400_000
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn full_size_links_online_end_within_30_days_and_live_links_within_90() {
+    let w = world(2).await;
+    let opts = |full_size, expires_ms| WebShareOptions {
+        full_size,
+        expires_ms,
+    };
+    // Kept online with full-size downloads: never open-ended, at most 30 days.
+    for bad in [None, Some(in_days(&w, 31))] {
+        let e = w
+            .node
+            .create_web_share(&w.album, opts(true, bad))
+            .await
+            .unwrap_err();
+        assert!(format!("{e:#}").contains("30 days"), "{e:#}");
+    }
+    // Previews only may run until the sharer stops them.
+    let share = w
+        .node
+        .create_web_share(&w.album, opts(false, None))
+        .await
+        .unwrap();
+    // Turning full size on for that link needs an end date too.
+    assert!(w
+        .node
+        .update_web_share(&w.album, &share.share_id, opts(true, None))
+        .await
+        .is_err());
+    let share = w
+        .node
+        .update_web_share(&w.album, &share.share_id, opts(true, Some(in_days(&w, 30))))
+        .await
+        .unwrap();
+    assert!(share.full_size);
+
+    // From the sharer's devices: at most 90 days, full size or not.
+    for (full_size, bad) in [(false, None), (false, Some(in_days(&w, 91))), (true, None)] {
+        let e = w
+            .node
+            .create_live_share(&w.album, opts(full_size, bad))
+            .await
+            .unwrap_err();
+        assert!(format!("{e:#}").contains("90 days"), "{e:#}");
+    }
+    let live = w
+        .node
+        .create_live_share(&w.album, opts(true, Some(in_days(&w, 90))))
+        .await
+        .unwrap();
+    assert!(w
+        .node
+        .update_live_share(&w.album, &live.share_id, opts(false, None))
+        .await
+        .is_err());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_service_never_holds_a_photo() {
     let w = world(4).await;
@@ -343,7 +404,7 @@ async fn the_service_never_holds_a_photo() {
             &w.album,
             WebShareOptions {
                 full_size: true,
-                expires_ms: None,
+                expires_ms: Some(in_days(&w, 30)),
             },
         )
         .await
@@ -391,7 +452,7 @@ async fn full_size_originals_are_uploaded_without_their_location() {
             &w.album,
             WebShareOptions {
                 full_size: true,
-                expires_ms: None,
+                expires_ms: Some(in_days(&w, 30)),
             },
         )
         .await
@@ -567,7 +628,7 @@ async fn demo_serve_a_share() {
             &w.album,
             WebShareOptions {
                 full_size: true,
-                expires_ms: None,
+                expires_ms: Some(in_days(&w, 30)),
             },
         )
         .await
@@ -607,7 +668,13 @@ async fn a_live_link_is_served_by_the_device_and_stops_when_revoked() {
     let w = world(4).await;
     let share = w
         .node
-        .create_live_share(&w.album, WebShareOptions::default())
+        .create_live_share(
+            &w.album,
+            WebShareOptions {
+                full_size: false,
+                expires_ms: Some(in_days(&w, 90)),
+            },
+        )
         .await
         .unwrap();
     let link = w.node.live_share_link(&share).await.unwrap();
@@ -769,7 +836,13 @@ async fn a_device_without_the_folder_serves_a_live_link_only_when_asked_to() {
     let w = world(3).await;
     let share = w
         .node
-        .create_live_share(&w.album, WebShareOptions::default())
+        .create_live_share(
+            &w.album,
+            WebShareOptions {
+                full_size: false,
+                expires_ms: Some(in_days(&w, 90)),
+            },
+        )
         .await
         .unwrap();
     assert!(w.node.serves_live_share(&share.share_id));
@@ -962,7 +1035,7 @@ async fn a_link_changes_what_it_offers_and_keeps_its_address() {
             &share.share_id,
             WebShareOptions {
                 full_size: true,
-                expires_ms: None,
+                expires_ms: Some(in_days(&w, 30)),
             },
         )
         .await
@@ -997,7 +1070,7 @@ async fn from_a_bucket_an_album_opens_from_the_link_alone_and_stops_when_revoked
             &w.album,
             WebShareOptions {
                 full_size: true,
-                expires_ms: None,
+                expires_ms: Some(in_days(&w, 30)),
             },
         )
         .await
@@ -1159,7 +1232,7 @@ async fn a_link_opens_and_the_library_restores(w: World) {
             &w.album,
             WebShareOptions {
                 full_size: true,
-                expires_ms: None,
+                expires_ms: Some(in_days(&w, 30)),
             },
         )
         .await

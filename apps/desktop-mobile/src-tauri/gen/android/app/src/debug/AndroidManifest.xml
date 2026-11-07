@@ -6,5 +6,10 @@
         <receiver android:name=".BurstNow" android:exported="true">
             <intent-filter><action android:name="org.shoebox.desktop.BURST_NOW" /></intent-filter>
         </receiver>
+        <!-- Debug builds only. Run one indexing job:
+             adb shell am broadcast -n org.shoebox.desktop/.IndexNow -a org.shoebox.desktop.INDEX_NOW -->
+        <receiver android:name=".IndexNow" android:exported="true">
+            <intent-filter><action android:name="org.shoebox.desktop.INDEX_NOW" /></intent-filter>
+        </receiver>
     </application>
 </manifest>

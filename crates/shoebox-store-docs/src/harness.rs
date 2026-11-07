@@ -91,4 +91,8 @@ impl Harness for DocsHarness {
             .cloned()
             .expect("device was created by this harness")
     }
+
+    async fn pause(&self, millis: u64) {
+        tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
+    }
 }

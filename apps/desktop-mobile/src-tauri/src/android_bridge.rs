@@ -21,11 +21,24 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+use crate::search_models::IndexRun;
 use std::time::Duration;
 
 /// Set while the app is opening and a background run holds the library (both run in one
 /// process): the run stops at once and lets the app have it.
 pub static APP_OPENING: AtomicBool = AtomicBool::new(false);
+
+/// The app's own core and the runtime it runs on, while the app's process is alive (the app is
+/// open, or was and has not been killed): a background indexing run in the same process borrows it
+/// instead of finding `app.lock` taken and doing nothing (S2-04).
+static APP_CORE: std::sync::Mutex<Option<(std::sync::Weak<AppCore>, tokio::runtime::Handle)>> =
+    std::sync::Mutex::new(None);
+
+/// Called once by the app when its core is open.
+pub fn set_app_core(core: &Arc<AppCore>, runtime: tokio::runtime::Handle) {
+    *APP_CORE.lock().unwrap() = Some((Arc::downgrade(core), runtime));
+}
 
 /// The Kotlin `PhotoBackend` object, callable from any thread.
 struct Backend {
@@ -323,6 +336,9 @@ fn run_index(
 ) -> Result<serde_json::Value> {
     let dir = PathBuf::from(&data_dir);
     crate::diagnostics::init_logging();
+    let Some(_run) = IndexRun::begin() else {
+        return Ok(json!({ "skipped": "an indexing run is already going" }));
+    };
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -331,7 +347,23 @@ fn run_index(
     match lock.try_lock() {
         Ok(()) => {}
         Err(std::fs::TryLockError::WouldBlock) => {
-            return Ok(json!({ "skipped": "the app is running" }));
+            // The app's process is alive and its core holds the library: index on that core,
+            // on the runtime it runs on (the indexer's tasks must outlive this call).
+            let live = APP_CORE
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|(core, rt)| core.upgrade().map(|c| (c, rt.clone())));
+            let Some((core, rt)) = live else {
+                return Ok(json!({ "skipped": "the app is running" }));
+            };
+            return rt.block_on(async move {
+                if !core.app_state().await?.has_library {
+                    return Ok(json!({ "skipped": "no library on this device yet" }));
+                }
+                core.index_burst(Duration::from_secs(budget_secs), allow_download)
+                    .await
+            });
         }
         Err(std::fs::TryLockError::Error(e)) => {
             bail!("cannot lock {}: {e}", dir.join("app.lock").display())

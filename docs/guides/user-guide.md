@@ -108,7 +108,7 @@ photos ("dog on a beach"), labels, text in the photos and names. Searches run on
 with every other device switched off.
 
 Finding photos by what is in them needs each photo to be indexed once, by any of your devices: a keeper does it all
-the time, a computer when it is plugged in and you are away, a phone while it charges. Until then the line under the
+the time, a computer when it is plugged in and you are away, a phone while it charges. A phone with nothing else does it by itself, a few nights for a large library, and *Settings → Search* says how long is left. Until then the line under the
 results says how far it has come. *Settings → Search* turns indexing on this device on or off and rebuilds this
 device's index if something looks wrong. In the viewer, ≈ shows similar photos.
 

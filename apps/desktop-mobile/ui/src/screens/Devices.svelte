@@ -3,7 +3,8 @@
   // what it is sending or getting right now, under a card that says what is moving and opens into
   // this device's queue. Adding a device with a QR code and the six-digit code, roles, removing.
   import { onDestroy, onMount, untrack } from 'svelte';
-  import { api, blobUrl, type DeviceInfo, type DeviceStorageInfo, type PairStart, type TransferItem, type Transfers } from '../lib/api';
+  import { api, blobUrl, type DeviceInfo, type DeviceStorageInfo, type PairStart, type SearchStatus, type TransferItem, type Transfers } from '../lib/api';
+  import { deviceIndexLine } from '../lib/search';
   import { GrowthRates, rowActivity, speed, summarize } from '../lib/activity';
   import { bytes, plural } from '../lib/format';
   import { viewport } from '../lib/viewport.svelte';
@@ -22,6 +23,8 @@
   let devices = $state<DeviceInfo[]>([]);
   let storage = $state<DeviceStorageInfo[]>([]);
   let transfers = $state<Transfers | null>(null);
+  // What this device knows of search indexing, and who does it (refreshed while the screen is open).
+  let search = $state<SearchStatus | null>(null);
   let total = $state(0);
   let rates = $state<Record<string, number>>({});
   const growth = new GrowthRates();
@@ -31,7 +34,7 @@
   const rows = $derived(
     devices
       .filter((d) => !d.revoked)
-      .map((d) => ({ d, s: storeOf(d), act: rowActivity(d, transfers, devices, storage, total, rates) }))
+      .map((d) => ({ d, s: storeOf(d), act: rowActivity(d, transfers, devices, storage, total, rates), idx: deviceIndexLine(search, d.id, d.is_this_device) }))
       .sort((a, b) => Number(b.d.is_this_device) - Number(a.d.is_this_device) || used(b.s) - used(a.s)),
   );
   const most = $derived(Math.max(1, ...rows.map((r) => used(r.s))));
@@ -100,6 +103,10 @@
   onMount(() => {
     load().catch(fail);
     api.transfers().then((t) => (transfers = t)).catch(() => {});
+    const refreshSearch = () => api.searchStatus().then((st) => (search = st)).catch(() => {});
+    refreshSearch();
+    const timer = setInterval(refreshSearch, 10_000);
+    return () => clearInterval(timer);
   });
   $effect(() => {
     app.devicesVersion;
@@ -238,7 +245,7 @@
 
   {#if viewport.mobile}
     <List>
-      {#each rows as { d, s, act } (d.id)}
+      {#each rows as { d, s, act, idx } (d.id)}
         <button class="prow" onclick={() => (detail = d)}>
           <div class="row-flex">
             <Avatar name={d.name} size={38} />
@@ -253,6 +260,7 @@
           <div class="bar"><span class="orig" style:width="{(s.original_bytes / most) * 100}%"></span><span class="prev" style:width="{(s.other_bytes / most) * 100}%"></span></div>
           <div class="tiny muted between row-flex"><span>{s.originals ? plural(s.originals, 'original') : 'No originals'} · previews {bytes(s.other_bytes)}</span><b class="ink">{bytes(used(s))}</b></div>
           {#if act.text && act.tone !== 'idle'}<div class="small act {act.tone}">{act.text}{#if act.detail} <span class="muted">· {act.detail}</span>{/if}</div>{/if}
+          {#if idx}<div class="tiny muted">{idx}</div>{/if}
         </button>
       {/each}
     </List>
@@ -260,7 +268,7 @@
   {:else}
     <div class="table">
       <div class="thead"><span>Device</span><span>Connection</span><span>Keeps</span><span>Right now</span><span></span></div>
-      {#each rows as { d, s, act } (d.id)}
+      {#each rows as { d, s, act, idx } (d.id)}
         <div class="trow">
           <div class="row-flex who">
             <Avatar name={d.name} size={36} />
@@ -273,7 +281,7 @@
             <div class="bar"><span class="orig" style:width="{(s.original_bytes / most) * 100}%"></span><span class="prev" style:width="{(s.other_bytes / most) * 100}%"></span></div>
             <div class="row-flex between small"><span class="muted">{s.originals ? `${plural(s.originals, 'original')} · ${bytes(s.original_bytes)}` : 'No originals'} · previews {bytes(s.other_bytes)}</span><b>{bytes(used(s))}</b></div>
           </div>
-          <div class="small act {act.tone}">{act.text}{#if act.detail}<div class="tiny muted">{act.detail}</div>{/if}</div>
+          <div class="small act {act.tone}">{act.text}{#if act.detail}<div class="tiny muted">{act.detail}</div>{/if}{#if idx}<div class="tiny muted">{idx}</div>{/if}</div>
           <div class="menu-wrap">
             <button class="kebab" aria-label="Actions for {d.name}" onclick={(e) => { e.stopPropagation(); menuFor = menuFor === d.id ? null : d.id; }}>⋯</button>
             {#if menuFor === d.id}

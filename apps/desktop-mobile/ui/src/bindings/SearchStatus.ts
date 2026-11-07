@@ -11,6 +11,18 @@ export type SearchStatus = { total: number,
  */
 content: number, labelled: number, text_read: number, faces: number, 
 /**
+ * Photos likely to hold text, and how many of them have been read.
+ */
+text_wanted: number, text_wanted_read: number, 
+/**
+ * Photos faces are looked for in (not videos).
+ */
+faces_wanted: number, 
+/**
+ * People is on for the library.
+ */
+people_on: boolean, 
+/**
  * This device can search by meaning (it has the text model).
  */
 meaning: boolean, indexers: Array<SearchIndexer>, eta_secs: number | null, 
@@ -26,6 +38,30 @@ index_here: boolean,
  * Indexing is running on this device now.
  */
 indexing: boolean, 
+/**
+ * What this device is doing now: pictures, text, faces, grouping, compacting, or empty.
+ */
+stage: string, 
+/**
+ * Why this device is not indexing now (waiting for power, say), if so.
+ */
+waiting: string | null, 
+/**
+ * This device has nothing left to do.
+ */
+caught_up: boolean, 
+/**
+ * Photos this device could not read, by kind (not counted as waiting).
+ */
+skipped_pictures: number, skipped_text: number, skipped_faces: number, 
+/**
+ * An indexing run is going (the background job's, or the user's Index now).
+ */
+run_active: boolean, 
+/**
+ * Why the last Index now run did not run or stopped, if it did not finish.
+ */
+last_run: string | null, 
 /**
  * A search model being downloaded now (S2-02), as the indexing job reports it.
  */

@@ -15,6 +15,7 @@ use shoebox_search::models::{
 };
 use shoebox_store::Library;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -52,7 +53,63 @@ pub fn model_dirs(extra: &[PathBuf], data_dir: &std::path::Path) -> Vec<PathBuf>
     search_dirs(&dirs)
 }
 
+/// Set while an indexing run (the background job's, or the user's "Index now") is going in this
+/// process. WorkManager can start the job again while the native run of the first is still
+/// going, since native code cannot be cancelled; a second run would delete the first one's
+/// `index-stop` file and pause its indexer under it.
+static INDEX_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// How the last "Index now" run ended, for Settings.
+static LAST_RUN: Mutex<Option<String>> = Mutex::new(None);
+
+pub struct IndexRun;
+
+impl IndexRun {
+    pub fn begin() -> Option<Self> {
+        (!INDEX_RUNNING.swap(true, Ordering::SeqCst)).then_some(Self)
+    }
+}
+
+impl Drop for IndexRun {
+    fn drop(&mut self) {
+        INDEX_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// The longest an "Index now" run goes on; it ends sooner when everything is done.
+const MANUAL_BUDGET: Duration = Duration::from_secs(12 * 3600);
+
 impl AppCore {
+    /// The user asked for indexing now (Settings → Search): run until this device has nothing
+    /// left, with no power or idle gate, for as long as the app's process lives. Returns false
+    /// when a run is already going.
+    pub fn index_now(self: &Arc<Self>) -> bool {
+        let Some(run) = IndexRun::begin() else {
+            return false;
+        };
+        *LAST_RUN.lock().unwrap() = None;
+        let core = self.clone();
+        tokio::spawn(async move {
+            let _run = run;
+            let note = match core.index_burst(MANUAL_BUDGET, false).await {
+                Ok(v) => v
+                    .get("skipped")
+                    .and_then(|s| s.as_str())
+                    .map(|s| format!("Indexing did not start: {s}")),
+                Err(e) => Some(format!("Indexing stopped: {e:#}")),
+            };
+            *LAST_RUN.lock().unwrap() = note;
+        });
+        true
+    }
+
+    /// Ask the run `index_now` started to stop.
+    pub fn stop_index_now(&self) {
+        if INDEX_RUNNING.load(Ordering::SeqCst) {
+            let _ = std::fs::write(index_stop_path(self.data_dir()), b"stop");
+        }
+    }
+
     /// Set up search by meaning for `ln`: the text model, the model files offered to the other
     /// devices, and (on a desktop) the indexer.
     pub(crate) async fn start_search_models(&self, ln: &LibraryNode<Library>) {
@@ -216,19 +273,54 @@ impl AppCore {
             Arc::new(encoder) as Arc<dyn ImageEncoder>,
             Arc::new(shoebox_node::Always),
         );
-        loop {
+        // On a core that has run before (the app's own, borrowed by the job) the indexer is
+        // already running, paused since the last run.
+        ln.resume_indexer();
+        // Run until this device has nothing left to do (pictures, text, faces), the budget is
+        // spent, or the Android side asks it to stop (too hot, unplugged): `index-stop`.
+        let stop = index_stop_path(self.data_dir());
+        let _ = std::fs::remove_file(&stop);
+        let mut flushed = Instant::now();
+        let caught_up = loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
-            let p = ln.index_progress();
-            if p.mine_left == 0 || started.elapsed() >= budget {
-                break;
+            // Publish what has been read so far, so the counts in Settings move and a run that
+            // is killed keeps its work: text and face rows otherwise wait for a full shard.
+            if flushed.elapsed() >= Duration::from_secs(15) {
+                flushed = Instant::now();
+                if let Err(e) = ln.flush_index().await {
+                    tracing::warn!("could not publish index shards: {e:#}");
+                }
             }
-        }
+            let p = ln.index_progress();
+            write_index_progress(self.data_dir(), &p, false);
+            if p.caught_up {
+                break true;
+            }
+            if started.elapsed() >= budget || stop.exists() {
+                break false;
+            }
+        };
+        let _ = std::fs::remove_file(&stop);
         ln.pause_indexer();
         let published = ln.flush_index().await?;
+        // Group faces and compact shards when this device is the one the rule picks (S2-01), so a
+        // phone on its own finishes the whole job in one run.
+        if caught_up {
+            if let Err(e) = ln.regroup_people(FACES_MODEL, false).await {
+                tracing::warn!("could not group faces: {e:#}");
+            }
+            if let Err(e) = ln.compact_shards(false).await {
+                tracing::warn!("could not compact index shards: {e:#}");
+            }
+        }
         let _ = self.sync_burst(Duration::from_secs(20)).await;
-        Ok(
-            serde_json::json!({ "indexed": published, "progress": format!("{:?}", ln.index_progress()) }),
-        )
+        let p = ln.index_progress();
+        write_index_progress(self.data_dir(), &p, caught_up);
+        Ok(serde_json::json!({
+            "indexed": published,
+            "caught_up": caught_up,
+            "progress": format!("{p:?}"),
+        }))
     }
 }
 
@@ -304,6 +396,31 @@ fn download_progress(dir: &std::path::Path) -> Option<crate::types::ModelDownloa
     )
 }
 
+/// Where an indexing run on Android tells the notification how far it has got (it runs in its own
+/// process, like the model download): `{"indexed", "total", "left", "done"}`.
+pub fn index_progress_path(dir: &std::path::Path) -> PathBuf {
+    dir.join("index-progress.json")
+}
+
+/// A file the Android job creates to ask a run to stop (the phone is too hot or unplugged).
+pub fn index_stop_path(dir: &std::path::Path) -> PathBuf {
+    dir.join("index-stop")
+}
+
+fn write_index_progress(dir: &std::path::Path, p: &shoebox_node::IndexProgress, done: bool) {
+    let json = serde_json::json!({
+        "indexed": p.indexed,
+        "total": p.total,
+        "left": p.total.saturating_sub(p.indexed),
+        "done": done,
+    });
+    let path = index_progress_path(dir);
+    let part = path.with_extension("part");
+    if std::fs::write(&part, json.to_string()).is_ok() {
+        let _ = std::fs::rename(&part, &path);
+    }
+}
+
 impl AppCore {
     /// How much of the library search covers on this device, and who is indexing (S1-16).
     pub async fn search_status(&self) -> Result<crate::types::SearchStatus> {
@@ -324,6 +441,10 @@ impl AppCore {
             labelled: s.labelled as u32,
             text_read: s.text_read as u32,
             faces: s.faces as u32,
+            text_wanted: s.text_wanted as u32,
+            text_wanted_read: s.text_wanted_read as u32,
+            faces_wanted: s.faces_wanted as u32,
+            people_on: s.people_on,
             meaning: s.meaning,
             indexers: s
                 .indexers
@@ -333,12 +454,22 @@ impl AppCore {
                     photos_per_min: i.photos_per_min,
                     this_device: i.device == ln.device(),
                     reads_text: i.reads_text,
+                    finds_faces: i.finds_faces,
+                    device_id: hex::encode(i.device.0),
                 })
                 .collect(),
             eta_secs: s.eta_secs.map(|e| e.min(u64::from(u32::MAX)) as u32),
             held_bytes: s.held_bytes as f64,
             index_here: SearchSettings::load(self.data_dir()).index,
             indexing: p.running && !p.paused,
+            stage: p.stage.to_string(),
+            waiting: p.waiting.clone(),
+            caught_up: p.caught_up,
+            skipped_pictures: p.skipped_pictures as u32,
+            skipped_text: p.skipped_text as u32,
+            skipped_faces: p.skipped_faces as u32,
+            run_active: INDEX_RUNNING.load(Ordering::SeqCst),
+            last_run: LAST_RUN.lock().unwrap().clone(),
             model_download: download_progress(self.data_dir()),
         })
     }

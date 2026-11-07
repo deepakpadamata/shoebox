@@ -171,6 +171,9 @@ ts_type! {
         pub photos_per_min: u32,
         pub this_device: bool,
         pub reads_text: bool,
+        pub finds_faces: bool,
+        /// The device's id, as the devices list has it.
+        pub device_id: String,
     }
 }
 
@@ -183,6 +186,13 @@ ts_type! {
         pub labelled: u32,
         pub text_read: u32,
         pub faces: u32,
+        /// Photos likely to hold text, and how many of them have been read.
+        pub text_wanted: u32,
+        pub text_wanted_read: u32,
+        /// Photos faces are looked for in (not videos).
+        pub faces_wanted: u32,
+        /// People is on for the library.
+        pub people_on: bool,
         /// This device can search by meaning (it has the text model).
         pub meaning: bool,
         pub indexers: Vec<SearchIndexer>,
@@ -193,6 +203,20 @@ ts_type! {
         pub index_here: bool,
         /// Indexing is running on this device now.
         pub indexing: bool,
+        /// What this device is doing now: pictures, text, faces, grouping, compacting, or empty.
+        pub stage: String,
+        /// Why this device is not indexing now (waiting for power, say), if so.
+        pub waiting: Option<String>,
+        /// This device has nothing left to do.
+        pub caught_up: bool,
+        /// Photos this device could not read, by kind (not counted as waiting).
+        pub skipped_pictures: u32,
+        pub skipped_text: u32,
+        pub skipped_faces: u32,
+        /// An indexing run is going (the background job's, or the user's Index now).
+        pub run_active: bool,
+        /// Why the last Index now run did not run or stopped, if it did not finish.
+        pub last_run: Option<String>,
         /// A search model being downloaded now (S2-02), as the indexing job reports it.
         pub model_download: Option<ModelDownload>,
     }

@@ -455,7 +455,12 @@ async fn the_video_of_a_live_photo_goes_to_keepers_and_is_streamed_to_viewers() 
     })
     .await
     .expect("both keepers hold the video");
-    assert_eq!(nodes[0].copy_count(&photo).await.unwrap(), 2);
+    // The original's holding reaches this node on its own schedule (it failed once on CI with 1).
+    wait_until(Duration::from_secs(60), || async {
+        nodes[0].copy_count(&photo).await.unwrap() == 2
+    })
+    .await
+    .expect("both keepers hold the original");
 
     // The viewer knows the photo has a video, but holds neither it nor the original.
     wait_until(Duration::from_secs(60), || async {

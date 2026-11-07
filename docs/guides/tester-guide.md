@@ -43,9 +43,13 @@ device holds it. A phone alone only has its own copy.
 * **The Mac's Photos library backup has not yet run against a real library** (only against a test library). Tell us how
   it goes, especially with iCloud Photos turned on.
 * **Windows and Linux desktops are untested** on real machines, and the Windows installer is unsigned.
-* **Search by meaning (what is in a photo) needs its model on the device:**
-  * a phone gets the text model in the app;
-  * the image model comes from a computer or keeper, which index photos while idle or charging.
+* **Search by meaning (what is in a photo) needs each photo indexed once:**
+  * a phone gets the text model in the app, and downloads the image, face and text-reading models once (about 150 MB)
+    from the project's release when no other device of yours has them, on Wi-Fi only;
+  * a phone with no computer or keeper indexes its own library while it charges: a big library takes a few nights, and
+    a long run shows a progress notification. It stops when the phone is hot or unplugged. This is new and has not yet
+    run for a night on a real phone: tell us how it goes;
+  * a computer or keeper does the same faster, and shares the work with your phones.
 * **Shared links on the web (Shoebox Cloud)** are only available if the service is running for your group. Ask whoever gave
   you this build.
 

@@ -26,8 +26,23 @@ const MARKER: &str = "format.json";
 /// Files larger than this are not copied into the pre-migration backup (blob stores, docs
 /// databases): migrations must never rewrite those in place without their own safeguard.
 const BACKUP_MAX_FILE: u64 = 64 * 1024 * 1024;
-/// Directories never copied into the backup.
-const BACKUP_SKIP: &[&str] = &["blobs", "posters", "backups"];
+/// Directories never copied into the backup: the blob store and posters (large, and a migration
+/// never rewrites them), the backups themselves, the search models (fetched again by their
+/// hashes), and what Android or its WebView keep in the app's folder and rebuild.
+const BACKUP_SKIP: &[&str] = &[
+    "blobs",
+    "posters",
+    "backups",
+    "models",
+    "cache",
+    "code_cache",
+    "app_webview",
+    "app_textures",
+    "no_backup",
+];
+/// A copy from before an upgrade is deleted this long after it was made: by then the upgraded
+/// data has been used, and a forgotten copy only takes room.
+const BACKUP_KEEP: std::time::Duration = std::time::Duration::from_secs(14 * 24 * 3600);
 
 /// The layout this build writes.
 pub const CURRENT_FORMAT: u32 = 2;
@@ -118,6 +133,27 @@ fn is_empty(dir: &Path) -> Result<bool> {
     Ok(std::fs::read_dir(dir)?.next().is_none())
 }
 
+/// Delete the pre-upgrade copies in `dir/backups` older than `keep` (named `format-<from>-<secs>`).
+fn prune_backups(dir: &Path, keep: std::time::Duration) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let Ok(entries) = std::fs::read_dir(dir.join("backups")) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let made = name
+            .to_str()
+            .and_then(|n| n.strip_prefix("format-"))
+            .and_then(|n| n.rsplit('-').next())
+            .and_then(|secs| secs.parse::<u64>().ok());
+        if made.is_some_and(|t| now.saturating_sub(t) > keep.as_secs()) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 fn backup(dir: &Path, from: u32) -> Result<PathBuf> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -153,6 +189,7 @@ pub fn ensure_format_with(
     migrations: &[Migration],
 ) -> Result<FormatReport> {
     std::fs::create_dir_all(dir)?;
+    prune_backups(dir, BACKUP_KEEP);
     let found = read_marker(dir)?;
     let from = match found {
         Some(v) => v,
@@ -277,6 +314,26 @@ mod tests {
         );
         assert!(!d.path().join("epoch-notice.bin").exists());
         assert_eq!(read_marker(d.path()).unwrap(), Some(2));
+    }
+
+    #[test]
+    fn the_backup_leaves_out_models_and_android_caches_and_old_backups_go() {
+        let d = tempfile::tempdir().unwrap();
+        for sub in ["models", "cache", "app_webview", "node"] {
+            std::fs::create_dir_all(d.path().join(sub)).unwrap();
+            std::fs::write(d.path().join(sub).join("f"), b"x").unwrap();
+        }
+        let old = d.path().join("backups/format-0-1000");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("f"), b"x").unwrap();
+        let report = ensure_format_with(d.path(), 1, &[step(0, "adopt", |_| Ok(()))]).unwrap();
+        let saved = report.backup.unwrap();
+        assert!(saved.join("node/f").exists());
+        for skipped in ["models", "cache", "app_webview"] {
+            assert!(!saved.join(skipped).exists(), "{skipped} was copied");
+        }
+        assert!(!old.exists(), "a copy from 1970 is long past its keep time");
+        assert!(saved.exists(), "the copy just made stays");
     }
 
     #[test]

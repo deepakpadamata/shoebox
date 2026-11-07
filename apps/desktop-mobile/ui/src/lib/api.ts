@@ -182,6 +182,8 @@ export const api = {
   setPeople: (on: boolean) => call<null>('set_people', { on }),
   /** How much of the library search covers here, and who is indexing (S1-16). */
   searchStatus: () => call<SearchStatus>('search_status'),
+  indexNow: () => call<boolean>('index_now'),
+  stopIndexNow: () => call<null>('stop_index_now'),
   setSearchIndexing: (on: boolean) => call<null>('set_search_indexing', { on }),
   rebuildSearchIndex: () => call<null>('rebuild_search_index'),
   /** Photos that look like `photo` (S1-12), best first. */

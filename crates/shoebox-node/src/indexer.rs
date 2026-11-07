@@ -103,6 +103,18 @@ pub struct IndexProgress {
     pub paused: bool,
     /// Why it is not indexing (gate closed), if so.
     pub waiting: Option<String>,
+    /// What this device is doing now: "pictures", "text", "faces", "grouping", "compacting", or
+    /// "" when idle (S2-04 follow-up: the Settings screen says it).
+    pub stage: &'static str,
+    /// The last pass found nothing left for this device to do: pictures, text and faces (S2-04).
+    /// False until a pass has run, and while the gate is closed or indexing is paused.
+    pub caught_up: bool,
+    /// Photos this device tried and could not read since it started (a broken file, a format
+    /// the models cannot open), by kind. They are not tried again until the app restarts, so
+    /// they never count as waiting.
+    pub skipped_pictures: usize,
+    pub skipped_text: usize,
+    pub skipped_faces: usize,
 }
 
 #[derive(Default)]
@@ -112,6 +124,10 @@ pub(crate) struct IndexerState {
     wake: Notify,
     buffer: Mutex<Buffer>,
     progress: Mutex<IndexProgress>,
+    /// Photos this run could not read for a kind of work (0 pictures, 1 text, 2 faces), so a
+    /// photo that cannot be decoded is not tried on every pass and does not keep a phone awake.
+    /// Forgotten on restart.
+    failed: Mutex<HashSet<(u8, PhotoId)>>,
     /// This device's text reader (S1-14), if it has one.
     ocr: Mutex<Option<Arc<dyn Ocr>>>,
     /// Read text waiting for the next shard.
@@ -232,7 +248,11 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 
     pub fn index_progress(&self) -> IndexProgress {
-        self.inner.indexer.progress.lock().unwrap().clone()
+        let mut p = self.inner.indexer.progress.lock().unwrap().clone();
+        let failed = self.inner.indexer.failed.lock().unwrap();
+        let count = |kind: u8| failed.iter().filter(|(k, _)| *k == kind).count();
+        (p.skipped_pictures, p.skipped_text, p.skipped_faces) = (count(0), count(1), count(2));
+        p
     }
 
     /// Publish whatever results are waiting as shards now (tests, shutdown).
@@ -353,8 +373,17 @@ impl<L: LibraryStore> LibraryNode<L> {
         let mut own = vec![];
         let mut share = vec![];
         for p in photos {
-            if done.contains(&p.id) || p.thumb.hash == p.original.hash {
-                continue; // indexed, or a video still without its poster frame (A-104)
+            if done.contains(&p.id)
+                || p.thumb.hash == p.original.hash
+                || self
+                    .inner
+                    .indexer
+                    .failed
+                    .lock()
+                    .unwrap()
+                    .contains(&(0, p.id))
+            {
+                continue; // indexed, or a video still without its poster frame (A-104), or unreadable
             }
             let imported_ms = p.favorite.hlc.physical_ms.min(p.deleted_at.hlc.physical_ms);
             let due = now.saturating_sub(imported_ms.max(since_ms)) >= grace;
@@ -460,7 +489,15 @@ impl<L: LibraryStore> LibraryNode<L> {
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?
         {
-            if read.contains(&p.id) {
+            if read.contains(&p.id)
+                || self
+                    .inner
+                    .indexer
+                    .failed
+                    .lock()
+                    .unwrap()
+                    .contains(&(1, p.id))
+            {
                 continue;
             }
             let screenshot = shoebox_search::facts::PhotoFacts::of(&p).is_screenshot();
@@ -507,7 +544,10 @@ impl<L: LibraryStore> LibraryNode<L> {
                     o.1.get_or_insert_with(Instant::now);
                     o.0.push((id, text));
                 }
-                Err(e) => debug!("could not read text in {id}: {e}"),
+                Err(e) => {
+                    debug!("could not read text in {id}: {e}");
+                    self.inner.indexer.failed.lock().unwrap().insert((1, id));
+                }
             }
         }
         Ok(true)
@@ -546,7 +586,16 @@ impl<L: LibraryStore> LibraryNode<L> {
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?
         {
-            if done.contains(&p.id) || p.original.mime.starts_with("video/") {
+            if done.contains(&p.id)
+                || p.original.mime.starts_with("video/")
+                || self
+                    .inner
+                    .indexer
+                    .failed
+                    .lock()
+                    .unwrap()
+                    .contains(&(2, p.id))
+            {
                 continue;
             }
             let imported_ms = p.favorite.hlc.physical_ms.min(p.deleted_at.hlc.physical_ms);
@@ -591,7 +640,10 @@ impl<L: LibraryStore> LibraryNode<L> {
                     f.1.get_or_insert_with(Instant::now);
                     f.0.push((id, faces));
                 }
-                Err(e) => debug!("could not look for faces in {id}: {e:#}"),
+                Err(e) => {
+                    debug!("could not look for faces in {id}: {e:#}");
+                    self.inner.indexer.failed.lock().unwrap().insert((2, id));
+                }
             }
         }
         Ok(true)
@@ -749,6 +801,9 @@ async fn index_loop<L: LibraryStore>(
         }
         let open = gate.may_index();
         st.progress.lock().unwrap().waiting = (!open).then(|| "waiting for power and idle".into());
+        // Whether this pass found anything to do (S2-04: `caught_up`).
+        let mut busy = false;
+        let set_stage = |stage: &'static str| st.progress.lock().unwrap().stage = stage;
         if !ln.indexer_paused() && open {
             match ln.index_work(model, &cfg, since).await {
                 Ok((work, indexed, total)) => {
@@ -759,6 +814,10 @@ async fn index_loop<L: LibraryStore>(
                         p.total = total;
                         p.mine_left = work.len();
                         p.photos_per_min = rate;
+                    }
+                    busy |= !work.is_empty();
+                    if !work.is_empty() {
+                        set_stage("pictures");
                     }
                     for chunk in work.chunks(cfg.batch.max(1)) {
                         if ln.indexer_paused() || !gate.may_index() {
@@ -797,7 +856,10 @@ async fn index_loop<L: LibraryStore>(
                                     b.rows.push((id, v, l));
                                     done += 1;
                                 }
-                                Ok((id, Err(e))) => debug!("could not index {id}: {e:#}"),
+                                Ok((id, Err(e))) => {
+                                    debug!("could not index {id}: {e:#}");
+                                    st.failed.lock().unwrap().insert((0, id));
+                                }
                                 Err(e) => warn!("an encoder task failed: {e}"),
                             }
                         }
@@ -828,8 +890,12 @@ async fn index_loop<L: LibraryStore>(
             let engine = st.ocr.lock().unwrap().clone();
             if let Some(engine) = engine {
                 if !ln.indexer_paused() && gate.may_index() {
+                    set_stage("text");
                     match ln.read_some_text(&cfg, since, engine).await {
-                        Ok(true) => st.wake.notify_one(),
+                        Ok(true) => {
+                            busy = true;
+                            st.wake.notify_one()
+                        }
                         Ok(false) => {}
                         Err(e) => warn!("could not read text in photos: {e:#}"),
                     }
@@ -845,13 +911,18 @@ async fn index_loop<L: LibraryStore>(
             if let Some(faces) = faces {
                 if regrouped.is_none_or(|t| t.elapsed() >= REGROUP_EVERY) {
                     regrouped = Some(Instant::now());
+                    set_stage("grouping");
                     if let Err(e) = ln.regroup_people(faces.model, false).await {
                         warn!("could not group faces: {e:#}");
                     }
                 }
                 if !ln.indexer_paused() && gate.may_index() {
+                    set_stage("faces");
                     match ln.find_some_faces(&cfg, since, faces).await {
-                        Ok(true) => st.wake.notify_one(),
+                        Ok(true) => {
+                            busy = true;
+                            st.wake.notify_one()
+                        }
                         Ok(false) => {}
                         Err(e) => warn!("could not look for faces: {e:#}"),
                     }
@@ -866,8 +937,17 @@ async fn index_loop<L: LibraryStore>(
         }
         if compacted.is_none_or(|t| t.elapsed() >= cfg.compact_every) {
             compacted = Some(Instant::now());
+            set_stage("compacting");
             if let Err(e) = ln.compact_shards(false).await {
                 warn!("could not compact index shards: {e:#}");
+            }
+        }
+        {
+            let mut p = st.progress.lock().unwrap();
+            p.caught_up = open && !ln.indexer_paused() && !busy;
+            // Nothing was worked on this pass: say so (otherwise the stage stands until the next).
+            if !busy {
+                p.stage = "";
             }
         }
         let wait = {

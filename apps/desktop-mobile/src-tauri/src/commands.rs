@@ -52,6 +52,8 @@ pub const COMMANDS: &[&str] = &[
     "search_status",
     "set_search_indexing",
     "rebuild_search_index",
+    "index_now",
+    "stop_index_now",
     "counts",
     "photo_detail",
     "set_favorite",
@@ -214,6 +216,11 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             .await?),
         "set_people" => out(core.set_people(arg::<bool>(&args, "on")?).await?),
         "set_search_indexing" => out(core.set_search_indexing(arg::<bool>(&args, "on")?).await?),
+        "index_now" => out(core.index_now()),
+        "stop_index_now" => {
+            core.stop_index_now();
+            out(())
+        }
         "rebuild_search_index" => out(core.rebuild_search_index().await?),
         "similar" => out(core
             .similar(

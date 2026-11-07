@@ -4,9 +4,15 @@
 //! `shoebox-web`, exactly as for a Cloud link.
 #![cfg(target_arch = "wasm32")]
 
+use iroh::address_lookup::{
+    AddressLookup, AddressLookupBuilder, AddressLookupBuilderError, EndpointInfo,
+    Error as LookupError, Item, PkarrResolver,
+};
 use iroh::endpoint::{presets, Connection};
-use iroh::{Endpoint, EndpointAddr, EndpointId};
+use iroh::{Endpoint, EndpointAddr, EndpointId, RelayConfig, RelayMap, RelayMode, RelayUrl};
+use n0_future::boxed::BoxStream;
 use n0_future::time::{timeout, Duration};
+use n0_future::StreamExt;
 use wasm_bindgen::prelude::*;
 
 const ALPN: &[u8] = b"shoebox/webview/0";
@@ -29,7 +35,17 @@ impl Live {
     /// Try each serving device in turn (`servers` is their 32-byte ids one after another); the first that answers
     /// wins. Fails with `unreachable` when none does.
     pub async fn connect(servers: &[u8]) -> Result<Live, JsError> {
-        let endpoint = Endpoint::bind(presets::N0)
+        // n0's defaults, except that relay hosts lose the trailing dot iroh writes (`….iroh.link.`): Firefox drops a
+        // Content-Security-Policy source ending in a dot, so the page can allow only `*.iroh.link`.
+        let endpoint = Endpoint::builder(presets::Minimal)
+            .relay_mode(RelayMode::Custom(RelayMap::from_iter(
+                iroh::defaults::prod::default_relay_map()
+                    .relays::<Vec<_>>()
+                    .into_iter()
+                    .map(|r| RelayConfig::from(undotted(&r.url))),
+            )))
+            .address_lookup(UndottedBuilder(PkarrResolver::n0_dns()))
+            .bind()
             .await
             .map_err(|_| err("unreachable"))?;
         for id in servers.chunks_exact(32) {
@@ -77,6 +93,59 @@ impl Live {
 
     pub fn close(&self) {
         self.conn.close(0u32.into(), b"done");
+    }
+}
+
+/// `url` without a trailing dot on its host name.
+fn undotted(url: &RelayUrl) -> RelayUrl {
+    match url.host_str() {
+        Some(host) if host.ends_with('.') && host.len() > 1 => {
+            let mut plain = (**url).clone();
+            if plain.set_host(Some(&host[..host.len() - 1])).is_ok() {
+                return plain.into();
+            }
+            url.clone()
+        }
+        _ => url.clone(),
+    }
+}
+
+/// An address lookup whose answers name relays without the trailing dot (a serving device publishes its home relay
+/// as iroh writes it).
+#[derive(Debug)]
+struct Undotted<T>(T);
+
+#[derive(Debug)]
+struct UndottedBuilder<T>(T);
+
+impl<B: AddressLookupBuilder> AddressLookupBuilder for UndottedBuilder<B> {
+    fn into_address_lookup(
+        self,
+        endpoint: &Endpoint,
+    ) -> Result<impl AddressLookup, AddressLookupBuilderError> {
+        Ok(Undotted(self.0.into_address_lookup(endpoint)?))
+    }
+}
+
+impl<L: AddressLookup> AddressLookup for Undotted<L> {
+    fn resolve(&self, id: EndpointId) -> Option<BoxStream<Result<Item, LookupError>>> {
+        let stream = self.0.resolve(id)?;
+        Some(Box::pin(stream.map(|item| {
+            item.map(|item| {
+                let info = item.endpoint_info();
+                let mut data = info.data.clone();
+                let relays: Vec<RelayUrl> = data.relay_urls().map(undotted).collect();
+                data.clear_relay_urls();
+                for url in relays {
+                    data.add_relay_url(url);
+                }
+                Item::new(
+                    EndpointInfo::from_parts(info.endpoint_id, data),
+                    item.provenance(),
+                    item.last_updated(),
+                )
+            })
+        })))
     }
 }
 

@@ -57,7 +57,8 @@ Firefox, and any phone. Those are open items, not assumed fine.
 ## Followed up in W1-08
 
 Live mode was built on this spike (A-116 in `assumptions.md`). Two things the spike did not find: the page's policy must
-allow the relay hosts **with a trailing dot** (`https://*.iroh.link.` as well as `https://*.iroh.link`), and a device's
+allow the relay hosts, which iroh writes **with a trailing dot** (`aps1-1.relay.n0.iroh.link.`); Firefox drops a policy
+source ending in a dot, so the page's client dials relays without it (`crates/shoebox-web-live`). And a device's
 connection gate has to let `shoebox/webview/0` through for peers that are not in the device list. The iroh client is
 3.3 MB (unoptimised, no `wasm-opt`) and loads only for Live links. Still to do from the conditions above: our own relays
 (V2-04), and Safari, Firefox and a phone.

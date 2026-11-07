@@ -26,6 +26,8 @@ struct Rig {
     app: axum::Router,
     clock: Arc<AtomicI64>,
     root: KeyPair,
+    /// The library this rig's devices sign for; a test may switch it to act as another library.
+    lib: LibraryId,
     dir: tempfile::TempDir,
 }
 
@@ -53,6 +55,7 @@ fn rig_on(clock: Arc<AtomicI64>, edit: impl FnOnce(&mut Config)) -> Rig {
         svc,
         clock,
         root: KeyPair::from_seed([1; 32]),
+        lib: LIB,
         dir,
     }
 }
@@ -84,7 +87,7 @@ impl Rig {
         let key = KeyPair::from_seed([seed; 32]);
         let cert = issue_device_cert(
             &self.root,
-            LIB,
+            self.lib,
             key.endpoint_id(),
             Role::Keeper,
             name,
@@ -108,7 +111,7 @@ impl Rig {
     ) -> CloudAuth {
         CloudAuth::sign_hashed(
             &d.key,
-            LIB,
+            self.lib,
             self.root.root_public(),
             None,
             d.cert.clone(),
@@ -571,6 +574,169 @@ async fn a_closed_service_refuses_libraries_it_has_not_registered() {
     assert_eq!(
         r.owner(&d, "GET", "/v1/usage", vec![]).await.0,
         StatusCode::FORBIDDEN
+    );
+    // The operator's own library is let in while closed.
+    let r = rig_with(|c| {
+        c.open_registration = false;
+        c.allowed_libraries = vec![LIB.0];
+    });
+    let d = r.device(2, "nest");
+    assert_eq!(
+        r.owner(&d, "GET", "/v1/usage", vec![]).await.0,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn a_closed_service_takes_a_new_library_with_an_invite_code() {
+    let mut r = rig_with(|c| {
+        c.open_registration = false;
+        c.admin_token = Some("operator-secret".into());
+    });
+    let operator = |method: &str, path: &str, body: &str| {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header("authorization", "Bearer operator-secret")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let json = |b: &[u8]| serde_json::from_slice::<serde_json::Value>(b).unwrap();
+    let register = |code: &str| serde_json::to_vec(&serde_json::json!({ "invite": code })).unwrap();
+
+    // Without a code a new library is told it needs one, by name, so the app can ask for it.
+    let d = r.device(2, "nest");
+    let (s, b) = r
+        .owner(&d, "POST", "/v1/library/register", b"{}".to_vec())
+        .await;
+    assert_eq!(
+        (s, json(&b)["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("invite-needed"))
+    );
+    let (s, b) = r
+        .owner(
+            &d,
+            "POST",
+            "/v1/library/register",
+            register("AAAA-BBBB-CCCC-DDDD-EEEE-FFFF"),
+        )
+        .await;
+    assert_eq!(
+        (s, json(&b)["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("invite-refused"))
+    );
+
+    // Only the operator makes codes.
+    assert_eq!(
+        r.send(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/invites")
+                .body(Body::empty())
+                .unwrap()
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (s, b, _) = r
+        .send(operator(
+            "POST",
+            "/admin/invites",
+            r#"{"uses": 1, "days": 7, "note": "for Asha"}"#,
+        ))
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let made = json(&b);
+    let code = made["code"].as_str().unwrap().to_string();
+    assert_eq!(code.len(), 27, "four groups of six with dashes: {code}");
+
+    // Typed in lower case without the dashes, it still works; then the library is known.
+    let typed = code.replace('-', "").to_lowercase();
+    let (s, b) = r
+        .owner(&d, "POST", "/v1/library/register", register(&typed))
+        .await;
+    assert_eq!(
+        (s, json(&b)["registered"].as_bool()),
+        (StatusCode::OK, Some(true))
+    );
+    assert_eq!(
+        r.owner(&d, "GET", "/v1/usage", vec![]).await.0,
+        StatusCode::OK
+    );
+    // Registering again needs nothing.
+    assert_eq!(
+        r.owner(&d, "POST", "/v1/library/register", b"{}".to_vec())
+            .await
+            .0,
+        StatusCode::OK
+    );
+
+    // The code was for one library: another is refused with it.
+    r.lib = LibraryId([0x7C; 16]);
+    r.root = KeyPair::from_seed([9; 32]);
+    let other = r.device(3, "phone");
+    let (s, b) = r
+        .owner(&other, "POST", "/v1/library/register", register(&code))
+        .await;
+    assert_eq!(
+        (s, json(&b)["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("invite-refused"))
+    );
+    assert_eq!(
+        r.owner(&other, "GET", "/v1/usage", vec![]).await.0,
+        StatusCode::FORBIDDEN
+    );
+
+    // The operator sees who used it, never the code; a code past its end date is refused.
+    let (_, b, _) = r.send(operator("GET", "/admin/invites", "")).await;
+    let list = json(&b);
+    let first = &list["invites"][0];
+    assert_eq!(first["usesLeft"], 0);
+    assert_eq!(first["note"], "for Asha");
+    assert_eq!(first["usedBy"][0], hex::encode(LIB.0));
+    assert!(!String::from_utf8_lossy(&b).contains(&code));
+    let (_, b, _) = r
+        .send(operator(
+            "POST",
+            "/admin/invites",
+            r#"{"uses": 5, "days": 1}"#,
+        ))
+        .await;
+    let soon = json(&b);
+    r.clock.fetch_add(86_400_000, Ordering::SeqCst);
+    let (s, b) = r
+        .owner(
+            &other,
+            "POST",
+            "/v1/library/register",
+            register(soon["code"].as_str().unwrap()),
+        )
+        .await;
+    assert_eq!(
+        (s, json(&b)["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("invite-refused"))
+    );
+
+    // Withdrawn, a code is gone; the library that used it stays.
+    let id = made["id"].as_str().unwrap();
+    assert_eq!(
+        r.send(operator("DELETE", &format!("/admin/invites/{id}"), ""))
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        r.send(operator("DELETE", &format!("/admin/invites/{id}"), ""))
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    r.lib = LIB;
+    r.root = KeyPair::from_seed([1; 32]);
+    assert_eq!(
+        r.owner(&d, "GET", "/v1/usage", vec![]).await.0,
+        StatusCode::OK
     );
 }
 
@@ -1071,6 +1237,7 @@ async fn with_records_kept_elsewhere_an_upload_and_a_report_survive_a_reopen() {
             svc,
             clock: clock.clone(),
             root: KeyPair::from_seed([1; 32]),
+            lib: LIB,
             dir: tempfile::tempdir().unwrap(),
         }
     };

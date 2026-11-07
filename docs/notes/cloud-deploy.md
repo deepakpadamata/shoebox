@@ -34,7 +34,11 @@ You need a Cloudflare account, Node 20+, Rust with the `wasm32-unknown-unknown` 
    npx wrangler secret put S3_SECRET_ACCESS_KEY
    npx wrangler secret put ADMIN_TOKEN        # optional: `openssl rand -hex 32`, for /admin
    ```
-   `QUOTA_GIB`, `SHARE_DAILY_GIB`, `CLOSED` and `CSP_CONNECT` are in `[vars]` with their defaults.
+   `QUOTA_GIB`, `SHARE_DAILY_GIB`, `CLOSED`, `LIBRARIES` and `CSP_CONNECT` are in `[vars]` with their defaults.
+   Registration is open by default: anyone who builds the app can register a library and use its quota. To keep the
+   service to your own libraries, deploy with `--var CLOSED:true --var LIBRARIES:<library id>` (hex, space-separated
+   for several); a library that registered before stays admitted. Passing them on the command line keeps the ids out
+   of the repository, but every deploy must pass them again or the service opens.
 5. **Deploy.** `npm run deploy`. It builds the viewer and the Worker (`scripts/build-cloud-worker.sh`; the first build
    installs worker-build into `target/tools`) and uploads both. The service is at
    `https://shoebox.<your subdomain>.workers.dev`.
@@ -109,6 +113,7 @@ TLS proxy in front, and keep `SHOEBOX_TRUST_PROXY=true` only while the proxy set
 | `SHOEBOX_CLOUD_VIEWER` | none (`/srv/viewer` in the image) | The viewer page's files |
 | `SHOEBOX_QUOTA_GIB`, `SHOEBOX_SHARE_DAILY_GIB` | 2, 1 | Per library; per link per day |
 | `SHOEBOX_CLOSED` | off | Refuse libraries that have not registered |
+| `SHOEBOX_LIBRARIES` | none | Library ids (hex) admitted even while closed: your own |
 | `SHOEBOX_TRUST_PROXY` | off | Take the caller's address from the last `X-Forwarded-For` entry |
 | `SHOEBOX_CSP_CONNECT` | none | Extra hosts the page may connect to (relays for Live links), space-separated |
 | `SHOEBOX_ADMIN_TOKEN` | none | Turns on `/admin` |
@@ -129,13 +134,27 @@ The proxy must not log paths (a share id is a link's address).
 
 ## The operator
 
-With an admin token set, three calls take `Authorization: Bearer <token>`:
+With an admin token set, these calls take `Authorization: Bearer <token>`:
 
 ```bash
 curl -H "authorization: Bearer $TOKEN" https://view.example.org/admin/reports
 curl -X POST -H "authorization: Bearer $TOKEN" https://view.example.org/admin/shares/<share id>/reinstate
 curl -X DELETE -H "authorization: Bearer $TOKEN" https://view.example.org/admin/shares/<share id>
 ```
+
+**Invite codes.** While the service is closed, a new library comes in with an invite code: the share sheet asks for
+one when the service says it needs it. Make a code (all fields optional: one use, no end date, no note):
+
+```bash
+curl -X POST -H "authorization: Bearer $TOKEN" -d '{"uses": 1, "days": 30, "note": "for Asha"}' \
+  https://view.example.org/admin/invites
+```
+
+The answer has the `code` (shown this once; the service keeps only its hash) and an `id`. A code lets in `uses` new
+libraries (each with all its devices) until `days` from now. `GET /admin/invites` lists every code by id with uses
+left, end date, note and the libraries that used it; `DELETE /admin/invites/<id>` withdraws one, and libraries that
+already came in with it stay. To run the end-to-end check against a closed service, give it a code with
+`SHOEBOX_TEST_INVITE`.
 
 A report switches a link off at once (A-118). The operator sees the share id, the library id, when and the reporter's
 words, never the photos (the key is only in the link). Reinstating serves the link again; deleting removes the share

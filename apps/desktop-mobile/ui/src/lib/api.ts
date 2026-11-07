@@ -260,7 +260,7 @@ export const api = {
   webLinkRevoke: (album: string, share: string) => call<{}>('web_link_revoke', { album, share }),
   webLinkRotate: (album: string, share: string) => call<WebLinkInfo>('web_link_rotate', { album, share }),
   webLinksRefresh: () => call<number>('web_links_refresh'),
-  cloudSetup: (url: string | null, phrase: string | null) => call<{}>('cloud_setup', { url, phrase }),
+  cloudSetup: (url: string | null, phrase: string | null, invite: string | null = null) => call<{}>('cloud_setup', { url, phrase, invite }),
   albumShareCheck: (album: string) => call<AddCheck>('album_share_check', { album }),
   albumShare: (album: string, location: string | null) => call<SharedAlbumInfo>('album_share', { album, location }),
   syncBurst: (seconds = 10) => call<import('../bindings/BurstReport').BurstReport>('sync_burst', { seconds }),

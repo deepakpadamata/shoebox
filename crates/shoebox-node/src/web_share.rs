@@ -34,6 +34,16 @@ pub use cloud_keeper::{CloudBackupReport, CloudPolicy, CloudRestoreReport, CLOUD
 
 pub const CLOUD_SECRET_KEY: &str = "cloud-secret";
 pub const CLOUD_URL_KEY: &str = "cloud-url";
+/// The service address this library registered with (W1-10); another address means registering again.
+pub const CLOUD_REGISTERED_KEY: &str = "cloud-registered";
+
+/// What the service said to a library asking to register.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CloudRegistration {
+    Registered,
+    /// The service takes new libraries by invite, and none was given.
+    InviteNeeded,
+}
 const CIDS_FILE: &str = "cloud-cids.bin";
 /// Items sealed and uploaded together, so temporary ciphertext never piles up.
 const BATCH: usize = 64;
@@ -48,6 +58,47 @@ pub struct WebShareOptions {
     pub full_size: bool,
     /// After this (ms since the epoch) the service stops serving the link.
     pub expires_ms: Option<i64>,
+}
+
+/// The longest a link kept online may offer full-size downloads: originals are the costly bytes to hold and the
+/// ones most worth taking, so such a link always ends.
+pub const CLOUD_FULL_SIZE_MAX_DAYS: u32 = 30;
+/// The longest a Live link may run: it keeps a sealed copy of the album on the sharer's devices and serves it.
+pub const LIVE_MAX_DAYS: u32 = 90;
+const DAY_MS: i64 = 86_400_000;
+
+impl WebShareOptions {
+    /// The longest this kind of link may run, in days; `None` when it may run until it is stopped.
+    pub fn max_days(full_size: bool, live: bool) -> Option<u32> {
+        if live {
+            Some(LIVE_MAX_DAYS)
+        } else if full_size {
+            Some(CLOUD_FULL_SIZE_MAX_DAYS)
+        } else {
+            None
+        }
+    }
+
+    /// Refuse a link that would run longer than its kind allows (or forever when it must end), counted from `now`.
+    pub(crate) fn check(&self, live: bool, now_ms: u64) -> Result<()> {
+        let Some(max) = Self::max_days(self.full_size, live) else {
+            return Ok(());
+        };
+        let what = if live {
+            "a link from your devices"
+        } else {
+            "a link with full-size downloads"
+        };
+        let end = self
+            .expires_ms
+            .with_context(|| format!("{what} needs an end date, at most {max} days away"))?;
+        // A minute's slack for a date that was worked out just before.
+        ensure!(
+            end <= now_ms as i64 + i64::from(max) * DAY_MS + 60_000,
+            "{what} lasts at most {max} days"
+        );
+        Ok(())
+    }
 }
 
 /// One link to one album, as the library remembers it.
@@ -409,6 +460,47 @@ impl<L: LibraryStore> LibraryNode<L> {
             .and_then(|b| String::from_utf8(b).ok()))
     }
 
+    /// Has this library registered with the service at its current address?
+    pub async fn cloud_registered(&self) -> Result<bool> {
+        let Some(url) = self.cloud_url().await? else {
+            return Ok(false);
+        };
+        Ok(self.store().setting(CLOUD_REGISTERED_KEY).await?.as_deref() == Some(url.as_bytes()))
+    }
+
+    /// Register this library with the service, with an invite code when it asks for one. A library it already
+    /// knows is simply registered. Every device of the library then knows (the mark is a library setting).
+    pub async fn register_cloud(&self, invite: Option<&str>) -> Result<CloudRegistration> {
+        let url = self
+            .cloud_url()
+            .await?
+            .context("no cloud address is set for this library")?;
+        let s = self.session().await?;
+        let body =
+            serde_json::to_vec(&serde_json::json!({ "invite": invite.unwrap_or("").trim() }))?;
+        let res = s
+            .call("POST", "/v1/library/register", body, now_i64(self.now_ms()))
+            .await?;
+        let status = res.status();
+        if status.is_success() {
+            self.store()
+                .put_setting(CLOUD_REGISTERED_KEY, url.into_bytes())
+                .await?;
+            return Ok(CloudRegistration::Registered);
+        }
+        let text = res.text().await.unwrap_or_default();
+        let error = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v["error"].as_str().map(str::to_string));
+        match error.as_deref() {
+            Some("invite-needed") => Ok(CloudRegistration::InviteNeeded),
+            Some("invite-refused") => {
+                bail!("that invite code is not valid, has been used up or has ended")
+            }
+            _ => bail!("registering with the service: it answered {status}: {text}"),
+        }
+    }
+
     async fn session(&self) -> Result<Session> {
         let base = self
             .cloud_url()
@@ -542,6 +634,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         album: &AlbumId,
         options: WebShareOptions,
     ) -> Result<WebShare> {
+        options.check(false, self.now_ms())?;
         let s = self.session().await?;
         let mut id = [0u8; 16];
         getrandom::fill(&mut id).map_err(|e| anyhow!("randomness: {e}"))?;
@@ -570,6 +663,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         share_id: &[u8; 16],
         options: WebShareOptions,
     ) -> Result<WebShare> {
+        options.check(false, self.now_ms())?;
         let mut shares = self.web_shares(album).await?;
         let i = shares
             .iter()

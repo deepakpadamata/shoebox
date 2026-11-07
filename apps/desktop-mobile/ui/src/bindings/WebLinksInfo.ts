@@ -12,4 +12,12 @@ enabled: boolean,
 /**
  * The service's address, if one is set.
  */
-url: string | null, links: Array<WebLinkInfo>, };
+url: string | null, 
+/**
+ * The library is registered with the service at that address (or it could not be asked just now).
+ */
+registered: boolean, 
+/**
+ * The service takes new libraries by invite: ask for a code.
+ */
+invite_needed: boolean, links: Array<WebLinkInfo>, };

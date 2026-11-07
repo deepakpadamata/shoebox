@@ -13,7 +13,9 @@ use shoebox_core::model::*;
 use shoebox_core::share::{self, ShareKey, ShareLink};
 use shoebox_core::store::*;
 use shoebox_core::Hlc;
-use shoebox_node::{CloudPolicy, ImportOptions, LibraryNode, WebShareOptions, WEBVIEW_ALPN};
+use shoebox_node::{
+    CloudPolicy, CloudRegistration, ImportOptions, LibraryNode, WebShareOptions, WEBVIEW_ALPN,
+};
 use shoebox_store::{HybridBackend, Library};
 use shoebox_testkit::{wait_until, Cluster};
 use std::sync::Arc;
@@ -62,6 +64,8 @@ async fn world_in_bucket(photos_in_album: usize) -> World {
 /// Where the service keeps the bytes.
 enum Bytes {
     OnDisk,
+    /// On disk, with registration closed: a new library needs an invite code.
+    OnDiskClosed,
     FakeBucket,
     /// A real S3-compatible bucket (see [`real_bucket`]).
     Bucket(shoebox_cloud::s3::S3Config),
@@ -201,6 +205,10 @@ async fn world_with(photos_in_album: usize, role: Role, bytes: Bytes) -> World {
     config.clock = Arc::new(move || clock.now_ms() as i64);
     let bucket = match bytes {
         Bytes::OnDisk => None,
+        Bytes::OnDiskClosed => {
+            config.open_registration = false;
+            None
+        }
         Bytes::FakeBucket => {
             let clock = cluster.clock().clone();
             let b = common::start(Arc::new(move || clock.now_ms() as i64)).await;
@@ -336,6 +344,109 @@ async fn an_album_is_shared_and_opens_from_the_link_alone() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_library_registers_with_an_invite_code_and_every_device_knows() {
+    let w = world_with(1, Role::Keeper, Bytes::OnDiskClosed).await;
+    let svc = w.svc.clone().unwrap();
+    // Not registered: the service asks for a code, and nothing can be uploaded.
+    assert!(!w.node.cloud_registered().await.unwrap());
+    assert_eq!(
+        w.node.register_cloud(None).await.unwrap(),
+        CloudRegistration::InviteNeeded
+    );
+    let e = w
+        .node
+        .create_web_share(&w.album, WebShareOptions::default())
+        .await
+        .unwrap_err();
+    assert!(format!("{e:#}").contains("invite"), "{e:#}");
+    // A wrong code is an error that says so.
+    let e = w.node.register_cloud(Some("nope")).await.unwrap_err();
+    assert!(format!("{e:#}").contains("not valid"), "{e:#}");
+
+    let (code, _) = svc.store.create_invite(1, None, "test", svc.now()).unwrap();
+    assert_eq!(
+        w.node.register_cloud(Some(&code)).await.unwrap(),
+        CloudRegistration::Registered
+    );
+    assert!(w.node.cloud_registered().await.unwrap());
+    w.node
+        .create_web_share(&w.album, WebShareOptions::default())
+        .await
+        .unwrap();
+    // Asking again needs no code, and another address means registering again.
+    assert_eq!(
+        w.node.register_cloud(None).await.unwrap(),
+        CloudRegistration::Registered
+    );
+    w.node
+        .set_cloud_url("https://elsewhere.example")
+        .await
+        .unwrap();
+    assert!(!w.node.cloud_registered().await.unwrap());
+}
+
+/// An end date `days` from now on the test's clock.
+fn in_days(w: &World, days: i64) -> i64 {
+    w._cluster.clock().now_ms() as i64 + days * 86_400_000
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn full_size_links_online_end_within_30_days_and_live_links_within_90() {
+    let w = world(2).await;
+    let opts = |full_size, expires_ms| WebShareOptions {
+        full_size,
+        expires_ms,
+    };
+    // Kept online with full-size downloads: never open-ended, at most 30 days.
+    for bad in [None, Some(in_days(&w, 31))] {
+        let e = w
+            .node
+            .create_web_share(&w.album, opts(true, bad))
+            .await
+            .unwrap_err();
+        assert!(format!("{e:#}").contains("30 days"), "{e:#}");
+    }
+    // Previews only may run until the sharer stops them.
+    let share = w
+        .node
+        .create_web_share(&w.album, opts(false, None))
+        .await
+        .unwrap();
+    // Turning full size on for that link needs an end date too.
+    assert!(w
+        .node
+        .update_web_share(&w.album, &share.share_id, opts(true, None))
+        .await
+        .is_err());
+    let share = w
+        .node
+        .update_web_share(&w.album, &share.share_id, opts(true, Some(in_days(&w, 30))))
+        .await
+        .unwrap();
+    assert!(share.full_size);
+
+    // From the sharer's devices: at most 90 days, full size or not.
+    for (full_size, bad) in [(false, None), (false, Some(in_days(&w, 91))), (true, None)] {
+        let e = w
+            .node
+            .create_live_share(&w.album, opts(full_size, bad))
+            .await
+            .unwrap_err();
+        assert!(format!("{e:#}").contains("90 days"), "{e:#}");
+    }
+    let live = w
+        .node
+        .create_live_share(&w.album, opts(true, Some(in_days(&w, 90))))
+        .await
+        .unwrap();
+    assert!(w
+        .node
+        .update_live_share(&w.album, &live.share_id, opts(false, None))
+        .await
+        .is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_service_never_holds_a_photo() {
     let w = world(4).await;
     w.node
@@ -343,7 +454,7 @@ async fn the_service_never_holds_a_photo() {
             &w.album,
             WebShareOptions {
                 full_size: true,
-                expires_ms: None,
+                expires_ms: Some(in_days(&w, 30)),
             },
         )
         .await
@@ -391,7 +502,7 @@ async fn full_size_originals_are_uploaded_without_their_location() {
             &w.album,
             WebShareOptions {
                 full_size: true,
-                expires_ms: None,
+                expires_ms: Some(in_days(&w, 30)),
             },
         )
         .await
@@ -567,7 +678,7 @@ async fn demo_serve_a_share() {
             &w.album,
             WebShareOptions {
                 full_size: true,
-                expires_ms: None,
+                expires_ms: Some(in_days(&w, 30)),
             },
         )
         .await
@@ -607,7 +718,13 @@ async fn a_live_link_is_served_by_the_device_and_stops_when_revoked() {
     let w = world(4).await;
     let share = w
         .node
-        .create_live_share(&w.album, WebShareOptions::default())
+        .create_live_share(
+            &w.album,
+            WebShareOptions {
+                full_size: false,
+                expires_ms: Some(in_days(&w, 90)),
+            },
+        )
         .await
         .unwrap();
     let link = w.node.live_share_link(&share).await.unwrap();
@@ -769,7 +886,13 @@ async fn a_device_without_the_folder_serves_a_live_link_only_when_asked_to() {
     let w = world(3).await;
     let share = w
         .node
-        .create_live_share(&w.album, WebShareOptions::default())
+        .create_live_share(
+            &w.album,
+            WebShareOptions {
+                full_size: false,
+                expires_ms: Some(in_days(&w, 90)),
+            },
+        )
         .await
         .unwrap();
     assert!(w.node.serves_live_share(&share.share_id));
@@ -962,7 +1085,7 @@ async fn a_link_changes_what_it_offers_and_keeps_its_address() {
             &share.share_id,
             WebShareOptions {
                 full_size: true,
-                expires_ms: None,
+                expires_ms: Some(in_days(&w, 30)),
             },
         )
         .await
@@ -997,7 +1120,7 @@ async fn from_a_bucket_an_album_opens_from_the_link_alone_and_stops_when_revoked
             &w.album,
             WebShareOptions {
                 full_size: true,
-                expires_ms: None,
+                expires_ms: Some(in_days(&w, 30)),
             },
         )
         .await
@@ -1153,13 +1276,20 @@ async fn with_a_deployed_service_a_link_opens_and_the_library_restores() {
 }
 
 async fn a_link_opens_and_the_library_restores(w: World) {
+    // A service closed to new libraries lets the test's library in with `SHOEBOX_TEST_INVITE` (one use per run).
+    if let Ok(code) = std::env::var("SHOEBOX_TEST_INVITE") {
+        assert_eq!(
+            w.node.register_cloud(Some(&code)).await.unwrap(),
+            CloudRegistration::Registered
+        );
+    }
     let share = w
         .node
         .create_web_share(
             &w.album,
             WebShareOptions {
                 full_size: true,
-                expires_ms: None,
+                expires_ms: Some(in_days(&w, 30)),
             },
         )
         .await

@@ -463,6 +463,7 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             core.cloud_setup(
                 opt::<String>(&args, "url")?,
                 opt::<String>(&args, "phrase")?,
+                opt::<String>(&args, "invite")?,
             )
             .await?;
             Ok(json!({}))

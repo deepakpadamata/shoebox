@@ -91,6 +91,16 @@ fn json_response(status: StatusCode, body: Value) -> Response {
 impl From<StoreError> for ApiError {
     fn from(e: StoreError) -> Self {
         match e {
+            StoreError::RegistrationClosed => Self::new(
+                StatusCode::FORBIDDEN,
+                "invite-needed",
+                "this service takes new libraries by invite: enter an invite code",
+            ),
+            StoreError::InviteRefused => Self::new(
+                StatusCode::FORBIDDEN,
+                "invite-refused",
+                "that invite code is not valid, has been used up or has ended",
+            ),
             StoreError::UnknownLibrary | StoreError::WrongRoot => Self::new(
                 StatusCode::FORBIDDEN,
                 "forbidden",
@@ -139,6 +149,30 @@ fn authorize(
     uri: &Uri,
     body_hash: &[u8; 32],
 ) -> Result<LibraryId, ApiError> {
+    let auth = verify(s, headers, method, uri, body_hash)?;
+    s.store.admit(
+        auth.library,
+        auth.root,
+        auth.admin.as_ref(),
+        &auth.device,
+        open_to(s, auth.library),
+    )?;
+    Ok(auth.library)
+}
+
+/// May this library register without an invite?
+fn open_to(s: &Service, library: LibraryId) -> bool {
+    s.config.open_registration || s.config.allowed_libraries.contains(&library.0)
+}
+
+/// Check a request's signature and time, without asking whether the library is known.
+fn verify(
+    s: &Service,
+    headers: &HeaderMap,
+    method: &Method,
+    uri: &Uri,
+    body_hash: &[u8; 32],
+) -> Result<CloudAuth, ApiError> {
     let unauthorised =
         |m: &str| ApiError::new(StatusCode::UNAUTHORIZED, "unauthorized", m.to_string());
     let text = headers
@@ -156,14 +190,7 @@ fn authorize(
         s.config.skew_ms,
     )
     .map_err(|e| unauthorised(&e.to_string()))?;
-    s.store.admit(
-        auth.library,
-        auth.root,
-        auth.admin.as_ref(),
-        &auth.device,
-        s.config.open_registration,
-    )?;
-    Ok(auth.library)
+    Ok(auth)
 }
 
 /// A small body held in memory, with its hash.
@@ -931,6 +958,42 @@ async fn usage(
     ))
 }
 
+/// `POST /v1/library/register`: a library joins the service, with `{"invite": "<code>"}` when registration is
+/// closed. A library already known (or one let in without a code) just answers `registered`.
+async fn register(
+    State(s): Svc,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Response, ApiError> {
+    let (bytes, hash) = small_body(body, 4096).await?;
+    let auth = verify(&s, &headers, &method, &uri, &hash)?;
+    let invite = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|v| v["invite"].as_str().map(str::to_string))
+        .filter(|c| !c.trim().is_empty());
+    let open = open_to(&s, auth.library) || s.store.knows_library(auth.library);
+    match invite {
+        Some(code) if !open => s.store.admit_with_invite(
+            &code,
+            auth.library,
+            auth.root,
+            auth.admin.as_ref(),
+            &auth.device,
+            s.now(),
+        )?,
+        _ => s.store.admit(
+            auth.library,
+            auth.root,
+            auth.admin.as_ref(),
+            &auth.device,
+            open,
+        )?,
+    }
+    Ok(json_response(StatusCode::OK, json!({ "registered": true })))
+}
+
 async fn post_certs(
     State(s): Svc,
     method: Method,
@@ -1135,6 +1198,82 @@ async fn admin_reports(State(s): Svc, headers: HeaderMap) -> Result<Response, Ap
     ))
 }
 
+/// `POST /admin/invites` with `{"uses": n, "days": d, "note": "..."}` (all optional; one use, no end date): make an
+/// invite code. The answer is the only time the code is shown; the service keeps its hash.
+async fn admin_create_invite(
+    State(s): Svc,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Response, ApiError> {
+    admin(&s, &headers)?;
+    let (bytes, _) = small_body(body, 4096).await?;
+    let v: serde_json::Value = if bytes.is_empty() {
+        json!({})
+    } else {
+        serde_json::from_slice(&bytes).map_err(|_| ApiError::bad("send JSON"))?
+    };
+    let uses = v["uses"].as_u64().unwrap_or(1);
+    if !(1..=10_000).contains(&uses) {
+        return Err(ApiError::bad("uses is 1 to 10000"));
+    }
+    let expires_ms = match v["days"].as_u64() {
+        None => None,
+        Some(d) if (1..=3650).contains(&d) => Some(s.now() + d as i64 * 86_400_000),
+        Some(_) => return Err(ApiError::bad("days is 1 to 3650")),
+    };
+    let note: String = v["note"]
+        .as_str()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(200)
+        .collect();
+    let (code, id) = s
+        .store
+        .create_invite(uses as u32, expires_ms, &note, s.now())
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "io",
+                "could not save the invite",
+            )
+        })?;
+    Ok(json_response(
+        StatusCode::OK,
+        json!({ "code": code, "id": hex::encode(id), "uses": uses, "expiresMs": expires_ms, "note": note }),
+    ))
+}
+
+/// `GET /admin/invites`: every invite code (by id; the codes are not kept), oldest first.
+async fn admin_invites(State(s): Svc, headers: HeaderMap) -> Result<Response, ApiError> {
+    admin(&s, &headers)?;
+    Ok(json_response(
+        StatusCode::OK,
+        json!({ "invites": s.store.invites().iter().map(|(id, i)| json!({
+            "id": hex::encode(id),
+            "usesLeft": i.uses_left,
+            "createdMs": i.created_ms,
+            "expiresMs": i.expires_ms,
+            "note": i.note,
+            "usedBy": i.used_by,
+        })).collect::<Vec<_>>() }),
+    ))
+}
+
+/// `DELETE /admin/invites/{id}`: withdraw an invite code. Libraries that came in with it stay.
+async fn admin_delete_invite(
+    State(s): Svc,
+    Path(id_hex): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    admin(&s, &headers)?;
+    let id: [u8; 32] = parse_hex(&id_hex)?;
+    if !s.store.delete_invite(&id) {
+        return Err(ApiError::not_found());
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 /// `POST /admin/shares/{share}/reinstate`: serve a reported share again.
 async fn admin_reinstate(
     State(s): Svc,
@@ -1319,9 +1458,18 @@ pub(crate) fn router(service: Arc<Service>) -> Router {
         .route("/v1/shares", get(list_shares))
         .route("/v1/shares/{share}", put(put_share).delete(delete_share))
         .route("/v1/usage", get(usage))
-        .route("/v1/library/certs", post(post_certs));
+        .route("/v1/library/certs", post(post_certs))
+        .route("/v1/library/register", post(register));
     let operator = Router::new()
         .route("/admin/reports", get(admin_reports))
+        .route(
+            "/admin/invites",
+            get(admin_invites).post(admin_create_invite),
+        )
+        .route(
+            "/admin/invites/{id}",
+            axum::routing::delete(admin_delete_invite),
+        )
         .route("/admin/shares/{share}/reinstate", post(admin_reinstate))
         .route(
             "/admin/shares/{share}",

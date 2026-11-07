@@ -27,6 +27,7 @@ mod pairing;
 mod people;
 mod places;
 mod presence;
+mod previews;
 mod recover;
 mod rotation;
 mod search;

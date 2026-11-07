@@ -851,6 +851,10 @@ impl<L: LibraryStore> LibraryNode<L> {
         let (mut skipped, mut withheld) = (0u32, 0u32);
         for p in batch {
             let is_video = p.original.mime.starts_with("video/");
+            // A device that keeps no preview next to its original makes it again for the link.
+            if !is_video && !blobs.has(&p.preview.hash).await? {
+                let _ = self.ensure_preview(p).await;
+            }
             // Thumbnails and previews are on every device once it has synced; one that is not yet is skipped,
             // and the link says how many.
             if !(blobs.has(&p.thumb.hash).await? && blobs.has(&p.preview.hash).await?) && !is_video

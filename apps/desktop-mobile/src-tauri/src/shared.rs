@@ -401,6 +401,10 @@ impl AppCore {
         let mut items = vec![];
         for rec in recs {
             let is_video = rec.original.mime.starts_with("video/");
+            // A shared album carries the preview: make it again where this device kept none.
+            if !is_video {
+                let _ = ln.ensure_preview(&rec).await;
+            }
             let strip = choice == "remove" && (rec.exif.gps.is_some() || is_video);
             if !strip {
                 items.push(SharedItem {

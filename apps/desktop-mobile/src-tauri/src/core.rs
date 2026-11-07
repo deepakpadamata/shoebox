@@ -273,6 +273,9 @@ impl AppCore {
             .map(relay_setting)
             .unwrap_or_else(|| opts.relay.clone());
         config.mdns = opts.mdns;
+        // Where an original is held (or referenced in the gallery) the preview next to it only
+        // takes room; the node still never does this on a keeper.
+        config.drop_previews = true;
         if let Some(every) = opts.gc_interval {
             config = config
                 .with_gc_interval(every)

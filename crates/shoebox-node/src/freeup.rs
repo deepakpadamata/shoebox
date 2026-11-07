@@ -225,14 +225,38 @@ impl<L: LibraryStore> LibraryNode<L> {
             return Ok(vec![]);
         }
         let me = self.device();
+        // A device that is the whole library has nobody to keep a preview for: its original is
+        // the copy, and a preview is made again if another device joins (`restore_previews`).
+        let alone = self.drops_previews() && self.is_alone().await?;
         let keepers = self.keepers().await?;
-        if keepers.is_empty() {
+        if keepers.is_empty() && !alone {
             return Ok(vec![]);
         }
         let photos = self
             .store()
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?;
+        if alone {
+            let mut released = vec![];
+            for rec in &photos {
+                let preview = rec.preview.hash;
+                let blobs = self.node().blobs();
+                if preview == rec.original.hash
+                    || !shows_directly(&rec.original.mime)
+                    || !blobs.kept(&rec.original.hash).await?
+                    || !blobs.kept(&preview).await?
+                    || blobs
+                        .protections(&preview)
+                        .await?
+                        .iter()
+                        .any(|p| matches!(p, Protection::Album(_)))
+                {
+                    continue;
+                }
+                released.push(preview);
+            }
+            return self.drop_released_previews(released).await;
+        }
         // (preview, keepers that say they hold it)
         let mut candidates: Vec<(Blake3Hash, Vec<EndpointId>)> = vec![];
         for rec in &photos {
@@ -294,6 +318,10 @@ impl<L: LibraryStore> LibraryNode<L> {
                 .map(|(preview, _)| preview)
                 .collect()
         };
+        self.drop_released_previews(released).await
+    }
+
+    async fn drop_released_previews(&self, released: Vec<Blake3Hash>) -> Result<Vec<Blake3Hash>> {
         if !released.is_empty() {
             let _exclusive = self.inner.ingest.write().await;
             for hash in &released {

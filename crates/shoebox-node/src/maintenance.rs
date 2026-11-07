@@ -198,6 +198,9 @@ async fn maintenance_loop<L: LibraryStore>(
         if let Err(e) = ln.release_previews().await {
             warn!("releasing previews failed: {e:#}");
         }
+        if let Err(e) = ln.restore_previews().await {
+            warn!("making previews again failed: {e:#}");
+        }
         if let Err(e) = ln.release_embedded_clips().await {
             warn!("releasing stored clips failed: {e:#}");
         }

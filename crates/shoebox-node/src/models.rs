@@ -82,6 +82,25 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(())
     }
 
+    /// Stop offering `file` and let its copy in the blob store go: the feature it serves is off on
+    /// this device. The caller removes the file in its folder.
+    pub async fn forget_model(&self, file: &ModelFile) -> Result<()> {
+        let h = hash(file);
+        if self.node().blobs().kept(&h).await? {
+            self.node().blobs().unprotect(&h, Protection::Index).await?;
+        }
+        if self
+            .store()
+            .holders(&h)
+            .await?
+            .iter()
+            .any(|x| x.device == self.device())
+        {
+            self.retract_holdings(vec![h]).await?;
+        }
+        Ok(())
+    }
+
     /// Whether any other device offers `file`.
     pub async fn model_offered(&self, file: &ModelFile) -> Result<bool> {
         Ok(self

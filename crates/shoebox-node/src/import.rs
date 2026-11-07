@@ -588,13 +588,24 @@ impl<L: LibraryStore> LibraryNode<L> {
         };
         let (preview, thumb) = match (&r.preview, &r.thumb) {
             (Some(p), Some(t)) => {
-                let ph = blobs
-                    .add_bytes(p.bytes.clone(), Protection::Library)
-                    .await?;
+                // A device that is the whole library and holds this original keeps no preview of
+                // it; the record has its hash and `restore_previews` makes it if another device
+                // joins.
+                let ph = if self.drops_previews()
+                    && shoebox_core::policy::shows_directly(&r.mime)
+                    && self.is_alone().await?
+                {
+                    Blake3Hash::of_bytes(&p.bytes)
+                } else {
+                    let ph = blobs
+                        .add_bytes(p.bytes.clone(), Protection::Library)
+                        .await?;
+                    held.push((ph, BlobKind::Preview));
+                    ph
+                };
                 let th = blobs
                     .add_bytes(t.bytes.clone(), Protection::Library)
                     .await?;
-                held.push((ph, BlobKind::Preview));
                 held.push((th, BlobKind::Thumb));
                 (rendition_ref(p, ph), rendition_ref(t, th))
             }

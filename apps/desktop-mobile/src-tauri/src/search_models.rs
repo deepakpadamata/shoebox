@@ -80,6 +80,35 @@ impl Drop for IndexRun {
 const MANUAL_BUDGET: Duration = Duration::from_secs(12 * 3600);
 
 impl AppCore {
+    /// Delete the model files the switched-off features would use, from this app's own `models/`
+    /// folder (files that ship with the app stay): the image, face and text-reading models when
+    /// this device does not index, the face models when People is off. The text model for
+    /// searching is always kept. They are fetched again when the feature is turned back on.
+    pub(crate) async fn remove_unused_models(&self, ln: &LibraryNode<Library>) {
+        let indexing = SearchSettings::load(self.data_dir()).index;
+        let people = ln.people_on().await.unwrap_or(true);
+        let mut unused: Vec<&shoebox_search::models::ModelFile> = vec![];
+        if !indexing {
+            unused.extend([&CLIP_IMAGE, &OCR_DET, &OCR_REC, &OCR_DICT]);
+        }
+        if !indexing || !people {
+            unused.extend([&FACE_DETECT, &FACE_EMBED]);
+        }
+        let dir = self.data_dir().join("models");
+        for file in unused {
+            let path = dir.join(file.name);
+            let had = path.exists();
+            if had {
+                let _ = std::fs::remove_file(&path);
+            }
+            if let Err(e) = ln.forget_model(file).await {
+                tracing::warn!("could not stop offering {}: {e:#}", file.name);
+            } else if had {
+                tracing::info!("removed {}: its feature is off here", file.name);
+            }
+        }
+    }
+
     /// The user asked for indexing now (Settings → Search): run until this device has nothing
     /// left, with no power or idle gate, for as long as the app's process lives. Returns false
     /// when a run is already going.
@@ -114,6 +143,7 @@ impl AppCore {
     /// devices, and (on a desktop) the indexer.
     pub(crate) async fn start_search_models(&self, ln: &LibraryNode<Library>) {
         ln.set_search_model(CLIP_MODEL);
+        self.remove_unused_models(ln).await;
         let dirs = model_dirs(&self.opts.model_dirs, self.data_dir());
         let d = dirs.clone();
         ln.set_text_encoder(Arc::new(move || {
@@ -193,11 +223,13 @@ impl AppCore {
         if !SearchSettings::load(self.data_dir()).index {
             return Ok(serde_json::json!({ "skipped": "indexing is off on this device" }));
         }
+        self.remove_unused_models(&ln).await;
+        let people = ln.people_on().await.unwrap_or(true);
         let sources = self.model_sources(allow_download);
         let image = ln.model_bytes_from(&CLIP_IMAGE, &sources).await;
         let faces = match image {
             // Faces are a bonus: a download that fails here is tried again next time.
-            Ok(Some(_)) => {
+            Ok(Some(_)) if people => {
                 let d = ln.model_bytes_from(&FACE_DETECT, &sources).await;
                 let e = ln.model_bytes_from(&FACE_EMBED, &sources).await;
                 match (d, e) {
@@ -487,6 +519,7 @@ impl AppCore {
         } else {
             ln.pause_indexer();
         }
+        self.remove_unused_models(&ln).await;
         Ok(())
     }
 

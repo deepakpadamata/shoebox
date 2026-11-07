@@ -46,6 +46,11 @@ pub struct NodeConfig {
     /// A Companion also keeps the originals of photos you favourite.
     #[serde(default = "default_true")]
     pub keep_favorites: bool,
+    /// Keep no preview next to an original this device holds and shows as it is (JPEG, PNG): the
+    /// viewer and the indexer read the original, and a preview is made again if another device
+    /// needs it. Never on a keeper. Device-local.
+    #[serde(default)]
+    pub drop_previews: bool,
 }
 
 fn default_keep_recent_days() -> u32 {
@@ -80,6 +85,7 @@ impl NodeConfig {
             pinned_originals: vec![],
             keep_recent_days: default_keep_recent_days(),
             keep_favorites: true,
+            drop_previews: false,
         }
     }
 

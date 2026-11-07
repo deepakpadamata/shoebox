@@ -41,6 +41,14 @@ pub fn face_crop(bytes: &[u8], rect: [f32; 4], size: u32) -> Result<Rendition, A
     render::face_crop(image, orientation, rect, size)
 }
 
+/// The preview of a still picture, made again from its original: the same bytes the import made
+/// (same decoder, same resize, same encoder), so the preview's hash in the library still matches.
+pub fn preview_jpeg(bytes: &[u8]) -> Result<Vec<u8>, AnalyzeError> {
+    let (image, orientation) = decode_with_orientation(bytes)?;
+    let (_, preview, _) = render::renditions(image, orientation)?;
+    Ok(preview.bytes)
+}
+
 fn decode_with_orientation(bytes: &[u8]) -> Result<(image::DynamicImage, u16), AnalyzeError> {
     let format = detect::sniff(bytes, None);
     decode_picture(bytes, &format, || exif_data::read(bytes).orientation)

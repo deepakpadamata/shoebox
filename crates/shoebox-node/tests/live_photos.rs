@@ -388,6 +388,8 @@ fn samsung_photo(dir: &Path, name: &str) -> (PathBuf, Vec<u8>, Vec<u8>) {
     file.extend(&first);
     file.extend(b"MotionPhoto_Data");
     file.extend(&real);
+    // Another file for each name (the photo's id is the hash of the whole file).
+    file.extend(name.as_bytes());
     let path = dir.join(name);
     std::fs::write(&path, &file).unwrap();
     (path, first, real)
@@ -409,11 +411,9 @@ async fn a_samsung_photo_plays_the_video_after_its_tag() {
     assert_eq!(&r.ln.clip_bytes(&id).await.unwrap().unwrap()[..], &real[..]);
 }
 
-#[tokio::test]
-async fn a_record_that_names_the_clip_ahead_of_the_tag_is_corrected() {
-    let r = rig().await;
-    let dir = r.dir.path().join("samsung-old");
-    let (_, first, real) = samsung_photo(&dir, "20261031_221441.jpg");
+async fn old_samsung_record(r: &Rig, name: &str) -> (PhotoId, Vec<u8>) {
+    let dir = r.dir.path().join(name);
+    let (_, first, real) = samsung_photo(&dir, &format!("{name}.jpg"));
     let report =
         r.ln.import_paths(&[dir], ImportOptions::default())
             .await
@@ -435,15 +435,30 @@ async fn a_record_that_names_the_clip_ahead_of_the_tag_is_corrected() {
         })
         .await
         .unwrap();
-    assert!(
-        r.ln.clip_source(&id).await.unwrap().is_none(),
-        "the old record's clip is not found any more"
-    );
+    (id, real)
+}
 
-    assert_eq!(r.ln.repair_motion_clips().await.unwrap(), 1);
+#[tokio::test]
+async fn a_record_that_names_the_clip_ahead_of_the_tag_is_corrected_when_the_photo_is_opened() {
+    let r = rig().await;
+    let (id, real) = old_samsung_record(&r, "samsung-old-a").await;
+    // Opening the photo finds the clip and puts the record right.
+    assert!(r.ln.clip_source(&id).await.unwrap().is_some());
     let m = r.ln.store().motion(&id).await.unwrap().unwrap();
     assert_eq!(m.video.hash, Blake3Hash::of_bytes(&real));
     assert_eq!(&r.ln.clip_bytes(&id).await.unwrap().unwrap()[..], &real[..]);
+}
+
+#[tokio::test]
+async fn the_maintenance_pass_corrects_the_records_nobody_opened() {
+    let r = rig().await;
+    let (a, real_a) = old_samsung_record(&r, "samsung-old-b").await;
+    let (b, real_b) = old_samsung_record(&r, "samsung-old-c").await;
+    assert_eq!(r.ln.repair_motion_clips().await.unwrap(), 2);
+    for (id, real) in [(a, real_a), (b, real_b)] {
+        let m = r.ln.store().motion(&id).await.unwrap().unwrap();
+        assert_eq!(m.video.hash, Blake3Hash::of_bytes(&real));
+    }
     // Looked at once; the marker says the whole library has been.
     assert_eq!(r.ln.repair_motion_clips().await.unwrap(), 0);
 }

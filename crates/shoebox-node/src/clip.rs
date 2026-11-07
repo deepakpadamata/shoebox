@@ -17,7 +17,7 @@ use crate::library_node::LibraryNode;
 use anyhow::Result;
 use bytes::Bytes;
 use shoebox_core::ids::Blake3Hash;
-use shoebox_core::model::{MotionRecord, MotionSource, PhotoId};
+use shoebox_core::model::{MotionRecord, MotionSource, PhotoId, PhotoRecord};
 use shoebox_core::store::LibraryStore;
 use std::ops::Range;
 use tracing::{debug, warn};
@@ -56,7 +56,13 @@ impl<L: LibraryStore> LibraryNode<L> {
         let (offset, len) = match known {
             Some(e) => e,
             None => {
-                let Some(e) = self.find_clip(m, &rec.original.hash).await? else {
+                let found = match self.find_clip(m, &rec.original.hash).await? {
+                    Some(e) => Some(e),
+                    // The record may name the wrong clip (an earlier build): correct it now, so
+                    // the photo plays when it is opened, not when the next pass gets to it.
+                    None => self.repair_one(m, &rec).await?,
+                };
+                let Some(e) = found else {
                     return Ok(None);
                 };
                 self.inner.clip_extents.lock().unwrap().insert(m.photo, e);
@@ -197,17 +203,18 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// Look again, in each embedded-clip photo's original, for the video the camera shows. Builds
     /// before the Samsung fix took the first MP4 after the picture, which in newer Samsung files
     /// is a 0.6 s silent clip ahead of the real one; their records name that clip. Where the
-    /// original now gives another clip, the record is replaced by one that names it. A few per
-    /// pass (each reads a whole original); once every record has been looked at, a marker file
-    /// in the data folder says so and later runs skip it.
+    /// original now gives another clip, the record is replaced by one that names it. A photo
+    /// that is opened is corrected at once (`clip_handle`); this goes through the rest, for up to
+    /// a minute each pass (each reads a whole original). Once every record has been looked at, a
+    /// marker file in the data folder says so and later runs skip it.
     pub async fn repair_motion_clips(&self) -> Result<usize> {
-        const BATCH: usize = 30;
+        const BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
         let marker = self.node().config().data_dir.join("motion-clips-v2");
         if marker.exists() {
             return Ok(0);
         }
+        let started = std::time::Instant::now();
         let mut repaired = 0;
-        let mut looked = 0;
         let mut all_done = true;
         for m in self.store().motions().await? {
             if m.source != MotionSource::Embedded
@@ -215,63 +222,26 @@ impl<L: LibraryStore> LibraryNode<L> {
             {
                 continue;
             }
-            if looked >= BATCH {
+            if started.elapsed() >= BUDGET {
                 all_done = false;
                 break;
             }
-            looked += 1;
-            self.inner.clip_checked.lock().unwrap().insert(m.photo);
             let Some(rec) = self.store().photo(&m.photo).await? else {
                 continue;
             };
-            let blobs = self.node().blobs();
-            if !blobs.kept(&rec.original.hash).await? {
+            if !self.node().blobs().kept(&rec.original.hash).await? {
                 continue; // another device's photo: its own device repairs it
             }
-            let Ok(bytes) = blobs.get(&rec.original.hash).await else {
-                continue;
-            };
-            let found =
-                tokio::task::spawn_blocking(move || shoebox_media::find_embedded_video(&bytes))
-                    .await?;
-            let Some(v) = found else { continue };
-            if v.len == m.video.size {
+            let before = self.store().motion(&m.photo).await?.map(|x| x.video.hash);
+            if let Some(extent) = self.repair_one(&m, &rec).await? {
                 self.inner
                     .clip_extents
                     .lock()
                     .unwrap()
-                    .insert(m.photo, (v.offset, v.len));
-                continue;
+                    .insert(m.photo, extent);
             }
-            let handle = BlobHandle {
-                hash: rec.original.hash,
-                offset: v.offset,
-                len: Some(v.len),
-            };
-            let Ok(clip) = blobs.read_handle(&handle, 0..u64::MAX).await else {
-                continue;
-            };
-            let video = shoebox_core::model::BlobRef {
-                hash: Blake3Hash::of_bytes(&clip),
-                size: v.len,
-                mime: "video/mp4".into(),
-            };
-            self.store()
-                .put_motion(MotionRecord {
-                    photo: m.photo,
-                    video,
-                    duration_ms: v.duration_ms,
-                    source: MotionSource::Embedded,
-                    made_by: self.device(),
-                    hlc: shoebox_core::hlc::Hlc::GENESIS,
-                })
-                .await?;
-            self.inner
-                .clip_extents
-                .lock()
-                .unwrap()
-                .insert(m.photo, (v.offset, v.len));
-            repaired += 1;
+            repaired +=
+                usize::from(self.store().motion(&m.photo).await?.map(|x| x.video.hash) != before);
         }
         if all_done {
             let _ = std::fs::write(&marker, b"2");
@@ -282,5 +252,48 @@ impl<L: LibraryStore> LibraryNode<L> {
             );
         }
         Ok(repaired)
+    }
+
+    /// Look for the camera's video in the original of `rec`; if it is not the clip `m` names,
+    /// replace the record. The clip's place in the original once it is right, `None` when the
+    /// original cannot be read or holds none. Once per photo per run.
+    async fn repair_one(&self, m: &MotionRecord, rec: &PhotoRecord) -> Result<Option<(u64, u64)>> {
+        if !self.inner.clip_checked.lock().unwrap().insert(m.photo) {
+            return Ok(None);
+        }
+        let blobs = self.node().blobs();
+        let Ok(bytes) = blobs.get(&rec.original.hash).await else {
+            return Ok(None);
+        };
+        let found =
+            tokio::task::spawn_blocking(move || shoebox_media::find_embedded_video(&bytes)).await?;
+        let Some(v) = found else { return Ok(None) };
+        if v.len == m.video.size {
+            return Ok(Some((v.offset, v.len)));
+        }
+        let handle = BlobHandle {
+            hash: rec.original.hash,
+            offset: v.offset,
+            len: Some(v.len),
+        };
+        let Ok(clip) = blobs.read_handle(&handle, 0..u64::MAX).await else {
+            return Ok(None);
+        };
+        let video = shoebox_core::model::BlobRef {
+            hash: Blake3Hash::of_bytes(&clip),
+            size: v.len,
+            mime: "video/mp4".into(),
+        };
+        self.store()
+            .put_motion(MotionRecord {
+                photo: m.photo,
+                video,
+                duration_ms: v.duration_ms,
+                source: MotionSource::Embedded,
+                made_by: self.device(),
+                hlc: shoebox_core::hlc::Hlc::GENESIS,
+            })
+            .await?;
+        Ok(Some((v.offset, v.len)))
     }
 }

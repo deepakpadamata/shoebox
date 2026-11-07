@@ -47,8 +47,9 @@ fn config(env: &Env) -> Result<Config> {
         c.share_daily_bytes = n * GIB;
     }
     c.open_registration = var(env, "CLOSED").is_none_or(|v| v != "true");
-    c.allowed_libraries = shoebox_cloud::parse_library_ids(&var(env, "LIBRARIES").unwrap_or_default())
-        .map_err(|e| worker::Error::RustError(format!("LIBRARIES: {e}")))?;
+    c.allowed_libraries =
+        shoebox_cloud::parse_library_ids(&var(env, "LIBRARIES").unwrap_or_default())
+            .map_err(|e| worker::Error::RustError(format!("LIBRARIES: {e}")))?;
     // The Worker in front puts the caller's address here (from `CF-Connecting-IP`), replacing whatever was sent.
     c.trust_proxy = true;
     c.csp_connect = var(env, "CSP_CONNECT")

@@ -43,6 +43,8 @@ pub(crate) struct Inner<L: LibraryStore> {
     pub(crate) confirmations: Mutex<crate::freeup::Confirmations>,
     /// Where each embedded motion-photo clip sits in its photo's original (found by reading it once).
     pub(crate) clip_extents: Mutex<HashMap<shoebox_core::model::PhotoId, (u64, u64)>>,
+    /// Motion photos whose clip was looked for again this run (`repair_motion_clips`).
+    pub(crate) clip_checked: Mutex<std::collections::HashSet<shoebox_core::model::PhotoId>>,
     pub(crate) notice: Mutex<Option<shoebox_core::identity::EpochNotice>>,
     pub(crate) notice_acked: Mutex<std::collections::HashSet<EndpointId>>,
     pub(crate) invites: Arc<Mutex<crate::pairing::Invites>>,
@@ -107,6 +109,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 notice_acked: Default::default(),
                 confirmations: Mutex::new(crate::freeup::Confirmations::load(&data_dir)),
                 clip_extents: Mutex::new(HashMap::new()),
+                clip_checked: Mutex::new(std::collections::HashSet::new()),
                 recovery_approval: Mutex::new(None),
                 admin_watch: Mutex::new(crate::identity::AdminWatch::load(&data_dir)),
                 epoch_lock: tokio::sync::Mutex::new(()),

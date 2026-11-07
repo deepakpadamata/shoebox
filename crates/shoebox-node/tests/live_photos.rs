@@ -377,3 +377,73 @@ async fn a_clip_that_is_a_photo_of_its_own_is_not_released() {
     assert!(r.ln.release_embedded_clips().await.unwrap().is_empty());
     assert!(r.ln.node().blobs().kept(&clip_hash).await.unwrap());
 }
+
+/// A Samsung file of a newer camera: the picture, a short silent clip, Samsung's tag, then the
+/// video the camera shows (here: the sample .mov, which differs in length from the .mp4).
+fn samsung_photo(dir: &Path, name: &str) -> (PathBuf, Vec<u8>, Vec<u8>) {
+    std::fs::create_dir_all(dir).unwrap();
+    let first = std::fs::read(samples().join("clip.mp4")).unwrap();
+    let real = std::fs::read(samples().join("clip.mov")).unwrap();
+    let mut file = std::fs::read(samples().join("photo-gps.jpg")).unwrap();
+    file.extend(&first);
+    file.extend(b"MotionPhoto_Data");
+    file.extend(&real);
+    let path = dir.join(name);
+    std::fs::write(&path, &file).unwrap();
+    (path, first, real)
+}
+
+#[tokio::test]
+async fn a_samsung_photo_plays_the_video_after_its_tag() {
+    let r = rig().await;
+    let dir = r.dir.path().join("samsung");
+    let (_, first, real) = samsung_photo(&dir, "20261031_221440.jpg");
+    assert_ne!(first.len(), real.len(), "the two clips differ in length");
+    let report =
+        r.ln.import_paths(&[dir], ImportOptions::default())
+            .await
+            .unwrap();
+    let id = report.imported[0];
+    let m = r.ln.store().motion(&id).await.unwrap().unwrap();
+    assert_eq!(m.video.size as usize, real.len());
+    assert_eq!(&r.ln.clip_bytes(&id).await.unwrap().unwrap()[..], &real[..]);
+}
+
+#[tokio::test]
+async fn a_record_that_names_the_clip_ahead_of_the_tag_is_corrected() {
+    let r = rig().await;
+    let dir = r.dir.path().join("samsung-old");
+    let (_, first, real) = samsung_photo(&dir, "20261031_221441.jpg");
+    let report =
+        r.ln.import_paths(&[dir], ImportOptions::default())
+            .await
+            .unwrap();
+    let id = report.imported[0];
+    // What an older build wrote: the record names the first clip.
+    r.ln.store()
+        .put_motion(MotionRecord {
+            photo: id,
+            video: BlobRef {
+                hash: Blake3Hash::of_bytes(&first),
+                size: first.len() as u64,
+                mime: "video/mp4".into(),
+            },
+            duration_ms: 600,
+            source: MotionSource::Embedded,
+            made_by: r.ln.device(),
+            hlc: shoebox_core::hlc::Hlc::GENESIS,
+        })
+        .await
+        .unwrap();
+    assert!(
+        r.ln.clip_source(&id).await.unwrap().is_none(),
+        "the old record's clip is not found any more"
+    );
+
+    assert_eq!(r.ln.repair_motion_clips().await.unwrap(), 1);
+    let m = r.ln.store().motion(&id).await.unwrap().unwrap();
+    assert_eq!(m.video.hash, Blake3Hash::of_bytes(&real));
+    assert_eq!(&r.ln.clip_bytes(&id).await.unwrap().unwrap()[..], &real[..]);
+    // Looked at once; the marker says the whole library has been.
+    assert_eq!(r.ln.repair_motion_clips().await.unwrap(), 0);
+}

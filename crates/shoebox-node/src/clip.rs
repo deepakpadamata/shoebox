@@ -194,4 +194,93 @@ impl<L: LibraryStore> LibraryNode<L> {
         );
         Ok(released)
     }
+    /// Look again, in each embedded-clip photo's original, for the video the camera shows. Builds
+    /// before the Samsung fix took the first MP4 after the picture, which in newer Samsung files
+    /// is a 0.6 s silent clip ahead of the real one; their records name that clip. Where the
+    /// original now gives another clip, the record is replaced by one that names it. A few per
+    /// pass (each reads a whole original); once every record has been looked at, a marker file
+    /// in the data folder says so and later runs skip it.
+    pub async fn repair_motion_clips(&self) -> Result<usize> {
+        const BATCH: usize = 30;
+        let marker = self.node().config().data_dir.join("motion-clips-v2");
+        if marker.exists() {
+            return Ok(0);
+        }
+        let mut repaired = 0;
+        let mut looked = 0;
+        let mut all_done = true;
+        for m in self.store().motions().await? {
+            if m.source != MotionSource::Embedded
+                || self.inner.clip_checked.lock().unwrap().contains(&m.photo)
+            {
+                continue;
+            }
+            if looked >= BATCH {
+                all_done = false;
+                break;
+            }
+            looked += 1;
+            self.inner.clip_checked.lock().unwrap().insert(m.photo);
+            let Some(rec) = self.store().photo(&m.photo).await? else {
+                continue;
+            };
+            let blobs = self.node().blobs();
+            if !blobs.kept(&rec.original.hash).await? {
+                continue; // another device's photo: its own device repairs it
+            }
+            let Ok(bytes) = blobs.get(&rec.original.hash).await else {
+                continue;
+            };
+            let found =
+                tokio::task::spawn_blocking(move || shoebox_media::find_embedded_video(&bytes))
+                    .await?;
+            let Some(v) = found else { continue };
+            if v.len == m.video.size {
+                self.inner
+                    .clip_extents
+                    .lock()
+                    .unwrap()
+                    .insert(m.photo, (v.offset, v.len));
+                continue;
+            }
+            let handle = BlobHandle {
+                hash: rec.original.hash,
+                offset: v.offset,
+                len: Some(v.len),
+            };
+            let Ok(clip) = blobs.read_handle(&handle, 0..u64::MAX).await else {
+                continue;
+            };
+            let video = shoebox_core::model::BlobRef {
+                hash: Blake3Hash::of_bytes(&clip),
+                size: v.len,
+                mime: "video/mp4".into(),
+            };
+            self.store()
+                .put_motion(MotionRecord {
+                    photo: m.photo,
+                    video,
+                    duration_ms: v.duration_ms,
+                    source: MotionSource::Embedded,
+                    made_by: self.device(),
+                    hlc: shoebox_core::hlc::Hlc::GENESIS,
+                })
+                .await?;
+            self.inner
+                .clip_extents
+                .lock()
+                .unwrap()
+                .insert(m.photo, (v.offset, v.len));
+            repaired += 1;
+        }
+        if all_done {
+            let _ = std::fs::write(&marker, b"2");
+        }
+        if repaired > 0 {
+            debug!(
+                "replaced the video of {repaired} motion photo(s) with the one the camera shows"
+            );
+        }
+        Ok(repaired)
+    }
 }

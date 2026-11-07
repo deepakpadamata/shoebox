@@ -1,7 +1,7 @@
 <script lang="ts">
   // Full-size viewer (M3-08/09): the preview shows at once, the original replaces it when it is
   // here or once fetched on demand; the info panel says where every copy is stored.
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { api, blobUrl, motionSrc, playsNatively, videoUrl, type FaceOut, type PhotoDetail, type PhotoSummary } from '../lib/api';
   import FaceCrop from '../components/FaceCrop.svelte';
   import { bytes, dateTime, plural } from '../lib/format';
@@ -48,15 +48,19 @@
 
   $effect(() => {
     const id = photo.id;
-    detail = null;
-    originalReady = false;
-    stopLive();
-    liveFetching = false;
-    starting = false;
-    unplayable = false;
-    fetching = false;
-    zoom = 1;
-    pullY = 0;
+    // Only the photo is a dependency. `stopLive` reads `liveSrc`: tracked, setting it to play a
+    // Live Photo would run this again and stop the video the moment it started.
+    untrack(() => {
+      detail = null;
+      originalReady = false;
+      stopLive();
+      liveFetching = false;
+      starting = false;
+      unplayable = false;
+      fetching = false;
+      zoom = 1;
+      pullY = 0;
+    });
     api.photoDetail(id).then((d) => {
       if (photo.id === id) {
         detail = d;

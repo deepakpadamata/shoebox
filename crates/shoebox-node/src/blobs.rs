@@ -49,6 +49,73 @@ pub enum ImportMode {
     Reference,
 }
 
+/// Where to read a piece of bytes from: a whole blob (`<hash>`), or part of one (`<hash>@<offset>:<len>`),
+/// such as the motion-photo clip inside a photo's original. Plain text so a player on the other
+/// side of JNI can pass it back to [`BlobStore::read_handle`] as it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BlobHandle {
+    pub hash: Blake3Hash,
+    pub offset: u64,
+    /// `None`: to the end of the blob.
+    pub len: Option<u64>,
+}
+
+impl BlobHandle {
+    pub fn whole(hash: Blake3Hash) -> Self {
+        Self {
+            hash,
+            offset: 0,
+            len: None,
+        }
+    }
+}
+
+impl std::fmt::Display for BlobHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.len {
+            None if self.offset == 0 => write!(f, "{}", self.hash),
+            len => write!(
+                f,
+                "{}@{}:{}",
+                self.hash,
+                self.offset,
+                len.map_or(String::new(), |l| l.to_string())
+            ),
+        }
+    }
+}
+
+impl std::str::FromStr for BlobHandle {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self> {
+        let (hash, part) = match s.split_once('@') {
+            Some((h, p)) => (h, Some(p)),
+            None => (s, None),
+        };
+        let bytes: [u8; 32] = ::hex::decode(hash.trim())
+            .ok()
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| anyhow!("not a blob handle: {s}"))?;
+        let (offset, len) = match part {
+            None => (0, None),
+            Some(p) => {
+                let (o, l) = p
+                    .split_once(':')
+                    .ok_or_else(|| anyhow!("not a blob handle: {s}"))?;
+                (
+                    o.parse()?,
+                    if l.is_empty() { None } else { Some(l.parse()?) },
+                )
+            }
+        };
+        Ok(Self {
+            hash: Blake3Hash(bytes),
+            offset,
+            len,
+        })
+    }
+}
+
 fn hex(h: &Blake3Hash) -> String {
     h.to_string()
 }
@@ -215,6 +282,32 @@ impl BlobStore {
             .await
             .map(Bytes::from)
             .map_err(|e| anyhow!("reading {hash}: {e}"))
+    }
+
+    /// Size of what `handle` names (the part's length, once it lies inside the stored blob).
+    pub async fn handle_size(&self, handle: &BlobHandle) -> Result<Option<u64>> {
+        let Some(total) = self.size(&handle.hash).await? else {
+            return Ok(None);
+        };
+        let len = handle.len.unwrap_or(total.saturating_sub(handle.offset));
+        Ok((handle.offset.saturating_add(len) <= total).then_some(len))
+    }
+
+    /// Bytes `range` of what `handle` names (clamped to its size).
+    pub async fn read_handle(&self, handle: &BlobHandle, range: Range<u64>) -> Result<Bytes> {
+        let len = self
+            .handle_size(handle)
+            .await?
+            .with_context(|| format!("{} is not stored", handle.hash))?;
+        let end = range.end.min(len);
+        if range.start >= end {
+            return Ok(Bytes::new());
+        }
+        self.open_range(
+            &handle.hash,
+            handle.offset + range.start..handle.offset + end,
+        )
+        .await
     }
 
     /// Add a protection to a blob that is already stored.

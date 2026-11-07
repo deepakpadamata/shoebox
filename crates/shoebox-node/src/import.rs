@@ -471,8 +471,11 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(true)
     }
 
-    /// Give `photo` the video found inside its file (a Samsung or Google motion photo): the bytes
-    /// are copied out into a blob of their own so a device can fetch and play it without the still.
+    /// Give `photo` the video found inside its file (a Samsung or Google motion photo). The record
+    /// names the clip by hash and size; its bytes stay in the original, which this device holds
+    /// (copied or referenced in place), and are read from there when played (`clip.rs`). Only if
+    /// the original is not held here (it should be: the photo was just ingested) is the clip
+    /// copied out into a blob of its own, so it can still be played.
     async fn attach_embedded(
         &self,
         path: &Path,
@@ -499,7 +502,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         let size = bytes.len() as u64;
         let blobs = self.node().blobs();
         let hash = Blake3Hash::of_bytes(&bytes);
-        if !blobs.has(&hash).await? {
+        if !blobs.kept(&photo).await? && !blobs.has(&hash).await? {
             blobs.add_bytes(bytes, Protection::Library).await?;
             held.push((hash, BlobKind::Motion));
         }
@@ -585,13 +588,24 @@ impl<L: LibraryStore> LibraryNode<L> {
         };
         let (preview, thumb) = match (&r.preview, &r.thumb) {
             (Some(p), Some(t)) => {
-                let ph = blobs
-                    .add_bytes(p.bytes.clone(), Protection::Library)
-                    .await?;
+                // A device that is the whole library and holds this original keeps no preview of
+                // it; the record has its hash and `restore_previews` makes it if another device
+                // joins.
+                let ph = if self.drops_previews()
+                    && shoebox_core::policy::shows_directly(&r.mime)
+                    && self.is_alone().await?
+                {
+                    Blake3Hash::of_bytes(&p.bytes)
+                } else {
+                    let ph = blobs
+                        .add_bytes(p.bytes.clone(), Protection::Library)
+                        .await?;
+                    held.push((ph, BlobKind::Preview));
+                    ph
+                };
                 let th = blobs
                     .add_bytes(t.bytes.clone(), Protection::Library)
                     .await?;
-                held.push((ph, BlobKind::Preview));
                 held.push((th, BlobKind::Thumb));
                 (rendition_ref(p, ph), rendition_ref(t, th))
             }

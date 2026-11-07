@@ -7,6 +7,7 @@ use anyhow::{anyhow, Result};
 use shoebox_core::ids::Blake3Hash;
 use shoebox_core::model::BlobKind;
 use shoebox_core::policy::shows_directly;
+use shoebox_node::BlobHandle;
 use std::sync::Arc;
 
 /// Without a `Range` header at most this much is returned (as a partial response); videos and
@@ -77,14 +78,26 @@ pub async fn serve(
     if kind == "motion" {
         // The video of a Live Photo: served like an original, and "not here" until it is fetched
         // (the viewer asks with `fetch_now`, as it does for an original).
+        // The clip of a motion photo is a part of the photo's original (nothing stored of its
+        // own), or a blob of its own.
         let motion = core
             .motion(&photo)
             .await?
             .ok_or_else(|| anyhow!("this photo has no video"))?;
-        if core.blobs().size(&motion.video.hash).await?.is_none() {
+        let Some(handle) = core.ln().await?.clip_source(&photo).await? else {
             return Ok(None);
-        }
-        return read_blob(core, &motion.video.hash, &motion.video.mime, range).await;
+        };
+        return match read_handle(core, &handle, &motion.video.mime, &motion.video.hash, range).await
+        {
+            Err(e) if handle.hash != motion.video.hash => {
+                // The clip is read from a gallery file that may be gone: sort that out as for
+                // the original itself, and report the clip as not here.
+                tracing::warn!("reading the video of {photo}: {e:#}");
+                core.original_unreadable(&handle.hash).await?;
+                Ok(None)
+            }
+            other => other,
+        };
     }
     let (mut blob, mut bk) = match kind {
         "thumb" => (&rec.thumb, BlobKind::Thumb),
@@ -204,12 +217,23 @@ async fn read_blob(
     mime: &str,
     range: Option<(u64, Option<u64>)>,
 ) -> Result<Option<BlobBytes>> {
-    let Some(total) = core.blobs().size(hash).await? else {
+    read_handle(core, &BlobHandle::whole(*hash), mime, hash, range).await
+}
+
+/// The bytes (or a range) of what `handle` names (a blob, or a part of one), if it is here.
+async fn read_handle(
+    core: &Arc<AppCore>,
+    handle: &BlobHandle,
+    mime: &str,
+    etag: &Blake3Hash,
+    range: Option<(u64, Option<u64>)>,
+) -> Result<Option<BlobBytes>> {
+    let Some(total) = core.blobs().handle_size(handle).await? else {
         return Ok(None);
     };
     let (start, end, partial) = span(range, total);
     let bytes = if end > start {
-        core.blobs().open_range(hash, start..end).await?.to_vec()
+        core.blobs().read_handle(handle, start..end).await?.to_vec()
     } else {
         vec![]
     };
@@ -218,7 +242,7 @@ async fn read_blob(
         content_type: mime.to_string(),
         total,
         range: partial.then_some((start, end.saturating_sub(1))),
-        etag: hash.to_string(),
+        etag: etag.to_string(),
     }))
 }
 

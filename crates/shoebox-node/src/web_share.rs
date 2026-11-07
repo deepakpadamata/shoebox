@@ -945,6 +945,10 @@ impl<L: LibraryStore> LibraryNode<L> {
         let (mut skipped, mut withheld) = (0u32, 0u32);
         for p in batch {
             let is_video = p.original.mime.starts_with("video/");
+            // A device that keeps no preview next to its original makes it again for the link.
+            if !is_video && !blobs.has(&p.preview.hash).await? {
+                let _ = self.ensure_preview(p).await;
+            }
             // Thumbnails and previews are on every device once it has synced; one that is not yet is skipped,
             // and the link says how many.
             if !(blobs.has(&p.thumb.hash).await? && blobs.has(&p.preview.hash).await?) && !is_video
@@ -988,7 +992,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 }
             }
             let motion = match self.store().motion(&p.id).await? {
-                Some(m) if m.video.size <= MAX_MOTION && blobs.has(&m.video.hash).await? => {
+                Some(m) if m.video.size <= MAX_MOTION && self.clip_available(&p.id).await? => {
                     // A motion photo's clip is stripped like any original.
                     self.stage_motion(s, p, &m.video.hash).await?
                 }
@@ -1068,7 +1072,18 @@ impl<L: LibraryStore> LibraryNode<L> {
         p: &PhotoRecord,
         hash: &Blake3Hash,
     ) -> Result<Option<Staged>> {
-        let _ = p;
+        // A clip read from the photo's original is staged from memory.
+        if !self.node().blobs().has(hash).await? {
+            let Some(bytes) = self.clip_bytes(&p.id).await? else {
+                return Ok(None);
+            };
+            return match shoebox_media::strip_location(&bytes) {
+                Ok(stripped) => Ok(Some(
+                    self.stage(s, Plain::Memory(stripped.bytes), false).await?,
+                )),
+                Err(_) => Ok(None),
+            };
+        }
         self.stage_stripped(s, hash, true).await
     }
 

@@ -299,6 +299,9 @@ impl AppCore {
 
     /// Turn people on or off for the whole library.
     pub async fn set_people(&self, on: bool) -> Result<()> {
-        self.ln().await?.set_people(on).await
+        let ln = self.ln().await?;
+        ln.set_people(on).await?;
+        self.remove_unused_models(&ln).await;
+        Ok(())
     }
 }

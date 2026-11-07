@@ -11,7 +11,7 @@ use crate::config::NodeConfig;
 use crate::library_node::LibraryNode;
 use anyhow::{anyhow, bail, Result};
 use shoebox_core::ids::{Blake3Hash, EndpointId, Timestamp};
-use shoebox_core::model::{BlobKind, BlobRef, MotionRecord, PhotoId, PhotoRecord};
+use shoebox_core::model::{BlobKind, BlobRef, MotionRecord, MotionSource, PhotoId, PhotoRecord};
 use shoebox_core::policy::{
     fetch_plan, motion_plan, queue_order, rank_holders, Candidate, PathQuality, PlanContext,
     QueuedFetch,
@@ -219,8 +219,10 @@ impl<L: LibraryStore> LibraryNode<L> {
                 kept_favorite: config.keep_favorites && rec.favorite.value,
                 holds_original: self.node().blobs().kept(&rec.original.hash).await?,
             };
+            // An embedded clip is part of the original: wanted with it, never fetched on its own.
             let video = motions
                 .get(&rec.id)
+                .filter(|m| m.source != MotionSource::Embedded)
                 .map(|m| motion_plan(role, m, &ctx))
                 .unwrap_or_default();
             for item in fetch_plan(role, &rec, &ctx).into_iter().chain(video) {
@@ -331,11 +333,37 @@ impl<L: LibraryStore> LibraryNode<L> {
             BlobKind::Preview => rec.preview.clone(),
             BlobKind::Thumb => rec.thumb.clone(),
             BlobKind::Motion => {
-                self.store()
+                let m = self
+                    .store()
                     .motion(photo)
                     .await?
-                    .ok_or_else(|| anyhow!("photo {photo} has no video"))?
-                    .video
+                    .ok_or_else(|| anyhow!("photo {photo} has no video"))?;
+                if m.source == MotionSource::Embedded {
+                    // The clip is in the original: readable here, or came with the original.
+                    if self.clip_source(photo).await?.is_some() {
+                        return Ok(FetchSource {
+                            device: self.device(),
+                        });
+                    }
+                    // A device that still stores the clip from before serves it as a blob (a
+                    // few MB); otherwise the original is fetched and the clip read from it.
+                    let me = self.device();
+                    let stored_elsewhere = self
+                        .store()
+                        .holders(&m.video.hash)
+                        .await?
+                        .iter()
+                        .any(|h| h.kind == BlobKind::Motion && h.device != me);
+                    if !stored_elsewhere {
+                        let source = Box::pin(self.fetch_now(photo, BlobKind::Original)).await?;
+                        anyhow::ensure!(
+                            self.clip_source(photo).await?.is_some(),
+                            "the video is not in the original of {photo}"
+                        );
+                        return Ok(source);
+                    }
+                }
+                m.video
             }
             BlobKind::Index => bail!("index shards are not blobs of a photo"),
         };

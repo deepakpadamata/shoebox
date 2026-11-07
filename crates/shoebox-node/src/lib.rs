@@ -3,6 +3,7 @@
 mod activity;
 mod addr;
 mod blobs;
+mod clip;
 mod compact;
 mod config;
 mod doc_digest;
@@ -26,6 +27,7 @@ mod pairing;
 mod people;
 mod places;
 mod presence;
+mod previews;
 mod recover;
 mod rotation;
 mod search;
@@ -40,7 +42,7 @@ pub mod web_share;
 
 pub use activity::Activity;
 pub use addr::{from_endpoint_addr, from_iroh_id, to_endpoint_addr, to_iroh_id};
-pub use blobs::{BlobStore, ImportMode, Protection};
+pub use blobs::{BlobHandle, BlobStore, ImportMode, Protection};
 pub use compact::CompactReport;
 pub use config::{NodeConfig, RelaySetting};
 pub use doc_digest::{doc_digest, DOC_DIGEST_ALPN};

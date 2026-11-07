@@ -22,7 +22,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 
 pub use image::{DynamicImage, RgbImage};
-pub use motion::EmbeddedVideo;
+pub use motion::{find_embedded as find_embedded_video, EmbeddedVideo};
 pub use render::{set_platform_decoder, PlatformDecoder, PREVIEW_LONG_EDGE, THUMB_SIZE};
 pub use strip::{strip_location, StripError, Stripped};
 
@@ -39,6 +39,14 @@ pub fn decode_upright(bytes: &[u8], max_edge: u32) -> Result<image::DynamicImage
 pub fn face_crop(bytes: &[u8], rect: [f32; 4], size: u32) -> Result<Rendition, AnalyzeError> {
     let (image, orientation) = decode_with_orientation(bytes)?;
     render::face_crop(image, orientation, rect, size)
+}
+
+/// The preview of a still picture, made again from its original: the same bytes the import made
+/// (same decoder, same resize, same encoder), so the preview's hash in the library still matches.
+pub fn preview_jpeg(bytes: &[u8]) -> Result<Vec<u8>, AnalyzeError> {
+    let (image, orientation) = decode_with_orientation(bytes)?;
+    let (_, preview, _) = render::renditions(image, orientation)?;
+    Ok(preview.bytes)
 }
 
 fn decode_with_orientation(bytes: &[u8]) -> Result<(image::DynamicImage, u16), AnalyzeError> {

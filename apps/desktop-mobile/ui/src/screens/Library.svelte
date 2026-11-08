@@ -1,15 +1,16 @@
 <script lang="ts">
+  import Icon from '../components/Icon.svelte';
   // The timeline (M3-06): photos grouped by day, virtualised so 100k photos scroll smoothly,
   // with multi-select and the actions of mockup 2b.
   import { untrack } from 'svelte';
   import { api, type PageCursor, type PhotoPage, type PhotoSummary, type SearchPage } from '../lib/api';
   import { tzOffset } from '../lib/search';
-  import { dayLabel, plural } from '../lib/format';
-  import { buildLayout, visibleRows } from '../lib/timeline';
+  import { dayLabel, monthLabel, plural } from '../lib/format';
+  import { buildLayout, packedLabel, visibleRows } from '../lib/timeline';
   import { longPressDrag, pinch, pullRefresh, stepDensity } from '../lib/gestures';
   import { refreshEverything } from '../lib/refresh';
   import { viewport as media } from '../lib/viewport.svelte';
-  import { app, fail, toast } from '../lib/store.svelte';
+  import { app, fail, refreshAlbums, toast } from '../lib/store.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
   import { go } from '../lib/route.svelte';
   import Tile from '../components/Tile.svelte';
@@ -17,7 +18,6 @@
   import Button from '../components/Button.svelte';
   import Sheet from '../components/Sheet.svelte';
   import ShareSheet from '../components/ShareSheet.svelte';
-  import WebLinkSheet from '../components/WebLinkSheet.svelte';
   import Viewer from './Viewer.svelte';
 
   interface Props {
@@ -32,32 +32,6 @@
   let { source, album, photo, query = '', onsearch }: Props = $props();
   // Search results ranked by relevance have no day headers.
   let ranked = $state(false);
-
-  // An album of your own can be shared: a shared album with its photos, kept linked (A-097).
-  let sharedAs = $state<string | null>(null);
-  let shareAsk = $state(0);
-  let sharing = $state(false);
-  let linkSheet = $state(false);
-  $effect(() => {
-    if (source !== 'album' || !album) return;
-    app.version;
-    untrack(() => { api.albums().then((all) => (sharedAs = all.find((a) => a.id === album)?.shared_as ?? null)).catch(() => {}); });
-  });
-  async function startShare() {
-    try {
-      const check = await api.albumShareCheck(album!);
-      if (check.with_location > 0) shareAsk = check.with_location;
-      else await share('remove');
-    } catch (e) { fail(e); }
-  }
-  async function share(location: string) {
-    sharing = true;
-    try {
-      const s = await api.albumShare(album!, location);
-      shareAsk = 0;
-      go(`shared/${s.id}`);
-    } catch (e) { fail(e); } finally { sharing = false; }
-  }
 
   const GAP = 2;
   const HEAD = 44;
@@ -98,9 +72,21 @@
   let density = $state(Number(localStorage.getItem('density')) || 0);
   const minTile = $derived(density || (media.mobile ? 96 : 140));
   // Pinch to change the grid density; the choice is remembered.
+  // Past the smallest tiles the timeline groups by month (U1-18); pinching in leaves it again.
+  let monthView = $state(localStorage.getItem('monthView') === '1');
   function setDensity(scale: number) {
-    density = stepDensity(minTile, scale, DENSITIES);
+    if (monthView) {
+      if (scale > 1) setMonthView(false);
+      return;
+    }
+    const next = stepDensity(minTile, scale, DENSITIES);
+    if (scale < 1 && next === minTile && minTile <= DENSITIES[0]) { setMonthView(true); return; }
+    density = next;
     localStorage.setItem('density', String(density));
+  }
+  function setMonthView(on: boolean) {
+    monthView = on;
+    try { localStorage.setItem('monthView', on ? '1' : '0'); } catch { /* storage may be blocked */ }
   }
   // Long-press a tile, then drag across others to select them (mockup 2b).
   function indexOf(el: Element | null): number {
@@ -146,7 +132,7 @@
   });
   const firstSync = $derived(source === 'all' && wantThumbs.length > 0 && missingThumbs > 0 && app.peersOnline > 0);
 
-  const layout = $derived(buildLayout(items, { width, minTile, gap: GAP, headHeight: HEAD, days: !ranked }));
+  const layout = $derived(buildLayout(items, { width, minTile: monthView ? DENSITIES[0] : minTile, gap: GAP, headHeight: HEAD, days: !ranked, pack: !monthView, group: monthView ? 'month' : 'day' }));
   const range = $derived(visibleRows(layout, scrollTop, viewport));
   const shown = $derived(layout.rows.slice(range[0], range[1]));
   // The date scroller, once there is more than a couple of screens to scroll through.
@@ -306,11 +292,29 @@
   function keydown(e: KeyboardEvent) {
     if (viewing !== null) return;
     if (e.key === 'Escape') selected = [];
-    if ((e.key === 'Delete' || e.key === 'Backspace') && selecting && !(e.target instanceof HTMLInputElement)) removeSelected();
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selecting && !(e.target instanceof HTMLInputElement)) askDelete();
+    if (e.key === 's' && selecting && !(e.target instanceof HTMLInputElement) && !(e.metaKey || e.ctrlKey)) shareSheet = true;
     if ((e.metaKey || e.ctrlKey) && e.key === 'a' && !(e.target instanceof HTMLInputElement)) {
       e.preventDefault();
       selectAll();
     }
+  }
+
+  // ----- selection actions (U1-17) -----
+  let moreOpen = $state(false);
+  let confirmOpen = $state(false);
+  let ctx = $state<{ x: number; y: number } | null>(null);
+  const deviceWords = $derived((app.backup_status?.devices ?? 0) > 1 ? `all ${app.backup_status!.devices} devices` : 'this device');
+  function askDelete() { if (selected.length) confirmOpen = true; }
+  // Right-click on a computer: the menu acts on the selection, which first takes in the photo
+  // clicked when it is not part of it.
+  function context(i: number, e: MouseEvent) {
+    if (media.mobile) return;
+    e.preventDefault();
+    const id = items[i].id;
+    if (!selectedSet.has(id)) selected = [id];
+    lastClicked = i;
+    ctx = { x: e.clientX, y: e.clientY };
   }
 
   async function removeSelected() {
@@ -350,17 +354,6 @@
 
 <svelte:window onkeydown={keydown} />
 
-{#snippet glyph(name: 'close' | 'share' | 'heart' | 'album' | 'keep' | 'unalbum' | 'trash')}
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    {#if name === 'close'}<path d="M6 6l12 12M18 6L6 18" />
-    {:else if name === 'share'}<path d="M12 3.5v11M8 7.5l4-4 4 4M7 10.5H5.5v9h13v-9H17" />
-    {:else if name === 'heart'}<path class="fill" d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20z" />
-    {:else if name === 'album'}<rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="M12 8v8M8 12h8" />
-    {:else if name === 'keep'}<path d="M12 4v10M7.5 9.5L12 14l4.5-4.5M5 19.5h14" />
-    {:else if name === 'unalbum'}<rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="M8 12h8" />
-    {:else}<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 11v5M14 11v5" />{/if}
-  </svg>
-{/snippet}
 
 <div class="wrap">
   {#if firstSync}
@@ -370,20 +363,6 @@
       <ProgressBar total={wantThumbs.length} segments={[{ value: wantThumbs.length - missingThumbs, tone: 'info' }]} label="Previews downloaded" />
     </div>
   {/if}
-  {#if source === 'album' && album}
-    <div class="sharebar">
-      {#if sharedAs}
-        <span class="grow small">Shared with others. Photos you add here are shared too.</span>
-        <Button size="sm" onclick={() => go(`shared/${sharedAs}`)}>Open shared album</Button>
-        <Button size="sm" onclick={() => (linkSheet = true)}>Share a link</Button>
-      {:else}
-        <span class="grow small muted">Only on your devices.</span>
-        <Button size="sm" disabled={sharing} onclick={startShare}>{sharing ? 'Sharing…' : 'Share this album'}</Button>
-        <Button size="sm" onclick={() => (linkSheet = true)}>Share a link</Button>
-      {/if}
-    </div>
-  {/if}
-
   <div class="body">
   <div class="scroller" id="timeline" class:railed={showRail} bind:this={scroller} bind:clientWidth={width} bind:clientHeight={viewport}
     onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}
@@ -402,17 +381,25 @@
           <li>So do "last summer", "weekends" and "Christmas"</li>
         </ul>
       </div>
+    {:else if items.length === 0 && source === 'all' && (app.importProgress || app.backupProgress)}
+      <!-- The first import is running: say how far it is rather than "No photos yet". -->
+      {@const p = app.importProgress ?? app.backupProgress!}
+      <div class="empty" role="status">
+        <b>Bringing your photos in</b>
+        <span class="muted">{p.done.toLocaleString('en')} of {p.total.toLocaleString('en')}. They show up here as they arrive.</span>
+        <ProgressBar total={p.total} segments={[{ value: p.done, tone: 'info' }]} label="Importing" />
+      </div>
     {:else if items.length === 0}
       <div class="empty">
         <b>{source === 'favorites' ? 'No favorites yet' : source === 'album' ? 'This album is empty' : 'No photos yet'}</b>
-        <span class="muted">{source === 'all' ? 'Bring photos in from a folder, or add another device to start backing up.' : source === 'favorites' ? 'Tap the heart on a photo to find it here quickly.' : 'Select photos in your library and add them here.'}</span>
+        <span class="muted">{source === 'all' ? 'Bring photos in from a folder, or add another device to start backing up.' : source === 'favorites' ? 'Tap the heart on a photo to find it here quickly.' : 'Add photos from the album page, or select photos in Photos and choose Add to album.'}</span>
         {#if source === 'all'}
           <div class="row-flex" style="justify-content:center;margin-top:10px">
             {#if media.mobile}
-              <Button kind="primary" onclick={() => go(app.backup && app.backup.permission !== 'unavailable' ? 'settings' : 'devices')}>{app.backup && app.backup.permission !== 'unavailable' ? 'Turn on camera backup' : 'Add a device'}</Button>
+              <Button kind="primary" onclick={() => go(app.backup && app.backup.permission !== 'unavailable' ? 'settings' : 'backup')}>{app.backup && app.backup.permission !== 'unavailable' ? 'Turn on camera backup' : 'Add a device'}</Button>
             {:else}
               <Button kind="primary" onclick={() => app.importRequest++}>Import photos</Button>
-              <Button onclick={() => go('devices')}>Add a device</Button>
+              <Button onclick={() => go('backup/devices')}>Add a device</Button>
             {/if}
           </div>
         {:else}
@@ -426,10 +413,10 @@
             {@const all = dayIds(row.from, row.count).every((id) => selectedSet.has(id))}
             <div class="head" class:selecting style="top:{row.top}px;height:{row.height}px">
               <!-- Circle and date are one target while selecting; otherwise only the circle is. -->
-              <button class="day" class:all aria-pressed={all} aria-label="Select {dayLabel(row.day)}" title={all ? 'Clear this day' : 'Select this day'}
+              <button class="day" class:all aria-pressed={all} aria-label="Select {row.month ? monthLabel(row.day) : row.days ? packedLabel(row.days) : dayLabel(row.day)}" title={all ? 'Clear this selection' : row.month ? 'Select this month' : row.days ? 'Select these days' : 'Select this day'}
                 onclick={() => toggleDay(row.from, row.count)}>
                 <span class="circle"><svg viewBox="0 0 24 24"><path d="M7 12.5l3.2 3.2L17 9" /></svg></span>
-                <b>{dayLabel(row.day)}</b>
+                <b>{row.month ? monthLabel(row.day) : row.days ? packedLabel(row.days) : dayLabel(row.day)}</b>
               </button>
               <span class="grow"></span>
               <span class="n">{row.count.toLocaleString('en')}</span>
@@ -438,7 +425,7 @@
             <div class="tiles" style="top:{row.top}px;height:{row.height}px;gap:{GAP}px">
               {#each items.slice(row.from, row.to) as p, k (p.id)}
                 <Tile index={row.from + k} id={p.id} size={layout.tile} favorite={p.favorite} video={p.is_video} live={p.live} copies={p.copies} {target}
-                  takenAt={p.taken_at} hasThumb={p.has_thumb} hasPoster={p.has_poster} needsPoster={p.needs_poster} hasOriginal={p.has_original} backedUp={p.backed_up} selected={selectedSet.has(p.id)} {selecting} onclick={(e) => click(row.from + k, e)} />
+                  takenAt={p.taken_at} hasThumb={p.has_thumb} hasPoster={p.has_poster} needsPoster={p.needs_poster} hasOriginal={p.has_original} backedUp={p.backed_up} selected={selectedSet.has(p.id)} {selecting} onclick={(e) => click(row.from + k, e)} oncontextmenu={(e) => context(row.from + k, e)} />
               {/each}
             </div>
           {/if}
@@ -449,22 +436,17 @@
     {/if}
   </div>
   {#if selecting}
-    <!-- Floats over the grid, so starting a selection moves nothing under the finger. -->
-    <div class="selbar" role="toolbar" aria-label="{selected.length} selected">
-      <button class="ic" title="Clear selection" aria-label="Clear selection" onclick={() => (selected = [])}>{@render glyph('close')}</button>
-      <b class="count">{selected.length.toLocaleString('en')}</b>
-      <span class="sep"></span>
-      <button class="ic" bind:this={shareButton} title="Share" aria-label="Share" onclick={() => (shareSheet = true)}>{@render glyph('share')}</button>
-      <button class="ic" class:on={allFavorite} title={allFavorite ? 'Unfavorite' : 'Favorite'} aria-label={allFavorite ? 'Unfavorite' : 'Favorite'}
-        onclick={() => act(() => api.setFavorite(selected, !allFavorite))}>{@render glyph('heart')}</button>
-      <button class="ic" title="Add to album" aria-label="Add to album" onclick={openAlbumSheet}>{@render glyph('album')}</button>
-      <button class="ic" title="Keep on this device" aria-label="Keep on this device"
-        onclick={() => act(() => Promise.all(selected.map((id) => api.pinOriginal(id, true))), 'Originals will be kept on this device')}>{@render glyph('keep')}</button>
-      {#if source === 'album' && album}
-        <button class="ic" title="Remove from album" aria-label="Remove from album"
-          onclick={() => act(() => api.albumRemove(album, selected), 'Removed from the album').then(() => (selected = []))}>{@render glyph('unalbum')}</button>
-      {/if}
-      <button class="ic danger" title="Delete from all devices" aria-label="Delete from all devices" onclick={removeSelected}>{@render glyph('trash')}</button>
+    <!-- Labelled actions, Delete last and red (U1-17). On a phone the bar takes the place of the
+         tab bar; on a computer it is a toolbar over the grid. -->
+    <div class="selbar" class:phone={media.mobile} role="toolbar" aria-label="{selected.length} selected">
+      <button class="clear" title="Clear selection (Esc)" aria-label="Clear selection" onclick={() => (selected = [])}><Icon name="close" size={20} /></button>
+      <b class="count">{selected.length.toLocaleString('en')} selected</b>
+      <span class="grow"></span>
+      <button class="act" bind:this={shareButton} title="Share (S)" onclick={() => (shareSheet = true)}><Icon name="share" size={22} /><span>Share</span></button>
+      <button class="act" title="Add to album" onclick={openAlbumSheet}><Icon name="addalbum" size={22} /><span>Add to album</span></button>
+      <button class="act" class:on={allFavorite} title={allFavorite ? 'Unfavorite' : 'Favorite'} onclick={() => act(() => api.setFavorite(selected, !allFavorite))}><Icon name="heart" size={22} fill={allFavorite} /><span>{allFavorite ? 'Unfavorite' : 'Favorite'}</span></button>
+      <button class="act" title="More" onclick={() => (moreOpen = true)}><Icon name="more" size={22} /><span>More</span></button>
+      <button class="act danger" title="Delete from all devices (Delete)" onclick={askDelete}><Icon name="trash" size={22} /><span>Delete</span></button>
     </div>
   {/if}
   {#if showRail}
@@ -477,19 +459,40 @@
   <Viewer {items} index={viewing} onclose={() => (viewing = null)} onmove={jump} onsimilar={showSimilar} />
 {/if}
 
-<Sheet open={shareAsk > 0} title="Share the location?" onclose={() => (shareAsk = 0)} width={420}>
-  <div class="stack">
-    <p>{plural(shareAsk, 'photo')} in this album {shareAsk === 1 ? 'was' : 'were'} taken at a known place. People you share it with would see where. Your choice also applies to photos you add to the album later.</p>
-    <Button kind="primary" block disabled={sharing} onclick={() => share('remove')}>Remove the location</Button>
-    <Button block disabled={sharing} onclick={() => share('keep')}>Keep the location</Button>
-  </div>
-</Sheet>
-
 <ShareSheet open={shareSheet} ids={selected} anchor={() => shareButton?.getBoundingClientRect()} onclose={() => (shareSheet = false)}
   ondone={() => { shareSheet = false; selected = []; }} />
 
-{#if source === 'album' && album}
-  <WebLinkSheet open={linkSheet} {album} onclose={() => (linkSheet = false)} />
+<Sheet open={moreOpen} title="{plural(selected.length, 'photo')} selected" onclose={() => (moreOpen = false)} width={340}>
+  <div class="menu">
+    {#if app.state?.role !== 'keeper'}<button onclick={() => { moreOpen = false; act(() => Promise.all(selected.map((id) => api.pinOriginal(id, true))), `Kept on ${media.mobile ? 'this phone' : 'this device'}`); }}><Icon name="keep" size={20} /> Keep on {media.mobile ? 'this phone' : 'this device'}</button>{/if}
+    {#if source === 'album' && album}
+      <button onclick={() => { moreOpen = false; act(() => api.albumRemove(album, selected), 'Removed from the album').then(() => (selected = [])); }}><Icon name="unalbum" size={20} /> Remove from album</button>
+      {#if selected.length === 1}<button onclick={() => { moreOpen = false; act(() => api.setAlbumCover(album, selected[0]), 'Cover changed').then(() => { selected = []; refreshAlbums(); }); }}><Icon name="photos" size={20} /> Make cover</button>{/if}
+    {/if}
+    {#if selected.length === 1}<button onclick={() => { moreOpen = false; showSimilar(selected[0]); }}><Icon name="search" size={20} /> Find similar</button>{/if}
+  </div>
+</Sheet>
+
+<Sheet open={confirmOpen} title="Delete {plural(selected.length, 'photo')}?" onclose={() => (confirmOpen = false)} width={400}>
+  <div class="stack">
+    <p>{selected.length === 1 ? 'This photo' : `These ${selected.length.toLocaleString('en')} photos`} will be deleted from {deviceWords}. {selected.length === 1 ? 'It stays' : 'They stay'} in Recently Deleted for 30 days, then {selected.length === 1 ? 'goes' : 'go'} for good.</p>
+    <Button kind="danger" block onclick={() => { confirmOpen = false; removeSelected(); }}>Delete {plural(selected.length, 'photo')}</Button>
+    <Button block onclick={() => (confirmOpen = false)}>Cancel</Button>
+  </div>
+</Sheet>
+
+{#if ctx}
+  <div class="ctxscrim" role="presentation" onclick={() => (ctx = null)} oncontextmenu={(e) => { e.preventDefault(); ctx = null; }}></div>
+  <div class="ctx" role="menu" style="left:{Math.min(ctx.x, innerWidth - 220)}px; top:{Math.min(ctx.y, innerHeight - 300)}px">
+    <button role="menuitem" onclick={() => { ctx = null; shareSheet = true; }}>Share…</button>
+    <button role="menuitem" onclick={() => { ctx = null; openAlbumSheet(); }}>Add to album…</button>
+    <button role="menuitem" onclick={() => { ctx = null; act(() => api.setFavorite(selected, !allFavorite)); }}>{allFavorite ? 'Unfavorite' : 'Favorite'}</button>
+    {#if app.state?.role !== 'keeper'}<button role="menuitem" onclick={() => { ctx = null; act(() => Promise.all(selected.map((id) => api.pinOriginal(id, true))), 'Kept on this device'); }}>Keep on this device</button>{/if}
+    {#if source === 'album' && album}<button role="menuitem" onclick={() => { ctx = null; act(() => api.albumRemove(album, selected), 'Removed from the album').then(() => (selected = [])); }}>Remove from album</button>{/if}
+    {#if selected.length === 1}<button role="menuitem" onclick={() => { const id = selected[0]; ctx = null; showSimilar(id); }}>Find similar</button>{/if}
+    <hr />
+    <button role="menuitem" class="danger" onclick={() => { ctx = null; askDelete(); }}>Delete…</button>
+  </div>
 {/if}
 
 <Sheet open={albumSheet} title="Add to album" onclose={() => (albumSheet = false)} width={380}>
@@ -506,17 +509,30 @@
 
 <style>
   .wrap { height: 100%; display: flex; flex-direction: column; min-height: 0; }
-  .sharebar { display: flex; gap: 8px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line); }
-  .selbar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 2px;
-    padding: 4px 6px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
-  .selbar .count { min-width: 22px; padding: 0 6px 0 2px; font-size: 14px; font-variant-numeric: tabular-nums; }
-  .selbar .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
-  .ic { width: 40px; height: 40px; border: 0; border-radius: 12px; background: transparent; color: var(--ink); display: grid; place-items: center; cursor: pointer; padding: 0; }
-  .ic:hover { background: var(--surface-2); }
-  .ic svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-  .ic.on { color: var(--accent); }
-  .ic.on .fill { fill: currentColor; }
-  .ic.danger { color: var(--risk); }
+  .selbar { position: absolute; left: 12px; right: 12px; top: 8px; z-index: 6; display: flex; align-items: center; gap: 2px;
+    padding: 4px 8px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .selbar.phone { position: fixed; left: 0; right: 0; top: auto; bottom: 0; border-radius: 0; border-width: 1px 0 0; box-shadow: none; padding: 6px 4px calc(6px + var(--safe-bottom)); z-index: 25; }
+  .selbar .count { padding: 0 8px; font-size: var(--t-sm); white-space: nowrap; }
+  .selbar.phone .count { display: none; }
+  .selbar.phone .clear { display: none; }
+  .selbar.phone .grow { display: none; }
+  .selbar.phone .act { flex: 1; }
+  .grow { flex: 1; }
+  .clear { width: 36px; height: 36px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); display: grid; place-items: center; cursor: pointer; }
+  .act { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: var(--tap); min-height: var(--tap); padding: 2px 8px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font: inherit; font-size: var(--t-xs); cursor: pointer; }
+  .selbar:not(.phone) .act { flex-direction: row; gap: 6px; min-height: 36px; font-size: var(--t-sm); }
+  .act:hover, .clear:hover { background: var(--surface-2); }
+  .act.on { color: var(--accent); }
+  .act.danger { color: var(--risk); }
+  .ctxscrim { position: fixed; inset: 0; z-index: 49; }
+  .ctx { position: fixed; z-index: 50; min-width: 200px; padding: 5px; display: grid; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+  .ctx button { text-align: left; border: 0; background: none; color: var(--ink); font: inherit; font-size: var(--t-sm); padding: 8px 10px; border-radius: 7px; cursor: pointer; }
+  .ctx button:hover { background: var(--surface-2); }
+  .ctx .danger { color: var(--risk); }
+  .ctx hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
+  .menu { display: grid; }
+  .menu button { display: flex; align-items: center; gap: 12px; text-align: left; border: 0; border-top: 1px solid var(--line); background: none; color: var(--ink); font: inherit; min-height: var(--tap); cursor: pointer; }
+  .menu button:first-child { border-top: 0; }
   .body { flex: 1; position: relative; min-height: 0; display: flex; flex-direction: column; }
   .scroller { flex: 1; overflow-y: auto; position: relative; min-height: 0; touch-action: pan-y; }
   .scroller.railed { scrollbar-width: none; }
@@ -528,7 +544,7 @@
   .head { position: absolute; left: 0; right: 0; display: flex; justify-content: space-between; align-items: baseline; padding: 20px 18px 6px; }
   .head { gap: 6px; align-items: center; }
   .head b { font-size: 15px; }
-  .head .n { font-size: 12px; color: var(--ink-3); }
+  .head .n { font-size: var(--t-sm); color: var(--ink-3); }
   /* The day's select circle, left of the date: it slides in on hover (mouse) and while selecting. */
   .day { display: flex; align-items: center; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left; }
   .circle { width: 0; height: 24px; margin-right: 0; flex: none; display: grid; place-items: center; position: relative; opacity: 0;

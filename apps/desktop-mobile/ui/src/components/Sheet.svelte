@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   interface Props { title?: string; open: boolean; onclose: () => void; width?: number; children: Snippet; }
+  import Icon from './Icon.svelte';
   import { viewport } from '../lib/viewport.svelte';
   let { title, open, onclose, width = 460, children }: Props = $props();
   let box: HTMLDivElement | undefined = $state();
@@ -14,6 +15,20 @@
       first.focus({ preventScroll: true });
       return () => { (opener as HTMLElement | null)?.focus?.({ preventScroll: true }); };
     }
+  });
+  // An open sheet takes one history entry, so the system Back (Android) closes the sheet and not
+  // the screen under it. Sheets stack: each leaves its own entry and only the top one closes.
+  // Closing any other way gives the entry back.
+  $effect(() => {
+    if (!open) return;
+    const mine = Math.random();
+    history.pushState({ sheet: mine }, '');
+    const onpop = () => { if (history.state?.sheet !== mine) onclose(); };
+    addEventListener('popstate', onpop);
+    return () => {
+      removeEventListener('popstate', onpop);
+      if (history.state?.sheet === mine) history.back();
+    };
   });
   function key(e: KeyboardEvent) {
     if (!open) return;
@@ -33,7 +48,7 @@
 {#if open}
   <div class="scrim" role="presentation" onclick={onclose}></div>
   <div class="sheet" bind:this={box} tabindex="-1" class:bottom={viewport.mobile} role="dialog" aria-modal="true" aria-label={title} style={viewport.mobile ? '' : `width:min(${width}px, 94vw)`}>
-    {#if title}<div class="head"><b>{title}</b><button class="x" aria-label="Close" onclick={onclose}>✕</button></div>{/if}
+    {#if title}<div class="head"><b>{title}</b><button class="x" aria-label="Close" onclick={onclose}><Icon name="close" size={20} /></button></div>{/if}
     <div class="body">{@render children()}</div>
   </div>
 {/if}

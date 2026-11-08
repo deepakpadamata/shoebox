@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redesign: Search</title><link rel="stylesheet" href="assets/redesign.css"></head>
+<body><div class="doc">
+<header><h1>8 · Search</h1>
+<p>The search engine is already one of the app's strengths: chips show how a query was understood, and suggestions are grouped by type. The redesign gives it a tab and an inviting empty state with people and places, and fixes how the keyboard and field behave. Fixes F8, F14.</p></header>
+<nav class="pages"><a href="index.html">Overview</a><a href="01-navigation.html">Navigation</a><a href="02-photos.html">Photos &amp; selection</a><a href="03-viewer.html">Viewer</a><a href="04-albums-sharing.html">Albums &amp; sharing</a><a href="05-backup.html">Backup</a><a href="06-settings.html">Settings</a><a href="07-onboarding.html">Onboarding</a><a class="on" href="08-search.html">Search</a></nav>
+
+<section class="board">
+<h2>Phone</h2>
+<div class="row">
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar"><h1>Search</h1></div>
+      <div style="padding:0 16px 12px"><div class="field">⌕ People, places, things, dates…</div></div>
+      <div class="scroll">
+        <div class="sect" style="padding-left:16px">People</div>
+        <div style="display:flex;gap:14px;padding:0 16px">
+          <div style="text-align:center;font-size:12px"><div class="photo" data-seed="61" style="width:64px;height:64px;border-radius:99px;margin-bottom:4px"></div>Anna</div>
+          <div style="text-align:center;font-size:12px"><div class="photo" data-seed="62" style="width:64px;height:64px;border-radius:99px;margin-bottom:4px"></div>Ravi</div>
+          <div style="text-align:center;font-size:12px"><div class="photo" data-seed="63" style="width:64px;height:64px;border-radius:99px;margin-bottom:4px"></div>Mum</div>
+          <div style="text-align:center;font-size:12px"><div class="photo" data-seed="64" style="width:64px;height:64px;border-radius:99px;margin-bottom:4px"></div>Leo</div>
+        </div>
+        <div class="sect" style="padding-left:16px">Places</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:0 16px">
+          <div><div class="photo" data-seed="71" style="aspect-ratio:1;border-radius:10px"></div><div style="font-size:13px;margin-top:4px">Lisbon</div></div>
+          <div><div class="photo" data-seed="72" style="aspect-ratio:1;border-radius:10px"></div><div style="font-size:13px;margin-top:4px">Bengaluru</div></div>
+          <div><div class="photo" data-seed="73" style="aspect-ratio:1;border-radius:10px"></div><div style="font-size:13px;margin-top:4px">Home</div></div>
+        </div>
+        <div class="sect" style="padding-left:16px">Recent</div>
+        <div class="card"><div class="rowi"><span class="muted">↺</span><div class="tx"><b style="font-weight:500">beach last summer</b></div></div><div class="rowi"><span class="muted">↺</span><div class="tx"><b style="font-weight:500">videos</b></div></div></div>
+      </div>
+      <nav class="tabbar"><a href="#"><span class="ic">▦</span>Photos</a><a href="#"><span class="ic">▤</span>Albums</a><a class="on" href="#"><span class="ic">⌕</span>Search</a><a href="#"><span class="ic">⚙︎</span>Settings</a></nav>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Search home.</b> People and places you can tap, as on Google Photos' Search tab, with recent searches below. Faces are shown here because people often search by person. The full People list is still the second row in Albums.</div>
+  </div>
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div style="padding:6px 16px 8px;display:flex;gap:8px;align-items:center"><div class="field" style="flex:1;color:var(--ink)">⌕ beach last summer</div><span class="back">Cancel</span></div>
+      <div style="display:flex;gap:6px;padding:0 16px 8px;flex-wrap:wrap"><span class="pill info">the words "beach" ✕</span><span class="pill info">Jun–Aug 2026 ✕</span></div>
+      <div class="muted" style="padding:0 16px 8px;font-size:13px">48 photos · <a href="#">Select</a></div>
+      <div class="scroll"><div class="tiles" data-n="28" data-seed="81" data-video="4"></div></div>
+      <nav class="tabbar"><a href="#"><span class="ic">▦</span>Photos</a><a href="#"><span class="ic">▤</span>Albums</a><a class="on" href="#"><span class="ic">⌕</span>Search</a><a href="#"><span class="ic">⚙︎</span>Settings</a></nav>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Results.</b> The keyboard closes on Enter, so results fill the screen (F14). Chips stay so you can see how the query was read. There is a count and a Select shortcut.</div>
+  </div>
+  <div class="notes">
+    <h3>Behaviour changes</h3>
+    <ol>
+      <li><b>Phone:</b> call <code>blur()</code> on submit, and on scroll start.</li>
+      <li><b>Desktop:</b> clear the toolbar query when the route leaves <code>#/search</code>. Esc in the field clears it and goes back.</li>
+      <li><b>Coverage line</b> ("Search covers 8,210 of 12,431 so far") only shows while indexing is still going.</li>
+      <li><b>No results:</b> suggest removing the most restrictive chip ("Try without 2026").</li>
+      <li><b>⌘F and /</b> focus the desktop field. A ⌘K-style quick open could later also jump to albums and settings.</li>
+    </ol>
+  </div>
+</div>
+</section>
+</div>
+<script src="assets/redesign.js"></script>
+</body></html>

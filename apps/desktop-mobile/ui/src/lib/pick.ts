@@ -1,6 +1,7 @@
 // Native file and folder pickers (desktop shell). In a browser there is no picker: callers fall back
 // to a typed path.
-export const canPick = () => '__TAURI_INTERNALS__' in window && !/Android|iPhone|iPad/i.test(navigator.userAgent);
+export const isHandheld = () => /Android|iPhone|iPad/i.test(navigator.userAgent);
+export const canPick = () => '__TAURI_INTERNALS__' in window && !isHandheld();
 
 const MEDIA = ['jpg', 'jpeg', 'png', 'heic', 'heif', 'dng', 'cr2', 'cr3', 'nef', 'arw', 'raf', 'orf', 'rw2', 'tif', 'tiff', 'gif', 'webp', 'mov', 'mp4', 'm4v'];
 
@@ -16,4 +17,11 @@ export async function pickFolder(title?: string): Promise<string | null> {
   const { open } = await import('@tauri-apps/plugin-dialog');
   const r = await open({ multiple: false, directory: true, title });
   return r ?? null;
+}
+
+/** Google Takeout parts (`.zip`, `.tgz`), several at once; empty if cancelled. */
+export async function pickArchives(): Promise<string[]> {
+  const { open } = await import('@tauri-apps/plugin-dialog');
+  const r = await open({ multiple: true, directory: false, title: 'Choose the Takeout files', filters: [{ name: 'Takeout files', extensions: ['zip', 'tgz', 'gz'] }] });
+  return r ?? [];
 }

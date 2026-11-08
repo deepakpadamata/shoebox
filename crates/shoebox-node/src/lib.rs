@@ -14,6 +14,7 @@ mod freeup;
 mod holdings;
 mod identity;
 mod import;
+mod import_archive;
 mod in_place;
 mod indexer;
 mod keys;
@@ -52,6 +53,9 @@ pub use freeup::{FreeReport, CONFIRMATION_TTL_MS};
 pub use holdings::{DeviceStorage, DEFAULT_REDUNDANCY, REDUNDANCY_KEY};
 pub use identity::{Membership, RECOVERY_KIT_SAVED_KEY};
 pub use import::{ImportOptions, ImportReport};
+pub use import_archive::{
+    available_space, imported_album_id, ArchiveImportReport, ArchivePlanSummary, NotEnoughSpace,
+};
 pub use indexer::{
     owners_of, Always, FaceModels, IndexGate, IndexProgress, IndexerConfig, PEOPLE_SETTING,
 };

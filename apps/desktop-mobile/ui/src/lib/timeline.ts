@@ -12,6 +12,10 @@ export interface HeadRow {
   count: number;
   /** Index of the day's first item. */
   from: number;
+  /** A packed head (U1-18): consecutive quiet days under one heading, newest first. */
+  days?: { day: string; count: number }[];
+  /** A month heading (zoomed all the way out): `day` is the month's first day. */
+  month?: boolean;
 }
 export interface TileRow {
   type: 'tiles';
@@ -38,6 +42,42 @@ export interface LayoutOptions {
   headHeight: number;
   /** Group by day under date headers (the default); off for results ordered by relevance. */
   days?: boolean;
+  /** Combine consecutive days with few photos under one heading. */
+  pack?: boolean;
+  /** `month`: one heading per month, for the smallest tiles. */
+  group?: 'day' | 'month';
+}
+
+/** A day is quiet when it would leave most of its first row empty. */
+export const isQuiet = (count: number, cols: number) => count <= Math.max(2, Math.floor(cols / 2));
+
+interface DayGroup { day: string; from: number; to: number }
+
+function dayGroups(items: PhotoSummary[]): DayGroup[] {
+  const out: DayGroup[] = [];
+  for (let i = 0; i < items.length; ) {
+    const day = dayKey(items[i].taken_at);
+    let j = i;
+    while (j < items.length && dayKey(items[j].taken_at) === day) j++;
+    out.push({ day, from: i, to: j });
+    i = j;
+  }
+  return out;
+}
+
+/** What a packed heading says: "Mon 3 · Tue 4 · Wed 5" (the month once it changes). */
+export function packedLabel(days: { day: string }[]): string {
+  const W = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  let lastMonth = '';
+  return [...days].reverse().map(({ day }) => {
+    const [y, m, d] = day.split('-').map(Number);
+    const ym = `${y}-${m}`;
+    const base = `${W[new Date(y, m - 1, d).getDay()]} ${d}`;
+    const out = ym === lastMonth ? base : `${base} ${M[m - 1]}`;
+    lastMonth = ym;
+    return out;
+  }).join(' · ');
 }
 
 /** Items must already be sorted newest first (as the app core returns them). */
@@ -54,19 +94,52 @@ export function buildLayout(items: PhotoSummary[], o: LayoutOptions): Layout {
     }
     return { rows, height: top, cols, tile };
   }
-  while (i < items.length) {
-    const day = dayKey(items[i].taken_at);
-    let j = i;
-    while (j < items.length && dayKey(items[j].taken_at) === day) j++;
-    rows.push({ type: 'head', top, height: o.headHeight, day, count: j - i, from: i });
+  // The unit under one heading: a day, several quiet days, or a month.
+  let blocks: { day: string; from: number; to: number; days?: { day: string; count: number }[]; month?: boolean }[] = [];
+  const groups = dayGroups(items);
+  if (o.group === 'month') {
+    for (const g of groups) {
+      const last = blocks[blocks.length - 1];
+      const ym = g.day.slice(0, 7);
+      if (last && last.day.slice(0, 7) === ym) last.to = g.to;
+      else blocks.push({ day: `${ym}-01`, from: g.from, to: g.to, month: true });
+    }
+  } else if (o.pack) {
+    for (let k = 0; k < groups.length; ) {
+      const g = groups[k];
+      if (!isQuiet(g.to - g.from, cols)) {
+        blocks.push({ day: g.day, from: g.from, to: g.to });
+        k++;
+        continue;
+      }
+      // Quiet days next to each other, while they still fit in two rows.
+      let m = k;
+      let n = 0;
+      while (m < groups.length && isQuiet(groups[m].to - groups[m].from, cols) && n + (groups[m].to - groups[m].from) <= cols * 2 && m - k < 7) {
+        n += groups[m].to - groups[m].from;
+        m++;
+      }
+      if (m - k < 2) {
+        blocks.push({ day: g.day, from: g.from, to: g.to });
+        k++;
+      } else {
+        blocks.push({ day: g.day, from: g.from, to: groups[m - 1].to, days: groups.slice(k, m).map((x) => ({ day: x.day, count: x.to - x.from })) });
+        k = m;
+      }
+    }
+  } else {
+    blocks = groups.map((g) => ({ day: g.day, from: g.from, to: g.to }));
+  }
+  for (const b of blocks) {
+    rows.push({ type: 'head', top, height: o.headHeight, day: b.day, count: b.to - b.from, from: b.from, ...(b.days ? { days: b.days } : {}), ...(b.month ? { month: true } : {}) });
     top += o.headHeight;
-    for (let k = i; k < j; k += cols) {
-      const to = Math.min(k + cols, j);
+    for (let k = b.from; k < b.to; k += cols) {
+      const to = Math.min(k + cols, b.to);
       rows.push({ type: 'tiles', top, height: tile + o.gap, from: k, to });
       top += tile + o.gap;
     }
-    i = j;
   }
+  void i;
   return { rows, height: top, cols, tile };
 }
 

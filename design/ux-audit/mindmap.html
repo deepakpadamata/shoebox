@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shoebox UX Map</title>
+<style>
+  :root { --bg:#f5f4f0; --surface:#fff; --ink:#1d1c1a; --ink-2:#5e5b55; --line:#e2e0da; --accent:#a9540f;
+    --daily:#287a42; --weekly:#2f6db5; --monthly:#8a5a0c; --rare:#6e6a62; --once:#7a4fb5; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#121110; --surface:#1c1b19; --ink:#f1efe9; --ink-2:#b2aea5; --line:#34322e; --accent:#e08a3c;
+    --daily:#5cc27d; --weekly:#7aaee8; --monthly:#e2b04f; --rare:#96938b; --once:#b896f0; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  p.lede { color: var(--ink-2); margin: 0 0 16px; }
+  .legend { display:flex; flex-wrap:wrap; gap:8px; margin: 0 0 16px; }
+  .tag { display:inline-block; font-size:11px; font-weight:600; padding:1px 7px; border-radius:99px; border:1px solid currentColor; margin-left:6px; white-space:nowrap; }
+  .p { color: var(--ink-2); }
+  .daily{color:var(--daily)} .weekly{color:var(--weekly)} .monthly{color:var(--monthly)} .rare{color:var(--rare)} .once{color:var(--once)}
+  .tools { margin: 0 0 12px; display:flex; gap:8px; }
+  button { font:inherit; padding:6px 12px; border-radius:9px; border:1px solid var(--line); background:var(--surface); color:var(--ink); cursor:pointer; }
+  details { margin: 2px 0 2px 18px; }
+  details > summary { cursor:pointer; padding:4px 6px; border-radius:8px; list-style: none; }
+  details > summary::before { content:'▸'; display:inline-block; width:14px; color:var(--ink-2); transition: transform .15s; }
+  details[open] > summary::before { transform: rotate(90deg); }
+  details > summary:hover { background: var(--surface); }
+  .root > details { margin-left:0; background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:6px 8px; margin-bottom:10px; }
+  .root > details > summary { font-weight:700; font-size:16px; }
+  .leaf { margin: 2px 0 2px 38px; padding: 3px 6px; }
+  .note { color: var(--ink-2); font-size: 12.5px; margin-left: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Shoebox UX map</h1>
+  <p class="lede">Every screen, feature and setting in the desktop and phone app as built (Nov 2026). Tags: platform (D desktop, M phone), depth from the home screen, and how often a typical person needs it.</p>
+  <div class="legend">
+    <span class="tag daily">daily</span><span class="tag weekly">weekly</span><span class="tag monthly">monthly</span><span class="tag rare">rare</span><span class="tag once">once</span>
+  </div>
+  <div class="tools"><button id="open">Expand all</button><button id="close">Collapse all</button></div>
+  <div class="root" id="root"></div>
+</main>
+<script>
+// [label, platform, depth, use, note, children]
+const T = [
+ ['First run','DM','0','once','',[
+   ['Welcome: create / add this device / restore','DM','0','once','three doors, restore is a text link'],
+   ['Name this device','DM','1','once',''],
+   ['Pick a role: Keeper / Companion / Viewer','DM','1','once','jargon before any context'],
+   ['Save recovery kit (24 words, file / copy / print, confirm)','DM','2','once','blocks entry'],
+   ['Join: scan QR or paste pairing code','DM','1','once',''],
+   ['Check six-digit code','DM','2','once',''],
+   ['Restore with phrase + peer link + role','DM','1','rare','another device must allow within 2 min'],
+ ]],
+ ['Photos','DM','0','daily','',[
+   ['Timeline by day','DM','0','daily','',[
+     ['Pinch to change density (72–180 px)','DM','0','weekly',''],
+     ['Date rail scrubber','DM','0','weekly','only when content > 2 screens'],
+     ['Pull to refresh (backup + sync burst)','M','0','weekly',''],
+     ['First-sync "Getting your photos" bar','DM','0','once',''],
+     ['Tile badges: ♥, ▶, LIVE, red "N copies", blue ↻','DM','0','daily',''],
+   ]],
+   ['Viewer','DM','1','daily','',[
+     ['Close / ♥ / ⓘ / ≈ Similar / 🗑 Delete (all top-right)','DM','1','daily','no Share in the viewer'],
+     ['Swipe, pinch-zoom, double-click zoom, pull down to close','DM','1','daily',''],
+     ['Live Photo / video playback (system player on Android)','DM','1','daily',''],
+     ['Get original from another device','DM','1','monthly',''],
+     ['Info: date, size, camera, GPS','DM','2','weekly','desktop: open by default'],
+     ['Info: people in this photo, name / "Not X"','DM','2','monthly',''],
+     ['Info: copies pill + Stored on devices','DM','2','monthly',''],
+     ['Keep original on this device','DM','2','rare','shown even on keepers'],
+   ]],
+   ['Selection','DM','1','weekly','long-press drag (M), ⌘/⇧-click (D), day select',[
+     ['Share','DM','2','weekly',''],['Favorite','DM','2','weekly',''],['Add to album','DM','2','weekly',''],
+     ['Keep on this device','DM','2','rare','download icon, unlabeled'],['Remove from album','DM','2','monthly',''],
+     ['Delete from all devices','DM','2','monthly',''],
+   ]],
+   ['Favorites','D sidebar · M avatar menu','1–2','weekly',''],
+   ['Recently Deleted: restore, delete now','D sidebar · M avatar menu','1–2','rare',''],
+ ]],
+ ['Find','DM','0–1','weekly','',[
+   ['Search field (/ or ⌘F) · phone: header icon','DM','0–1','weekly','',[
+     ['Recent searches (8, this device)','DM','1','weekly',''],
+     ['Suggestions: people, places, albums, things, cameras, lenses','DM','1','weekly',''],
+     ['Chips for dates, kinds, places; ✕ to remove','DM','1','weekly',''],
+     ['Coverage line: what is indexed so far','DM','1','rare',''],
+   ]],
+   ['Similar photos (≈ in viewer)','DM','2','monthly',''],
+   ['People','D sidebar · M Albums → People','1–2','monthly','',[
+     ['Turn on / off for the library','DM','2','once',''],
+     ['Rename, Merge…, Add a name, Hide, This is me','DM','2–3','monthly',''],
+   ]],
+ ]],
+ ['Albums & sharing','DM','1','weekly','',[
+   ['Albums grid + "New album name" field','DM','1','weekly','covers never show'],
+   ['Album page: Rename (D only), Share this album, Share a link','DM','2','monthly',''],
+   ['Shared albums (separate tab/section)','DM','1','monthly','',[
+     ['New shared album / Join with an invitation','DM','1','monthly',''],
+     ['Photos · Activity · People tabs','DM','2','monthly',''],
+     ['Invite: add photos or only look → QR + long code','DM','3','monthly',''],
+     ['Album settings: keep originals, location ask/keep/remove, leave','DM','3','rare',''],
+     ['Remove member','DM','3','rare',''],
+     ['Save to my library','DM','3','monthly',''],
+   ]],
+   ['Web link ("Share a link")','DM','3','rare','',[
+     ['Setup: service address, phrase, invite code','DM','3','once','asks for a URL first'],
+     ['Kept online vs From my devices; full size; expiry; stop','DM','3','rare',''],
+   ]],
+   ['Share sheet from selection: new/existing shared album, Other apps','DM','3','weekly','system share is secondary'],
+ ]],
+ ['Bring photos in','DM','1–2','once','',[
+   ['Camera backup + folders + Wi-Fi / charging','M (Settings top)','2','once',''],
+   ['Mac Photos library backup','D (Settings top)','1','once',''],
+   ['Import: choose files / folder','D toolbar','1','monthly',''],
+   ['From Google Photos (Takeout plan → run → report)','D','2','once',''],
+   ['Add photos: from gallery / from files','M header ＋','1','rare',''],
+   ['Watched folders','D (typed path also shown on phone)','2','rare',''],
+   ['Gallery deletions held prompt','M','0','rare',''],
+ ]],
+ ['Safety','DM','0–2','weekly','',[
+   ['Status: dot (D toolbar) / "Syncing…" line (M Library)','DM','0','daily',''],
+   ['Banners: at risk, paused, camera off, kit, security, update, Takeout','DM','0','as needed','security + update are desktop only'],
+   ['Storage: stats, copies-per-photo chart, free up space','D sidebar · M avatar','1–2','monthly','route is "health"'],
+   ['Devices: activity, queue, device list','DM','1','weekly','',[
+     ['Add a device: role → QR + code → six-digit check','DM','2','rare',''],
+     ['Device detail / ⋯: make admin, change role, remove','DM','2–3','rare',''],
+   ]],
+   ['Recovery: copy device link, replace phrase','Settings','2','rare',''],
+   ['"Let this device in?" (recovery request)','D only','0','rare',''],
+ ]],
+ ['Settings (one page, 14 sections)','D sidebar · M avatar','1–2','monthly','',[
+   ['Backup card','M/Mac','2','once',''],['You: your name','DM','2','once',''],['This device: name, role (read-only)','DM','2','once',''],
+   ['What this device keeps: Off / 30 d / 90 d / 1 y + favourites','DM companion','2','rare',''],
+   ['Search: index toggle, progress, rebuild index','DM','2','rare',''],['Copies to keep: 1–4','DM','2','rare',''],
+   ['Connection: default / own relay / none','DM','2','rare',''],['Watched folders','DM','2','rare','typed path on phone'],
+   ['Export','DM','2','rare','typed path on phone'],['Diagnostics report','DM','2','rare',''],
+   ['Appearance: theme, text size','DM','2','once','theme not re-applied on launch'],
+   ['Recovery','DM','2','rare',''],['Leave this library','DM','2','rare',''],['About: licences, update check','DM','2','rare',''],
+ ]],
+];
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function node([label, plat, depth, use, note, kids]) {
+  const useCls = use.split(' ')[0];
+  const tags = `<span class="tag p">${esc(plat)}</span><span class="tag p">depth ${depth}</span><span class="tag ${useCls}">${use}</span>${note ? `<span class="note">— ${esc(note)}</span>` : ''}`;
+  if (!kids) return `<div class="leaf">${esc(label)} ${tags}</div>`;
+  return `<details open><summary>${esc(label)} ${tags}</summary>${kids.map(node).join('')}</details>`;
+}
+document.getElementById('root').innerHTML = T.map(node).join('');
+document.getElementById('open').onclick = () => document.querySelectorAll('details').forEach(d => d.open = true);
+document.getElementById('close').onclick = () => document.querySelectorAll('#root details details').forEach(d => d.open = false);
+</script>
+</body>
+</html>

@@ -24,7 +24,10 @@ import type { DeviceStorageInfo } from '../bindings/DeviceStorageInfo';
 import type { ExportReport } from '../bindings/ExportReport';
 import type { FreeUpReport } from '../bindings/FreeUpReport';
 import type { Health } from '../bindings/Health';
+import type { SafetyStatus } from '../bindings/SafetyStatus';
 import type { ImportSummary } from '../bindings/ImportSummary';
+import type { ArchiveImportInfo } from '../bindings/ArchiveImportInfo';
+import type { ArchivePlanInfo } from '../bindings/ArchivePlanInfo';
 import type { LibraryCounts } from '../bindings/LibraryCounts';
 import type { PageCursor } from '../bindings/PageCursor';
 import type { PairStart } from '../bindings/PairStart';
@@ -51,7 +54,7 @@ import type { WebLinksInfo } from '../bindings/WebLinksInfo';
 
 export type {
   AboutInfo, AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
-  AlbumInfo, AppEvent, BackupFolder, BackupPolicy, BackupPreview, BackupScope, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, Health, ImportSummary,
+  AlbumInfo, AppEvent, BackupFolder, BackupPolicy, BackupPreview, BackupScope, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, Health, SafetyStatus, ImportSummary, ArchiveImportInfo, ArchivePlanInfo,
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, FaceOut, PeopleList, PersonCard, SearchChip, SearchIndexer, SearchPage, SearchStatus, SearchSuggestion, Settings, TransferItem, Transfers, WebLinkCheck, WebLinkInfo, WebLinksInfo,
 };
 
@@ -196,6 +199,13 @@ export const api = {
   recentlyDeleted: () => call<PhotoSummary[]>('recently_deleted'),
   deletePermanently: (ids: string[]) => call<number>('delete_permanently', { ids }),
   importPaths: (paths: string[]) => call<ImportSummary>('import_paths', { paths }),
+  /** What importing these Google Takeout files (zip or tgz parts, or an unpacked folder) would do. Writes nothing. */
+  planArchiveImport: (paths: string[]) => call<ArchivePlanInfo>('plan_archive_import', { paths }),
+  /** Start, or continue, the Google Photos import in the background; progress arrives as ImportProgress. */
+  startArchiveImport: (paths: string[]) => call<{}>('start_archive_import', { paths }),
+  stopArchiveImport: () => call<{}>('stop_archive_import'),
+  forgetArchiveImport: () => call<{}>('forget_archive_import'),
+  archiveImportStatus: () => call<ArchiveImportInfo>('archive_import_status'),
   /** Phone: the person chooses photos (`files`: from anywhere, else the gallery) and they are imported. */
   importPicked: (files: boolean) => call<ImportSummary>('import_picked', { files }),
   /** Many photos left the gallery at once: delete them from the library too, or keep them. */
@@ -218,12 +228,14 @@ export const api = {
   makeAdmin: (id: string, phrase: string) => call<{}>('make_admin', { id, phrase }),
   setDeviceRole: (id: string, role: string, phrase?: string) => call<{}>('set_device_role', { id, role, phrase: phrase ?? null }),
   health: () => call<Health>('health'),
+  safetyStatus: () => call<SafetyStatus>('safety_status'),
   freeUpSpace: (dry_run: boolean) => call<FreeUpReport>('free_up_space', { dry_run }),
   settings: () => call<Settings>('settings'),
   setKeepRules: (recent_days: number, favorites: boolean) => call<{}>('set_keep_rules', { recent_days, favorites }),
   setRedundancyTarget: (copies: number) => call<{}>('set_redundancy_target', { copies }),
   setRelay: (relay: string) => call<{}>('set_relay', { relay }),
   renameDevice: (name: string) => call<{}>('rename_device', { name }),
+  setAlbumCover: (album: string, photo: string) => call<{}>('set_album_cover', { album, photo }),
   renameAlbum: (album: string, name: string) => call<{}>('rename_album', { album, name }),
   setPoster: (id: string, data: string) => call<{}>('set_poster', { id, data }),
   /** Make a video's poster frame with the platform's thumbnailer; `false` where it cannot. */
@@ -268,6 +280,15 @@ export const api = {
   diagnostics: () => call<DiagnosticsBundle>('diagnostics'),
   exportLibrary: (dest: string) => call<ExportReport>('export_library', { dest }),
   /** Hand the originals to other apps (the system share sheet); `anchor` places the macOS picker. */
+  /** The platform's share UI for a line of text; copies it where there is none. */
+  shareText: async (text: string, anchor?: { x: number; y: number; w: number; h: number }) => {
+    try {
+      await call<{}>('share_text', { text, anchor });
+    } catch {
+      await navigator.clipboard.writeText(text);
+      throw new Error('Sharing is not available here, so the text was copied. Paste it into a message.');
+    }
+  },
   shareFiles: (ids: string[], anchor?: { x: number; y: number; w: number; h: number }) => call<{}>('share_files', { ids, anchor }),
   /** Set this device's data aside and restart at first run (to create or join another library). */
   leaveLibrary: () => call<{ kept: string }>('leave_library'),

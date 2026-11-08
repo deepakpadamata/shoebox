@@ -25,6 +25,9 @@
   let phrase = $state('');
   let invite = $state('');
   let qr = $state(false);
+  // Set-up, one question at a time.
+  let started = $state(false);
+  let stepNo = $state(0);
 
   const DAYS: Record<string, number | null> = { never: null, current: null, '7': 7, '30': 30, '90': 90 };
 
@@ -74,7 +77,7 @@
     if (!open) return;
     album;
     untrack(() => {
-      busy = ''; phrase = ''; invite = ''; check = null; qr = false;
+      busy = ''; phrase = ''; invite = ''; check = null; qr = false; started = false; stepNo = 0;
       void load().then(loadCheck);
     });
   });
@@ -151,26 +154,36 @@
   {#if !info}
     <p class="muted small">Opening…</p>
   {:else if !ready}
+    <!-- Set-up asks one question at a time (U1-21): what this is first, then only what is missing. -->
+    {@const steps = [!info.url && 'url', !info.enabled && 'phrase', info.invite_needed && 'invite'].filter(Boolean) as string[]}
+    {@const cur = started ? steps[Math.min(stepNo, steps.length - 1)] : 'intro'}
+    {@const last = stepNo >= steps.length - 1}
     <div class="stack">
-      <p>Anyone you send the link to sees this album in their browser, with nothing installed. The photos are encrypted before they leave this device, so the service that stores them cannot see them.</p>
-      {#if !info.url}
-        <label class="field">Service address
+      {#if cur === 'intro'}
+        <b>Share this album with anyone, in their browser</b>
+        <p>A web link shows the album to people who have nothing installed. The photos are encrypted before they leave this device, so the service that stores them cannot see them, and only people with the link can open it.</p>
+        <p class="muted small">Setting it up takes {plural(steps.length, 'quick question')}, once for this library.</p>
+        <Button kind="primary" block onclick={() => { started = true; stepNo = 0; }}>Set up web links</Button>
+      {:else if cur === 'url'}
+        <label class="field">What is the address of the service?
           <input class="input" placeholder="https://" bind:value={url} disabled={busy !== ''} />
+          <span class="muted small">The address of the web link service you use, from whoever runs it.</span>
         </label>
-      {/if}
-      {#if !info.enabled}
-        <label class="field">Recovery phrase, once
+      {:else if cur === 'phrase'}
+        <label class="field">Your recovery phrase, once
           <textarea class="input" rows="3" placeholder="The 24 words from your recovery kit" bind:value={phrase} disabled={busy !== ''}></textarea>
           <span class="muted small">It gives this library the key that encrypts what it stores online. It is checked here and not kept or sent anywhere.</span>
         </label>
-      {/if}
-      {#if info.invite_needed}
+      {:else if cur === 'invite'}
         <label class="field">Invite code
           <input class="input mono" placeholder="XXXXXX-XXXXXX-XXXXXX-XXXXXX" autocapitalize="characters" autocomplete="off" spellcheck="false" bind:value={invite} disabled={busy !== ''} />
-          <span class="muted small">{info.url} takes new libraries by invite for now. Ask whoever runs it for a code; it is used once, for this library and all its devices.</span>
+          <span class="muted small">{info.url || url} takes new libraries by invite for now. Ask whoever runs it for a code; it is used once, for this library and all its devices.</span>
         </label>
       {/if}
-      <Button kind="primary" block disabled={busy !== '' || (!info.url && !url.trim()) || (!info.enabled && !phrase.trim()) || (info.invite_needed && !invite.trim())} onclick={setup}>{busy === 'setup' ? 'Setting up…' : 'Set up web links'}</Button>
+      {#if cur !== 'intro'}
+        {@const filled = cur === 'url' ? !!url.trim() : cur === 'phrase' ? !!phrase.trim() : !!invite.trim()}
+        <Button kind="primary" block disabled={busy !== '' || !filled} onclick={() => (last ? setup() : stepNo++)}>{busy === 'setup' ? 'Setting up…' : last ? 'Set up web links' : 'Next'}</Button>
+      {/if}
     </div>
   {:else}
     <div class="stack">
@@ -249,17 +262,17 @@
 </Sheet>
 
 <style>
-  .label { font-size: 12px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
+  .label { font-size: var(--t-sm); font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
   .link { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
   .qr { display: flex; justify-content: center; }
   .input { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 0 12px; color: var(--ink); font: inherit; }
   textarea.input { height: auto; padding: 10px 12px; resize: vertical; }
-  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: var(--t-sm); }
   .field { display: flex; flex-direction: column; gap: 6px; font-weight: 600; font-size: 13px; }
   .field .muted { font-weight: 400; }
   .wrap { flex-wrap: wrap; }
   .linkish { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
-  .warn { color: var(--danger, #c0392b); }
+  .warn { color: var(--risk); }
   .choice { display: flex; flex-direction: column; gap: 8px; }
   .choice label { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
   .choice label.on { border-color: var(--accent); }

@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redesign: Backup</title><link rel="stylesheet" href="assets/redesign.css"></head>
+<body><div class="doc">
+<header><h1>5 · Backup: one answer to "are my photos safe?"</h1>
+<p>Keeping photos safe is the whole promise of Shoebox, yet today the answer is spread over four places that disagree (F1, F15). The redesign merges Devices and Storage into one <b>Backup</b> page. On the phone it is the first section of the Settings tab, and the status chip on Photos opens it directly. On the Mac it is a sidebar row. It opens with a single sentence, worked out by one rule and used everywhere: the Photos chip, the Settings tab, the sidebar row, the viewer's Info and the banners.</p></header>
+<nav class="pages"><a href="index.html">Overview</a><a href="01-navigation.html">Navigation</a><a href="02-photos.html">Photos &amp; selection</a><a href="03-viewer.html">Viewer</a><a href="04-albums-sharing.html">Albums &amp; sharing</a><a class="on" href="05-backup.html">Backup</a><a href="06-settings.html">Settings</a><a href="07-onboarding.html">Onboarding</a><a href="08-search.html">Search</a></nav>
+
+<section class="board">
+<h2>The rule (one function, used everywhere)</h2>
+<p class="why">This keeps the rule the core already uses (<code>LibraryState::at_risk</code>, and <code>backed_up</code> in <code>core.rs</code>): a photo is <b>safe</b> when its original is on at least <i>copies to keep</i> devices <b>or</b> on any keeper. What changes is that every screen reads that one result and describes it honestly. "Every photo has at least 2 copies" is never said when the real reason is "a keeper has it", and the device count is always stated. A library whose only device is one keeper gets its own neutral state. The words are fixed, in this order of precedence:</p>
+<div class="row">
+  <div class="card pad" style="margin:0;width:340px"><span class="status risk"><span class="dot"></span>At risk</span><p style="margin:10px 0 0"><b>"1,203 photos are only on this phone."</b><br><span class="muted">Not safe by the rule (too few copies and no keeper has it), and no device that could take it has been seen in 7 days. Red. The Settings tab gets a dot and Photos shows one banner.</span></p></div>
+  <div class="card pad" style="margin:0;width:340px"><span class="status warn"><span class="dot"></span>Waiting</span><p style="margin:10px 0 0"><b>"214 new photos are waiting for your Mac."</b><br><span class="muted">Not safe yet, but a known device will take them when it comes online. Amber. Says who and since when.</span></p></div>
+  <div class="card pad" style="margin:0;width:340px"><span class="status busy"><span class="dot"></span>Backing up 23</span><p style="margin:10px 0 0"><b>"Backing up 23 photos to Mac Studio."</b><br><span class="muted">Transfers are running right now. Blue, with a count. Never "Syncing…" with no detail.</span></p></div>
+  <div class="card pad" style="margin:0;width:340px"><span class="status"><span class="dot"></span>All backed up</span><p style="margin:10px 0 0"><b>"All 12,431 photos are on 2 devices."</b><br><span class="muted">Green and quiet. When there is only one device: "All on this Mac. Add a second device for a backup." This is neutral, not green, and never says "at least 2 copies".</span></p></div>
+</div>
+</section>
+
+<section class="board">
+<h2>Phone: the Backup page</h2>
+<p class="why">Reached in one tap from the Photos status chip, or from the Backup card at the top of the Settings tab (<a href="06-settings.html">see Settings</a>). Day to day, the chip is all most people look at. This page is for when they want to know more, or when the chip turns amber or red.</p>
+<div class="row">
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar" style="align-items:center"><span class="back">‹ Settings</span><h1 style="font-size:20px;text-align:center">Backup</h1><span style="width:60px"></span></div>
+      <div class="scroll">
+        <div class="hero"><div class="big" style="color:var(--ok)">✓</div><h2>All 12,431 photos are on 2 devices</h2><p>Last checked a minute ago. Mac Studio and Raspberry Pi each have every original.</p></div>
+        <div class="sect">Your devices</div>
+        <div class="card">
+          <div class="rowi"><span class="lead">▭</span><div class="tx"><b>Mac Studio</b><span>Keeps everything · Same Wi-Fi</span></div><span class="pill ok">Online</span></div>
+          <div class="rowi"><span class="lead">▣</span><div class="tx"><b>Raspberry Pi</b><span>Keeps everything · Via relay</span></div><span class="pill ok">Online</span></div>
+          <div class="rowi"><span class="lead">▯</span><div class="tx"><b>This phone</b><span>Keeps last 90 days · 4.2 GB</span></div><span class="chev"></span></div>
+          <div class="rowi"><span class="lead" style="background:var(--accent-soft);color:var(--accent)">＋</span><div class="tx"><b style="color:var(--accent)">Add a device</b></div></div>
+        </div>
+        <div class="card"><div class="rowi"><span class="lead">≡</span><div class="tx"><b>Details</b><span>Queue, copies per photo, free up space</span></div><span class="chev"></span></div></div>
+      </div>
+      <nav class="tabbar"><a href="#"><span class="ic">▦</span>Photos</a><a href="#"><span class="ic">▤</span>Albums</a><a href="#"><span class="ic">⌕</span>Search</a><a class="on" href="#"><span class="ic">⚙︎</span>Settings</a></nav>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>All good.</b> One sentence and the list of devices, with Details one tap down. The Camera backup toggle is on the Settings tab itself, just above the Devices row.</div>
+  </div>
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar" style="align-items:center"><span class="back">‹ Settings</span><h1 style="font-size:20px;text-align:center">Backup</h1><span style="width:60px"></span></div>
+      <div class="scroll">
+        <div class="hero risk"><div class="big" style="color:var(--warn)">◷</div><h2>214 new photos are waiting for your Mac</h2><p>Mac Studio has been offline since Wednesday. They're safe on this phone until then.</p>
+          <div style="display:flex;gap:8px;margin-top:14px"><span class="btn sm primary">Why is it offline?</span><span class="btn sm">See the 214</span></div></div>
+        <div class="sect">Your devices</div>
+        <div class="card">
+          <div class="rowi"><span class="lead">▭</span><div class="tx"><b>Mac Studio</b><span>Last seen Wed 5 Nov, 22:10</span></div><span class="pill warn">Offline</span></div>
+          <div class="rowi"><span class="lead">▣</span><div class="tx"><b>Raspberry Pi</b><span>Has every original · Via relay</span></div><span class="pill ok">Online</span></div>
+          <div class="rowi"><span class="lead">▯</span><div class="tx"><b>This phone</b><span>214 waiting · 4.6 GB</span></div><span class="chev"></span></div>
+        </div>
+        <div class="card"><div class="rowi"><span class="lead">≡</span><div class="tx"><b>Details</b><span>Queue, copies per photo, activity</span></div><span class="chev"></span></div></div>
+      </div>
+      <nav class="tabbar"><a href="#"><span class="ic">▦</span>Photos</a><a href="#"><span class="ic">▤</span>Albums</a><a href="#"><span class="ic">⌕</span>Search</a><a class="on" href="#"><span class="ic"><span class="badge"></span>⚙︎</span>Settings</a></nav>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Needs attention.</b> The answer names the device and the date, and says the photos are not in danger yet. It offers one helpful action (troubleshoot), not a wall of stats.</div>
+  </div>
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar" style="align-items:center"><span class="back">‹ Backup</span><h1 style="font-size:20px;text-align:center">Details</h1><span style="width:60px"></span></div>
+      <div class="scroll">
+        <div class="card pad">
+          <b>Copies per photo</b>
+          <div class="meter"><i style="width:94%;background:var(--ok)"></i><i style="width:6%;background:var(--warn)"></i></div>
+          <div style="display:flex;justify-content:space-between;font-size:13px"><span><b style="color:var(--ok)">■</b> 2+ copies · 12,217</span><span><b style="color:var(--warn)">■</b> 1 copy · 214</span></div>
+          <div class="muted" style="margin-top:8px;font-size:13px">Target: 2 copies. <a href="#">Change</a></div>
+        </div>
+        <div class="card pad">
+          <b>Waiting to send</b>
+          <div class="muted" style="font-size:13px;margin:4px 0 10px">214 photos · 1.1 GB · to Mac Studio</div>
+          <div class="tiles" style="--cols:6;border-radius:8px;overflow:hidden" data-n="12" data-seed="51"></div>
+        </div>
+        <div class="card pad">
+          <b>Free up space on this phone</b>
+          <div class="muted" style="font-size:13px;margin:4px 0 10px">3,812 photos older than 90 days are safely on 2 other devices. Removing them here frees 9.4 GB.</div>
+          <span class="btn sm">Review &amp; free up 9.4 GB</span>
+        </div>
+        <div class="card pad"><b>Recent activity</b><div class="muted" style="font-size:13px;margin-top:6px">Today 09:12 · 23 photos to Raspberry Pi<br>Yesterday · 8 photos to Raspberry Pi<br>Wed · 112 photos to Mac Studio</div></div>
+      </div>
+      <nav class="tabbar"><a href="#"><span class="ic">▦</span>Photos</a><a href="#"><span class="ic">▤</span>Albums</a><a href="#"><span class="ic">⌕</span>Search</a><a class="on" href="#"><span class="ic"><span class="badge"></span>⚙︎</span>Settings</a></nav>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Details</b> brings together today's Storage chart, the Devices queue and activity. The chart uses the same rule as the sentence, so the two can't disagree (F1). "Free up space" only appears when it would free something.</div>
+  </div>
+</div>
+</section>
+
+<section class="board">
+<h2>Phone: device detail and add a device</h2>
+<p class="why">Device actions are rare and some can't be undone, so they live one level down and only show when they apply. "Make admin" is hidden on an admin (F22). Roles are explained in what-it-does language ("Keeps every original" rather than "Keeper"), and the role word appears only as a small label.</p>
+<div class="row">
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar" style="align-items:center"><span class="back">‹ Backup</span><h1 style="font-size:20px;text-align:center">Mac Studio</h1><span style="width:60px"></span></div>
+      <div class="scroll">
+        <div class="card pad"><div style="display:flex;justify-content:space-between"><b>Online · Same Wi-Fi</b><span class="pill">Keeper</span></div>
+          <div class="meter"><i style="width:62%;background:var(--accent)"></i></div><div class="muted" style="font-size:13px">1.2 TB of 2 TB · has all 12,431 originals</div></div>
+        <div class="card">
+          <div class="rowi"><div class="tx"><b>What it does</b><span>Keeps every original</span></div><span class="chev"></span></div>
+          <div class="rowi"><div class="tx"><b>Name</b><span>Mac Studio</span></div><span class="chev"></span></div>
+          <div class="rowi"><div class="tx"><b>Can add and remove devices</b><span>Yes, admin</span></div></div>
+        </div>
+        <div class="card"><div class="rowi"><div class="tx"><b style="color:var(--risk)">Remove from library…</b><span>It stops getting photos. Its copies stay on its disk.</span></div></div></div>
+      </div>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Device.</b> Plain-language rows. The destructive action is set apart and explains what will happen.</div>
+  </div>
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar" style="align-items:center"><span class="back">Cancel</span><h1 style="font-size:20px;text-align:center">Add a device</h1><span style="width:60px"></span></div>
+      <div class="scroll">
+        <div class="card pad" style="text-align:center">
+          <div style="width:200px;height:200px;margin:6px auto 12px;background:repeating-linear-gradient(90deg,var(--ink) 0 7px,transparent 7px 12px),repeating-linear-gradient(0deg,var(--ink) 0 6px,transparent 6px 13px);background-blend-mode:difference;border-radius:8px;opacity:.85"></div>
+          <b style="font-size:17px">Open Shoebox on the other device</b>
+          <div class="muted" style="margin:6px 0 0">Choose "Add to an existing library" and scan this. Works over any network.</div>
+        </div>
+        <div class="card"><div class="rowi"><div class="tx"><b>It will…</b><span>Keep every original (good for a computer or server)</span></div><span class="chev"></span></div></div>
+        <div style="padding:0 16px"><span class="btn block">⇪ Send pairing link instead</span></div>
+      </div>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Add a device.</b> The QR code comes first. The role is picked automatically from the type of device and can be changed in one row. Today the role choice is a whole step before the QR (F10).</div>
+  </div>
+</div>
+</section>
+
+<section class="board">
+<h2>Desktop: Backup</h2>
+<div class="desk"><div class="win">
+  <aside class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <a href="#"><span class="ic">▦</span>Photos<span class="n">12,431</span></a>
+    <a href="#"><span class="ic">♥</span>Favorites<span class="n">142</span></a>
+    <a href="#"><span class="ic">☺</span>People</a>
+    <div class="grp">Albums</div>
+    <a href="#"><span class="ic">▤</span>Lisbon<span class="n"><span class="pill info">Shared</span></span></a>
+    <a href="#"><span class="ic">▤</span>The boys</a>
+    <div class="foot">
+      <a class="on" href="#" style="background:var(--warn-soft)"><span class="ic" style="color:var(--warn)">◷</span><span><b style="display:block;font-size:13px">214 waiting</b><span class="muted" style="font-size:12px">Mac Studio offline</span></span></a>
+      <a href="#"><span class="ic">⚙︎</span>Settings</a>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="tb"><h1>Backup</h1><div class="seg" style="width:300px;margin-left:12px"><span class="on">Overview</span><span>Devices</span><span>Storage</span></div><div class="grow"></div><span class="btn sm primary">＋ Add a device</span></div>
+    <div class="content" style="padding:20px;display:grid;grid-template-columns:1.3fr 1fr;gap:16px;align-content:start;background:var(--bg)">
+      <div class="hero risk" style="margin:0;grid-column:1/3;display:flex;gap:18px;align-items:center"><div class="big" style="color:var(--warn);margin:0">◷</div><div style="flex:1"><h2>214 new photos are waiting for Mac Studio</h2><p>It has been offline since Wed 5 Nov, 22:10. They're on Raspberry Pi and on Deepak's phone in the meantime.</p></div><span class="btn sm">Troubleshoot</span></div>
+      <div class="card" style="margin:0">
+        <div class="rowi"><span class="lead">▭</span><div class="tx"><b>Mac Studio</b><span>Keeper · last seen Wed 22:10 · 1.2 / 2 TB</span></div><span class="pill warn">Offline</span></div>
+        <div class="rowi"><span class="lead">▣</span><div class="tx"><b>Raspberry Pi</b><span>Keeper · via relay · 0.9 / 4 TB</span></div><span class="pill ok">Online</span></div>
+        <div class="rowi"><span class="lead">▯</span><div class="tx"><b>Deepak's S25</b><span>Companion · keeps 90 days · 4.6 GB</span></div><span class="pill ok">Online</span></div>
+        <div class="rowi"><span class="lead">▯</span><div class="tx"><b>This Mac (MacBook Air)</b><span>Viewer · originals on demand</span></div><span class="pill">This device</span></div>
+      </div>
+      <div class="card pad" style="margin:0">
+        <b>Copies per photo</b>
+        <div class="meter"><i style="width:94%;background:var(--ok)"></i><i style="width:6%;background:var(--warn)"></i></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px"><span>2+ copies · 12,217</span><span>1 copy · 214</span></div>
+        <div class="muted" style="margin:10px 0 0;font-size:13px">Target 2 copies · <a href="#">Change in Settings</a></div>
+        <div style="height:1px;background:var(--line);margin:14px 0"></div>
+        <b>Mac Photos library</b><div class="muted" style="font-size:13px;margin-top:4px">Backing up "Photos Library" · 12,018 of 12,018 · <a href="#">Options</a></div>
+      </div>
+    </div>
+  </div>
+</div></div>
+<div class="cap wide"><b>Desktop Backup.</b> The sidebar row becomes the page: Overview, Devices and Storage are tabs inside one screen. The Mac Photos backup card moves here from the top of Settings, because it is about backup.</div>
+</section>
+</div>
+<script src="assets/redesign.js"></script>
+</body></html>

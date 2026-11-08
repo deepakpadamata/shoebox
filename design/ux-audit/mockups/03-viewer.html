@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redesign: Viewer</title><link rel="stylesheet" href="assets/redesign.css"></head>
+<body><div class="doc">
+<header><h1>3 · Viewer</h1>
+<p>The viewer is where people decide to send, keep or delete a photo, so sharing has to be one tap. Actions move to a bottom bar within thumb reach, Share comes first, and Delete sits at the far end. Rare actions go into an overflow menu. Shared albums use this same viewer. Fixes F2, F3, F5, F22.</p></header>
+<nav class="pages"><a href="index.html">Overview</a><a href="01-navigation.html">Navigation</a><a href="02-photos.html">Photos &amp; selection</a><a class="on" href="03-viewer.html">Viewer</a><a href="04-albums-sharing.html">Albums &amp; sharing</a><a href="05-backup.html">Backup</a><a href="06-settings.html">Settings</a><a href="07-onboarding.html">Onboarding</a><a href="08-search.html">Search</a></nav>
+
+<section class="board">
+<h2>Phone</h2>
+<p class="why">Today the actions ♥ ⓘ ≈ 🗑 are all in the top-right corner, there is no Share, and Delete is the same size as Info. In the redesign, the top bar holds only Back, the date and an overflow menu (⋯). The bottom bar holds the four everyday actions, each with a label. Info slides up as a sheet over the photo, as in Google Photos and Apple Photos.</p>
+<div class="row">
+  <div>
+    <div class="phone" style="background:#000;color:#fff"><div class="sb" style="color:#fff">9:41</div><div class="body">
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 10px"><button class="iconbtn plain" style="color:#fff">‹</button><div style="flex:1;text-align:center"><b>Thursday</b><div style="font-size:12px;opacity:.7">6 Nov · 18:42 · Lisbon</div></div><button class="iconbtn plain" style="color:#fff">⋯</button></div>
+      <div style="flex:1;display:flex;align-items:center"><div class="photo" data-seed="5" style="width:100%;aspect-ratio:3/4"></div></div>
+      <div style="padding:0 16px 10px;font-size:12px;font-weight:700"><span style="background:rgba(255,255,255,.18);padding:3px 8px;border-radius:99px">◎ LIVE</span></div>
+      <div class="actbar dark">
+        <div class="a"><span class="ic">⇪</span>Share</div>
+        <div class="a"><span class="ic">♡</span>Favorite</div>
+        <div class="a"><span class="ic">ⓘ</span>Info</div>
+        <div class="a" style="color:#ff9c8a"><span class="ic">🗑︎</span>Delete</div>
+      </div>
+    </div><div class="home" style="background:#fff"></div></div>
+    <div class="cap"><b>Viewer.</b> Four labelled actions within thumb reach. Tapping the photo hides all the controls. Swipe down to close and swipe up for Info, both kept from today.</div>
+  </div>
+  <div>
+    <div class="phone" style="background:#000;color:#fff"><div class="sb" style="color:#fff">9:41</div><div class="body">
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 10px"><button class="iconbtn plain" style="color:#fff">‹</button><div style="flex:1;text-align:center"><b>Thursday</b></div><button class="iconbtn plain" style="color:#fff">⋯</button></div>
+      <div class="photo" data-seed="5" style="width:100%;height:300px"></div>
+      <div class="sheet" style="color:var(--ink);top:330px;padding-bottom:20px">
+        <div class="grab"></div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Thu 6 Nov 2026, 18:42</h3></div>
+        <div class="muted" style="margin:2px 0 12px">Lisbon, Portugal · iPhone 15 Pro · 12 MP · 3.1 MB</div>
+        <div class="card" style="margin:0 0 12px;background:var(--ok-soft)"><div class="rowi"><span class="lead" style="background:transparent;color:var(--ok)">✓</span><div class="tx"><b style="color:var(--ok)">Backed up</b><span>On your Mac and Raspberry Pi</span></div><span class="chev"></span></div></div>
+        <div style="font-weight:700;margin:0 0 8px">People</div>
+        <div style="display:flex;gap:14px">
+          <div style="text-align:center"><div class="photo" data-seed="61" style="width:52px;height:52px;border-radius:99px"></div><div style="font-size:12px;margin-top:4px">Anna</div></div>
+          <div style="text-align:center"><div class="photo" data-seed="62" style="width:52px;height:52px;border-radius:99px"></div><div style="font-size:12px;margin-top:4px">Ravi</div></div>
+          <div style="text-align:center"><div style="width:52px;height:52px;border-radius:99px;border:2px dashed var(--line);display:grid;place-items:center;color:var(--ink-3)">＋</div><div style="font-size:12px;margin-top:4px" class="muted">Add name</div></div>
+        </div>
+        <div style="font-weight:700;margin:14px 0 8px">In albums</div>
+        <span class="pill">Lisbon</span> <span class="pill">Family 2026</span>
+      </div>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Info sheet.</b> Copies are shown with the same words as everywhere else: "Backed up · On your Mac and Raspberry Pi". Device names replace "1 copy · wants 2". People and albums are shown as chips.</div>
+  </div>
+  <div>
+    <div class="phone" style="background:#000;color:#fff"><div class="sb" style="color:#fff">9:41</div><div class="body">
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 10px"><button class="iconbtn plain" style="color:#fff">‹</button><div style="flex:1;text-align:center"><b>Thursday</b></div><button class="iconbtn" style="background:rgba(255,255,255,.2);color:#fff">⋯</button></div>
+      <div class="photo" data-seed="5" style="width:100%;flex:1"></div>
+      <div style="position:absolute;right:12px;top:52px;width:240px;background:var(--surface);color:var(--ink);border-radius:14px;box-shadow:var(--shadow);overflow:hidden">
+        <div class="rowi"><div class="tx"><b style="font-weight:500">Add to album</b></div><span>▤</span></div>
+        <div class="rowi"><div class="tx"><b style="font-weight:500">Find similar</b></div><span>≈</span></div>
+        <div class="rowi"><div class="tx"><b style="font-weight:500">Edit date &amp; place</b></div><span>✎</span></div>
+        <div class="rowi"><div class="tx"><b style="font-weight:500">Keep on this phone</b><span>Original stays here offline</span></div><span>⤓</span></div>
+        <div class="rowi"><div class="tx"><b style="font-weight:500">Save copy to gallery</b></div><span>↧</span></div>
+      </div>
+      <div class="actbar dark">
+        <div class="a"><span class="ic">⇪</span>Share</div><div class="a"><span class="ic">♡</span>Favorite</div><div class="a"><span class="ic">ⓘ</span>Info</div><div class="a" style="color:#ff9c8a"><span class="ic">🗑︎</span>Delete</div>
+      </div>
+    </div><div class="home" style="background:#fff"></div></div>
+    <div class="cap"><b>Overflow menu.</b> Rare actions such as Similar and Keep on this phone live here, and only the ones that apply are shown: a keeper never sees "Keep on this device" (F22). "Edit date &amp; place" is a suggested new item, needed for scanned photos.</div>
+  </div>
+</div>
+</section>
+
+<section class="board">
+<h2>Desktop</h2>
+<p class="why">On desktop the info column is collapsible and stays on its last state. The toolbar has Share, Favorite, Info and Delete with tooltips and shortcuts (⌘⇧S, F or L, ⌘I, ⌫). Arrow keys move between photos and Esc closes. Shared albums open this same viewer, with comments in the info column.</p>
+<div class="desk" style="background:#0d0d0c"><div class="win">
+  <div class="main" style="background:#0d0d0c;color:#fff">
+    <div class="tb" style="border-color:#222"><button class="iconbtn plain" style="color:#fff">‹</button><div><b>Thursday 6 Nov</b> <span style="opacity:.6">· 18:42 · 3 of 86</span></div><div class="grow"></div>
+      <span class="btn sm primary">⇪ Share</span><button class="iconbtn plain" style="color:#fff">♡</button><button class="iconbtn" style="background:#333;color:#fff">ⓘ</button><button class="iconbtn plain" style="color:#ff9c8a">🗑︎</button><button class="iconbtn plain" style="color:#fff">⋯</button></div>
+    <div class="content" style="display:flex">
+      <div style="flex:1;display:grid;place-items:center;padding:24px"><div class="photo" data-seed="5" style="width:520px;height:600px"></div></div>
+      <aside style="width:300px;background:var(--surface);color:var(--ink);padding:18px;border-left:1px solid #222">
+        <b style="font-size:15px">Thu 6 Nov 2026, 18:42</b>
+        <div class="muted" style="margin:2px 0 14px">Lisbon, Portugal<br>iPhone 15 Pro · 24 mm · f/1.8<br>4032 × 3024 · 3.1 MB</div>
+        <div style="background:var(--ok-soft);color:var(--ok);border-radius:10px;padding:10px 12px;font-weight:600;margin-bottom:14px">✓ Backed up<div style="font-weight:400;color:var(--ink-2);font-size:13px">Mac Studio · Raspberry Pi</div></div>
+        <b>People</b><div style="display:flex;gap:10px;margin:8px 0 14px"><div class="photo" data-seed="61" style="width:40px;height:40px;border-radius:99px"></div><div class="photo" data-seed="62" style="width:40px;height:40px;border-radius:99px"></div></div>
+        <b>Albums</b><div style="margin:8px 0 14px"><span class="pill">Lisbon</span> <span class="pill">Family 2026</span></div>
+        <b>Comments</b><div class="muted" style="margin-top:6px">Anna: the light here! 🌅</div>
+      </aside>
+    </div>
+  </div>
+</div></div>
+<div class="cap wide"><b>Desktop viewer.</b> Share is the primary button. The info column says "Backed up" with device names, which is the same rule the Backup screen uses. Comments from shared albums appear here, so there is one viewer instead of two (F5).</div>
+</section>
+</div>
+<script src="assets/redesign.js"></script>
+</body></html>

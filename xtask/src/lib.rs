@@ -7,3 +7,4 @@ pub mod gazetteer;
 pub mod jpeg;
 pub mod models;
 pub mod samples;
+pub mod takeout;

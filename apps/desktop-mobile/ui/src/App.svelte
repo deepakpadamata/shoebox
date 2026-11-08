@@ -21,7 +21,7 @@
   </div>
 {:else if app.error}
   <div class="splash"><b>Shoebox could not start</b><span class="muted">{app.error}</span></div>
-{:else if !app.state?.has_library}
+{:else if !app.state?.has_library || app.setup}
   <Onboarding />
 {:else if viewport.mobile}
   <MobileShell />

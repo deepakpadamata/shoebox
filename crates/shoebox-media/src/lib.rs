@@ -7,12 +7,14 @@
 //! from their headers. Anything else is reported as
 //! [`AnalyzeError::Unsupported`]; the pipeline never panics on bad input.
 
+pub mod archive;
 mod detect;
 mod exif_data;
 mod motion;
 mod raw;
 mod render;
 mod strip;
+pub mod takeout;
 mod video;
 
 use shoebox_core::ids::{Blake3Hash, Timestamp};

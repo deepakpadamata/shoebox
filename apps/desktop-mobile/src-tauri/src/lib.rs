@@ -16,6 +16,7 @@ pub mod keystore;
 pub mod notify;
 mod people;
 pub mod photos_source;
+mod safety;
 mod search_models;
 mod shared;
 pub mod types;

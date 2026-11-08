@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from './Icon.svelte';
   // "Back up camera roll" (mockups 1d/5e): the switch, the rules, and what it is doing now.
   import { api, type BackupFolder, type BackupPolicy, type BackupPreview, type BackupScope } from '../lib/api';
   import { app, fail, toast } from '../lib/store.svelte';
@@ -8,6 +9,9 @@
   import Sheet from './Sheet.svelte';
   import Button from './Button.svelte';
 
+  // `compact`: only the switch and one line of status, for the Settings home (the rules and
+  // folders are on the camera backup page).
+  let { compact = false }: { compact?: boolean } = $props();
   const st = $derived(app.backup);
   let busy = $state(false);
   // A Mac backs up the Photos app's library (P1-04): no folders, Wi-Fi or charger rules.
@@ -107,22 +111,22 @@
 
     {#if st.policy.enabled}
       {#if st.paused}
-        <div class="small paused">⏸ {st.paused}. {plural(st.pending, 'photo')} waiting.</div>
+        <div class="small paused"><Icon name="pause" size={14} /> {st.paused}. {plural(st.pending, 'photo')} waiting.</div>
       {:else if app.backupProgress}
         <ProgressBar total={app.backupProgress.total} segments={[{ value: app.backupProgress.done, tone: 'info' }]} label="Backing up" />
         <div class="small muted">{app.backupProgress.done} of {app.backupProgress.total}</div>
       {:else if st.pending > 0}
         <div class="small muted">{plural(st.pending, 'photo')} waiting.</div>
       {:else}
-        <div class="small muted">✓ {plural(st.imported, 'photo')} backed up from this device.</div>
+        <div class="small muted"><Icon name="check" size={14} /> {plural(st.imported, 'photo')} backed up from this device.</div>
       {/if}
-      {#if st.cloud_waiting > 0}
-        <div class="small muted">☁ {plural(st.cloud_waiting, 'photo')} in iCloud only: downloaded while this Mac is on mains power.</div>
+      {#if st.cloud_waiting > 0 && !compact}
+        <div class="small muted"><Icon name="cloud" size={14} /> {plural(st.cloud_waiting, 'photo')} in iCloud only: downloaded while this Mac is on mains power.</div>
       {/if}
-      {#if st.permission === 'limited'}
+      {#if st.permission === 'limited' && !compact}
         <div class="small paused">Only the photos you chose are shared with the app. Allow all photos in the system settings to back up everything.</div>
       {/if}
-      {#if !photosApp}
+      {#if !photosApp && !compact}
       <div class="row-flex small">
         <span class="grow">Backing up: <b>{scopeLabel(st.policy.scope)}</b></span>
         <Button size="sm" disabled={busy} onclick={openFolders}>Choose folders</Button>
@@ -130,7 +134,7 @@
       <label class="row-flex small"><Toggle checked={st.policy.wifi_only} label="Wi-Fi only" onchange={(v) => apply({ wifi_only: v })} /> Only on Wi-Fi</label>
       <label class="row-flex small"><Toggle checked={st.policy.charging_only} label="Only while charging" onchange={(v) => apply({ charging_only: v })} /> Only while charging</label>
       {/if}
-      {#if st.last_error}<div class="small err">Last problem: {st.last_error}</div>{/if}
+      {#if st.last_error && !compact}<div class="small err">Last problem: {st.last_error}</div>{/if}
     {:else if st.permission === 'denied'}
       <div class="small muted">Photo access has not been allowed yet; you will be asked when you turn this on.</div>
     {/if}

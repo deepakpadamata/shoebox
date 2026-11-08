@@ -1,366 +1,115 @@
 <script lang="ts">
-  // Settings (mockup 6b/6c): this device, how many copies to keep, relay, watched folders, theme.
+  // Settings (U1-14, U1-15). On a phone: a home that lists the groups with their current value,
+  // Backup first, and a page per group (`#/settings/<group>`, so Back is predictable). On a
+  // computer: two panes, the groups on the left with a filter, the group on the right.
   import { onMount } from 'svelte';
-  import { api, type AboutInfo, type SearchStatus, type Settings } from '../lib/api';
+  import { api } from '../lib/api';
+  import { go, rest } from '../lib/route.svelte';
+  import { app } from '../lib/store.svelte';
+  import { safetyLine } from '../lib/safety';
+  import { isHandheld } from '../lib/pick';
+  import { savedTheme } from '../lib/theme';
   import { viewport } from '../lib/viewport.svelte';
-  import { phoneAloneLine, processingHeadline, processingRows } from '../lib/search';
-  import { app, fail, refreshState, toast } from '../lib/store.svelte';
-  import Button from '../components/Button.svelte';
-  import List from '../components/List.svelte';
-  import Row from '../components/Row.svelte';
-  import Segmented from '../components/Segmented.svelte';
-  import BackupCard from '../components/BackupCard.svelte';
-  import Sheet from '../components/Sheet.svelte';
-  import RecoveryKit from './RecoveryKit.svelte';
-  import Toggle from '../components/Toggle.svelte';
-  import { canPick, pickFolder } from '../lib/pick';
-  import { applyTextSize, savedTextSize } from '../lib/textsize';
+  import Icon, { type IconName } from '../components/Icon.svelte';
+  import { filterGroups, GROUPS, groupTitle } from './settings/groups';
+  import { cfg, loadSettings } from './settings/store.svelte';
+  import About from './settings/About.svelte';
+  import Advanced from './settings/Advanced.svelte';
+  import Appearance from './settings/Appearance.svelte';
+  import Camera from './settings/Camera.svelte';
+  import Recovery from './settings/Recovery.svelte';
+  import SearchPeople from './settings/SearchPeople.svelte';
+  import You from './settings/You.svelte';
 
-  let s = $state<Settings | null>(null);
-  let name = $state('');
-  // The name people you share with see: one for all your devices.
-  let profileName = $state('');
-  let profileSet = $state(false);
-  onMount(() => { api.profile().then((p) => { profileName = p.name; profileSet = p.is_set; }).catch(() => {}); });
-  let relay = $state('default');
-  let customRelay = $state('');
-  let folder = $state('');
-  let target = $state('2');
-  let theme = $state(localStorage.getItem('theme') ?? 'system');
-  let exportDir = $state('');
-  let exporting = $state(false);
-  let textSize = $state(savedTextSize());
-  function setTextSize(v: string) {
-    textSize = v;
-    try { localStorage.setItem('textSize', v); } catch { /* not remembered */ }
-    applyTextSize(v);
-  }
-  let diag = $state<{ file_name: string; text: string } | null>(null);
-  let about = $state<AboutInfo | null>(null);
-  let licences = $state<string | null>(null);
-  let checking = $state(false);
-  async function checkNow() {
-    checking = true;
-    try {
-      const u = await api.checkForUpdate();
-      toast(u ? `Shoebox ${u.version} is available` : 'You have the latest version');
-    } catch (e) {
-      fail(e);
-    } finally {
-      checking = false;
-    }
-  }
-  onMount(() => { api.about().then((a) => (about = a)).catch(() => {}); });
-  // Search on this device (S1-16).
-  let search = $state<SearchStatus | null>(null);
-  let rebuilding = $state(false);
+  const group = $derived(rest()[0]);
+  const known = $derived(GROUPS.some((g) => g.id === group));
+  // A computer always shows one group; the first until another is chosen.
+  const shown = $derived(known ? group : 'camera');
+  const line = $derived(safetyLine(app.backup_status, isHandheld() ? 'phone' : 'computer'));
+  let filter = $state('');
+  const matches = $derived(filterGroups(filter));
+  let version = $state('');
   onMount(() => {
-    const refresh = () => api.searchStatus().then((st) => (search = st)).catch(() => {});
-    refresh();
-    const timer = setInterval(refresh, 3000);
-    return () => clearInterval(timer);
+    loadSettings();
+    api.about().then((a) => (version = a.version)).catch(() => {});
   });
-  const pct = (n: number, of: number) => (of === 0 ? 100 : Math.floor((n * 100) / of));
-  // Replacing the recovery phrase: the current one in, the new kit out (shown once).
-  let replaceOpen = $state(false);
-  let oldPhrase = $state('');
-  let replacing = $state(false);
-  let newKit = $state<{ phrase: string; kit_text: string } | null>(null);
-  async function replacePhrase() {
-    replacing = true;
-    try {
-      newKit = await api.replaceRecoveryPhrase(oldPhrase);
-      oldPhrase = '';
-      await refreshState();
-    } catch (e) {
-      fail(e);
-    } finally {
-      replacing = false;
-    }
-  }
-
-  // Leaving the library: the data folder is set aside (not deleted) and the app restarts at first run.
-  let leaveOpen = $state(false);
-  let leaving = $state(false);
-  const handheld = /Android|iPhone|iPad/i.test(navigator.userAgent);
-  async function leave() {
-    leaving = true;
-    try {
-      await api.leaveLibrary();
-      toast(handheld ? 'Left the library. Shoebox closes; open it again to start over.' : 'Left the library. Shoebox is restarting…');
-    } catch (e) {
-      fail(e);
-      leaving = false;
-    }
-  }
-
-  async function showDiagnostics() {
-    try { diag = await api.diagnostics(); } catch (e) { fail(e); }
-  }
-  async function copyDiagnostics() {
-    try { await navigator.clipboard.writeText(diag!.text); toast('Copied. Paste it into your message.'); } catch { toast('Select the text and copy it'); }
-  }
-  const diagUrl = $derived(diag ? URL.createObjectURL(new Blob([diag.text], { type: 'text/plain' })) : '');
-
-  async function doExport() {
-    exporting = true;
-    try {
-      const r = await api.exportLibrary(exportDir.trim());
-      toast(`Exported ${r.written} originals${r.missing ? `; ${r.missing} are on other devices and were skipped` : ''}`);
-    } catch (e) {
-      fail(e);
-    } finally {
-      exporting = false;
-    }
-  }
-
-  async function load() {
-    s = await api.settings();
-    name = s.device_name;
-    target = String(s.redundancy_target);
-    relay = s.relay === 'default' || s.relay === 'off' ? s.relay : 'custom';
-    customRelay = relay === 'custom' ? s.relay : '';
-  }
-  onMount(() => { load().catch(fail); });
-
-  async function save<T>(f: () => Promise<T>, msg: string) {
-    try {
-      await f();
-      toast(msg);
-      await load();
-    } catch (e) {
-      fail(e);
-    }
-  }
-
-  function applyTheme(v: string) {
-    theme = v;
-    localStorage.setItem('theme', v);
-    if (v === 'system') document.documentElement.removeAttribute('data-theme');
-    else document.documentElement.setAttribute('data-theme', v);
-  }
+  const themeName = $derived(({ system: 'System', light: 'Light', dark: 'Dark' } as Record<string, string>)[savedTheme()] ?? 'System');
+  const icons: Record<string, IconName> = { camera: 'camera', you: 'person', search: 'search', appearance: 'settings', recovery: 'key', advanced: 'lock', about: 'info' };
+  const value = (id: string) => (id === 'you' ? (cfg.s?.device_name ?? '') : id === 'appearance' ? themeName : id === 'about' ? version : '');
+  const open = (id: string) => go(`settings/${id}`);
 </script>
 
-<div class="page">
-  {#if s}
-    <BackupCard />
+{#snippet content(id: string)}
+  {#if id === 'camera'}<Camera />
+  {:else if id === 'you'}<You />
+  {:else if id === 'search'}<SearchPeople />
+  {:else if id === 'appearance'}<Appearance />
+  {:else if id === 'recovery'}<Recovery />
+  {:else if id === 'advanced'}<Advanced />
+  {:else if id === 'about'}<About />{/if}
+{/snippet}
 
-    <div class="section">You</div>
-    <div class="card pad stack">
-      <span class="small muted">Your name</span>
-      <div class="row-flex">
-        <input class="input grow" bind:value={profileName} placeholder="Your name" />
-        <Button size="sm" disabled={!profileName.trim()} onclick={() => save(async () => { await api.setProfileName(profileName); profileSet = true; }, 'Saved on all your devices')}>Save</Button>
+{#if viewport.mobile}
+  <div class="page">
+    {#if known}
+      {@render content(group)}
+    {:else}
+      <div class="set-section">Backup</div>
+      <div class="card list">
+        <button class="item" onclick={() => go('backup')}>
+          <span class="dot {line.tone}"></span><span class="grow"><b>{line.short}</b><span class="sub">Devices, camera backup and storage</span></span><Icon name="chevron" size={16} />
+        </button>
       </div>
-      <div class="small muted">{profileSet ? 'People you share albums with see this name. It is the same on all your devices.' : 'People you share albums with see this device\'s name until you set one here, for all your devices.'}</div>
-    </div>
 
-    <div class="section">This device</div>
-    <div class="card pad stack">
-      <span class="small muted">Name</span>
-      <div class="row-flex">
-        <input class="input grow" bind:value={name} />
-        <Button size="sm" disabled={!name.trim() || name === s.device_name} onclick={() => save(async () => { await api.renameDevice(name); await refreshState(); }, 'Renamed')}>Save</Button>
+      <div class="set-section">App</div>
+      <div class="card list">
+        {#each GROUPS.filter((g) => ['search', 'appearance', 'you', 'recovery'].includes(g.id)) as g (g.id)}
+          <button class="item" onclick={() => open(g.id)}><Icon name={icons[g.id]} size={22} /><span class="grow">{g.title}</span><span class="muted small val">{value(g.id)}</span><Icon name="chevron" size={16} /></button>
+        {/each}
       </div>
-      <div class="small muted">Role: <b>{s.role}</b></div>
-    </div>
 
-    {#if s.role === 'companion'}
-      <div class="section">What this device keeps</div>
-      <div class="card pad stack">
-        <p class="small muted" style="margin:0">Keeps the full-size photos from this recent period, from any of your devices. Older ones stay on your keepers; open one and it is fetched. Pinned photos are always kept.</p>
-        <Segmented value={String(s.keep_recent_days)} options={[{ value: '0', label: 'Off' }, { value: '30', label: '30 days' }, { value: '90', label: '90 days' }, { value: '365', label: '1 year' }]}
-          onchange={(v) => save(() => api.setKeepRules(Number(v), s!.keep_favorites), 'Saved')} />
-        <label class="row-flex"><Toggle checked={s.keep_favorites} label="Keep favourites" onchange={(v) => save(() => api.setKeepRules(s!.keep_recent_days, v), 'Saved')} /> Also keep my favourites</label>
+      <div class="set-section">More</div>
+      <div class="card list">
+        {#each GROUPS.filter((g) => ['advanced', 'about'].includes(g.id)) as g (g.id)}
+          <button class="item" onclick={() => open(g.id)}><Icon name={icons[g.id]} size={22} /><span class="grow">{g.title}</span><span class="muted small val">{value(g.id)}</span><Icon name="chevron" size={16} /></button>
+        {/each}
       </div>
     {/if}
-
-    {#if search && s.role !== 'viewer'}
-      <div class="section">Search</div>
-      <div class="card pad stack">
-        <label class="row-flex"><Toggle checked={search.index_here} label="Index photos on this device"
-          onchange={(v) => save(async () => { await api.setSearchIndexing(v); search = await api.searchStatus(); }, v ? 'Indexing on' : 'Indexing off')} />
-          {viewport.mobile ? 'Index photos while charging' : 'Index photos on power when idle'}</label>
-        <p class="small muted" style="margin:0">Indexing lets your devices find photos by what is in them. It is shared out between the devices that do it; turned off here, the others take this device's share.</p>
-        {#if viewport.mobile && search.meaning && search.index_here}
-          <div class="row-flex">
-            {#if search.run_active}
-              <Button size="sm" kind="ghost" onclick={() => save(async () => { await api.stopIndexNow(); }, 'Stopping…')}>Stop indexing</Button>
-            {:else}
-              <Button size="sm" onclick={() => save(async () => { if (!(await api.indexNow())) toast('Indexing is already running'); search = await api.searchStatus(); }, 'Indexing started')}>Index now</Button>
-            {/if}
-            <span class="tiny muted grow">{search.run_active ? 'Runs until everything is indexed. Keep the phone plugged in and the app open.' : 'Starts now, whether or not the phone is charging, until everything is indexed.'}</span>
-          </div>
-          {#if search.last_run && !search.run_active}<div class="small">{search.last_run}</div>{/if}
-        {/if}
-        {#if processingHeadline(search)}<div class="small"><b>{processingHeadline(search)}</b></div>{/if}
-        {#each processingRows(search) as r (r.key)}
-          <div class="proc">
-            <div class="row-flex between"><span class="small">{r.label}</span>{#if r.state !== 'off'}<span class="small muted">{r.done.toLocaleString()} of {r.total.toLocaleString()}</span>{/if}</div>
-            {#if r.state !== 'off'}<div class="pbar" role="progressbar" aria-label={r.label} aria-valuenow={pct(r.done, r.total)} aria-valuemin="0" aria-valuemax="100"><span class={r.state} style:width="{pct(r.done, r.total)}%"></span></div>{/if}
-            <div class="tiny muted">{r.note}</div>
-          </div>
-        {/each}
-        {#if !search.meaning}<div class="small muted">This device searches by words and labels: the model for searching by meaning is not installed.</div>{/if}
-        {#if search.model_download}<div class="small muted">Downloading search models: {pct(search.model_download.done, search.model_download.total)}% of {(search.model_download.total / 1e6).toFixed(0)} MB ({search.model_download.name}). It happens once, on Wi-Fi.</div>{/if}
-        {#if phoneAloneLine(search)}<div class="small muted">{phoneAloneLine(search)}</div>{/if}
-        {#each search.indexers as i}
-          <div class="small muted">{i.this_device ? 'This device' : i.name || 'A device'}: {i.photos_per_min.toLocaleString()} photos a minute{i.reads_text ? ', reads text' : ''}{i.finds_faces ? ', finds faces' : ''}</div>
-        {/each}
-        <div class="row-flex">
-          <span class="small muted grow">Search data on this device: {(search.held_bytes / 1e6).toFixed(1)} MB</span>
-          <Button size="sm" kind="ghost" disabled={rebuilding} onclick={async () => { rebuilding = true; try { await api.rebuildSearchIndex(); toast('Search index rebuilt'); } catch (e) { fail(e); } finally { rebuilding = false; } }}>Rebuild this device's search index</Button>
-        </div>
-      </div>
-    {/if}
-
-    <div class="section">Copies to keep</div>
-    <div class="card pad stack">
-      <p class="small muted" style="margin:0">Photos with fewer copies than this are marked at risk and copied to other devices as soon as one is reachable. A photo held by a keeper counts as backed up whatever this number is.</p>
-      <Segmented bind:value={target} options={['1', '2', '3', '4'].map((v) => ({ value: v, label: `${v} ${v === '1' ? 'copy' : 'copies'}` }))}
-        onchange={(v) => save(() => api.setRedundancyTarget(Number(v)), 'Saved')} />
-    </div>
-
-    <div class="section">Connection</div>
-    <div class="card pad stack">
-      <p class="small muted" style="margin:0">Devices find each other on your network first. A relay only helps when they cannot reach each other directly; it never sees your photos. Changes apply the next time the app starts.</p>
-      <Segmented bind:value={relay} options={[{ value: 'default', label: 'Default relays' }, { value: 'custom', label: 'My own relay' }, { value: 'off', label: 'No relay' }]}
-        onchange={(v) => v !== 'custom' && save(() => api.setRelay(v), 'Saved. Restart to apply.')} />
-      {#if relay === 'custom'}
-        <div class="row-flex">
-          <input class="input grow" placeholder="https://relay.example.com" bind:value={customRelay} />
-          <Button size="sm" disabled={!customRelay.trim()} onclick={() => save(() => api.setRelay(customRelay), 'Saved. Restart to apply.')}>Save</Button>
-        </div>
-      {/if}
-    </div>
-
-    <div class="section">Watched folders</div>
-    <List>
-      {#each s.watched_folders as f}<Row icon="📁" title={f} />{/each}
-      {#if s.watched_folders.length === 0}<Row title="No folders watched" subtitle="Photos that appear in a watched folder are imported automatically." />{/if}
-    </List>
-    <div class="row-flex" style="margin-top:8px">
-      {#if canPick()}
-        <Button size="sm" onclick={async () => { const d = await pickFolder('Watch a folder').catch(() => null); if (d) save(async () => { await api.watchFolder(d); }, 'Watching'); }}>Choose a folder to watch…</Button>
-      {:else}
-      <input class="input grow" placeholder="/Users/you/Pictures/Inbox" bind:value={folder} />
-      <Button size="sm" disabled={!folder.trim()} onclick={() => save(async () => { await api.watchFolder(folder); folder = ''; }, 'Watching')}>Watch</Button>
-      {/if}
-    </div>
-
-    <div class="section">Export</div>
-    <div class="card pad stack">
-      <p class="small muted" style="margin:0">Copies every original on this device into plain folders by year and month, with a <span class="mono">library.json</span> listing favorites and albums. Your library is never locked in.</p>
-      <div class="row-flex">
-        {#if canPick()}
-          <Button size="sm" disabled={exporting} onclick={async () => { const d = await pickFolder('Export to a folder').catch(() => null); if (d) { exportDir = d; await doExport(); } }}>{exporting ? 'Exporting…' : 'Choose a folder and export…'}</Button>
-        {:else}
-        <input class="input grow" placeholder="/Users/you/Shoebox export" bind:value={exportDir} />
-        <Button size="sm" disabled={!exportDir.trim() || exporting} onclick={doExport}>{exporting ? 'Exporting…' : 'Export'}</Button>
-        {/if}
-      </div>
-    </div>
-
-    <div class="section">Help</div>
-    <div class="card pad stack">
-      <p class="small muted" style="margin:0">If something is wrong, you can send a report to whoever is helping you. It has counts, versions and recent errors, and nothing about what is in your library: no photos, names, places or file names. Nothing is sent automatically.</p>
-      <div><Button size="sm" onclick={showDiagnostics}>Create a diagnostics report</Button></div>
-    </div>
-
-    <div class="section">Appearance</div>
-    <div class="card pad">
-      <Segmented value={theme} options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} onchange={applyTheme} />
-      <div class="small muted" style="margin:12px 0 6px">Text size</div>
-      <Segmented value={textSize} options={[{ value: 'small', label: 'Small' }, { value: 'default', label: 'Default' }, { value: 'large', label: 'Large' }, { value: 'xlarge', label: 'Largest' }]} onchange={setTextSize} />
-    </div>
-
-    <div class="section">Recovery</div>
-    <div class="card pad small stack">
-      {#if app.state?.recovery_kit_saved}✓ You confirmed the recovery kit is saved.{:else}The recovery kit has not been confirmed as saved.{/if}
-      <div class="muted">If every other device is lost, a new device recovers the library with the 24 words plus this device's link.</div>
-      <div><Button size="sm" onclick={async () => { try { const l = await api.deviceLink(); await navigator.clipboard.writeText(l); toast('This device’s link was copied'); } catch (e) { fail(e); } }}>Copy this device’s link</Button></div>
-      <div class="muted">If someone else may have seen your phrase, replace it: the old one stops working on every device.</div>
-      <div><Button size="sm" onclick={() => { replaceOpen = true; newKit = null; oldPhrase = ''; }}>Replace recovery phrase…</Button></div>
-    </div>
-
-    <div class="section">Leave this library</div>
-    <div class="card pad small stack">
-      <div class="muted">To create a new library on this device or join another one. This device stops syncing with this library; its data here is set aside, not deleted.</div>
-      <div><Button size="sm" kind="danger" onclick={() => (leaveOpen = true)}>Leave this library…</Button></div>
-    </div>
-
-    <div class="section">About</div>
-    <div class="card pad small stack">
-      {#if about}
-        <div><b>Shoebox {about.version}</b> <span class="muted mono">({about.commit})</span></div>
-        <div class="muted">Shoebox is free software under the GNU Affero General Public License 3.0. You can get its source code, and the source of this exact version, at <a href={about.source_url} target="_blank" rel="noreferrer">{about.source_url}</a>.</div>
-      {/if}
-      <div><Button size="sm" onclick={async () => { try { licences = await api.thirdPartyLicences(); } catch (e) { fail(e); } }}>Third-party licences</Button></div>
-      {#if s}
-        <label class="row-flex"><Toggle checked={s.update_checks} label="Check for new versions" onchange={async (v) => { try { await api.setUpdateChecks(v); if (s) s.update_checks = v; } catch (e) { fail(e); } }} /> Check for new versions</label>
-        <div class="muted">Twice a day the app reads the version number on the Shoebox website. Nothing about you or your library is sent; the website sees only that someone asked.</div>
-        <div><Button size="sm" disabled={checking} onclick={checkNow}>{checking ? 'Checking…' : 'Check now'}</Button></div>
-      {/if}
-    </div>
-  {:else}
-    <span class="muted">Loading…</span>
-  {/if}
-</div>
-
-<Sheet open={licences !== null} title="Third-party licences" onclose={() => (licences = null)} width={720}>
-  {#if licences !== null}
-    <textarea class="report mono" readonly rows="22" value={licences}></textarea>
-  {/if}
-</Sheet>
-
-<Sheet open={replaceOpen} title={newKit ? 'Your new recovery kit' : 'Replace recovery phrase'} onclose={() => { if (!newKit) { replaceOpen = false; oldPhrase = ''; } }} width={560}>
-  {#if newKit}
-    <RecoveryKit phrase={newKit.phrase} kitText={newKit.kit_text} onsaved={() => { replaceOpen = false; newKit = null; }} />
-  {:else}
-    <div class="stack">
-      <p class="small">A new 24-word phrase replaces the current one. Your devices switch to it as soon as they are in touch; the old phrase then opens nothing. Devices you removed stay removed.</p>
-      <p class="small muted">If you see a device in Devices you do not know, remove it first. Then keep the new phrase somewhere only you can reach.</p>
-      <textarea class="phrase" rows="3" placeholder="Current 24-word recovery phrase" autocomplete="off" spellcheck="false" bind:value={oldPhrase}></textarea>
-      <Button kind="primary" block disabled={replacing || !oldPhrase.trim()} onclick={replacePhrase}>{replacing ? 'Replacing…' : 'Replace'}</Button>
-      <Button block onclick={() => { replaceOpen = false; oldPhrase = ''; }}>Cancel</Button>
-    </div>
-  {/if}
-</Sheet>
-
-<Sheet open={leaveOpen} title="Leave this library?" onclose={() => { if (!leaving) leaveOpen = false; }} width={460}>
-  <div class="stack">
-    <p class="small">This device stops syncing and Shoebox starts over at first run, where you can create a new library or join another one.</p>
-    <p class="small muted">Nothing is deleted: this device's copy of the library is moved aside in its data folder. Originals only this device holds are no longer backed up anywhere; check Health first. The other devices keep listing this one until an admin removes it.</p>
-    <Button kind="danger" block disabled={leaving} onclick={leave}>{leaving ? 'Leaving…' : 'Leave this library'}</Button>
-    <Button block disabled={leaving} onclick={() => (leaveOpen = false)}>Cancel</Button>
   </div>
-</Sheet>
-
-<Sheet open={diag !== null} title="Diagnostics report" onclose={() => (diag = null)} width={640}>
-  {#if diag}
-    <div class="stack">
-      <p class="small muted" style="margin:0">Read it first: this is everything that would be shared.</p>
-      <textarea class="report mono" readonly rows="14" value={diag.text}></textarea>
-      <div class="row-flex">
-        <Button kind="primary" onclick={copyDiagnostics}>Copy</Button>
-        <a class="dl" href={diagUrl} download={diag.file_name}>Save as a file</a>
-      </div>
-    </div>
-  {/if}
-</Sheet>
+{:else}
+  <div class="two">
+    <nav class="left" aria-label="Settings">
+      <input class="filter" type="search" placeholder="Filter settings" aria-label="Filter settings" bind:value={filter}
+        onkeydown={(e) => { if (e.key === 'Enter' && matches[0]) { open(matches[0].id); } if (e.key === 'Escape') filter = ''; }} />
+      <button class="gl status" onclick={() => go('backup')}><span class="dot {line.tone}"></span><span class="grow">{line.short}</span><Icon name="chevron" size={14} /></button>
+      {#each matches as g (g.id)}
+        <button class="gl" class:on={shown === g.id} onclick={() => open(g.id)}><Icon name={icons[g.id]} size={18} />{g.title}</button>
+      {:else}
+        <p class="muted small nomatch">No setting matches “{filter}”.</p>
+      {/each}
+    </nav>
+    <div class="right">{#key shown}{@render content(shown)}{/key}</div>
+  </div>
+{/if}
 
 <style>
-  .proc { display: flex; flex-direction: column; gap: 4px; }
-  .pbar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
-  .pbar span { display: block; height: 100%; background: var(--ink-3); }
-  .pbar span.working { background: var(--accent); }
-  .pbar span.done { background: var(--ok, #3ba55d); }
-  .report { width: 100%; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font-size: 11px; padding: 10px; }
-  .dl { font-size: 13px; color: var(--accent); }
-  .page { padding: 18px; max-width: 640px; overflow: auto; height: 100%; }
-  .section { font-size: 12px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; margin: 20px 0 8px; }
-  .section:first-child { margin-top: 0; }
-  .pad { padding: 14px; }
-  .phrase { width: 100%; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 10px 12px; color: var(--ink); font: inherit; resize: none; }
-  .input { height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); padding: 0 12px; color: var(--ink); font: inherit; }
+  .page { padding: 12px 14px calc(16px + var(--safe-bottom)); overflow: auto; height: 100%; }
+  .gap { margin-top: 10px; }
+  .list { padding: 0; overflow: hidden; }
+  .item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: var(--tap); padding: 6px 14px; border: 0; background: none; font: inherit; font-size: var(--t-md); color: var(--ink); text-align: left; cursor: pointer; }
+  .item + .item { border-top: 1px solid var(--line); }
+  .item .val { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .grow { flex: 1; min-width: 0; }
+  .sub { display: block; font-size: var(--t-sm); color: var(--ink-2); }
+  .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; background: var(--ink-3); }
+  .dot.ok { background: var(--ok); } .dot.info { background: var(--info); } .dot.warn { background: var(--warn); } .dot.risk { background: var(--risk); }
+  .two { display: flex; height: 100%; }
+  .left { width: 240px; flex: none; border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+  .filter { height: 34px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); padding: 0 12px; margin-bottom: 8px; color: var(--ink); font: inherit; }
+  .gl { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-radius: 8px; background: none; font: inherit; font-size: var(--t-sm); color: var(--ink); cursor: pointer; text-align: left; }
+  .gl:hover { background: var(--surface-2); }
+  .gl.on { background: var(--surface-3); font-weight: 600; }
+  .gl.status { margin-bottom: 6px; border: 1px solid var(--line); }
+  .nomatch { padding: 8px 10px; }
+  .right { flex: 1; min-width: 0; padding: 18px 24px; overflow: auto; max-width: 760px; }
 </style>

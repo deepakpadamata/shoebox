@@ -6,6 +6,7 @@
   import { go } from '../lib/route.svelte';
   import { fail, toast } from '../lib/store.svelte';
   import { plural } from '../lib/format';
+  import Icon from '../components/Icon.svelte';
   import Button from '../components/Button.svelte';
   import FaceCrop from '../components/FaceCrop.svelte';
   import Sheet from '../components/Sheet.svelte';
@@ -14,6 +15,8 @@
   let naming = $state<PersonCard | null>(null);
   let name = $state('');
   let merging = $state<string[]>([]);
+  // Rename, Merge, Hide and This is me live behind ⋯ (or a long press), not under every face.
+  let acting = $state<PersonCard | null>(null);
   async function load() {
     try { list = await api.people(); } catch (e) { fail(e); }
   }
@@ -59,13 +62,10 @@
       <div class="grid">
         {#each list.people as p (p.id)}
           <div class="card-p" class:sel={merging.includes(p.id)}>
-            <button class="face" onclick={() => go(`person/${p.id}`)}><FaceCrop face={p.cover} size={96} /></button>
-            <b class="small">{p.name || 'Unnamed'}{p.me ? ' (me)' : ''}</b>
+            <button class="face" aria-label={p.name || 'Unnamed'} onclick={() => go(`person/${p.id}`)} oncontextmenu={(e) => { e.preventDefault(); acting = p; }}><FaceCrop face={p.cover} size={84} /></button>
+            <b class="small nm">{p.name || 'Unnamed'}{p.me ? ' (me)' : ''}</b>
             <span class="muted small">{plural(p.count, 'photo')}</span>
-            <span class="acts">
-              <button class="link small" onclick={() => { naming = p; name = p.name; }}>Rename</button>
-              <button class="link small" onclick={() => toggleMerge(p.id)}>{merging.includes(p.id) ? 'Selected' : 'Merge…'}</button>
-            </span>
+            <button class="more" aria-label="Actions for {p.name || 'this person'}" onclick={() => (acting = p)}><Icon name="more" size={18} /></button>
           </div>
         {/each}
       </div>
@@ -75,9 +75,9 @@
       <div class="grid">
         {#each list.groups as g (g.id)}
           <div class="card-p">
-            <button class="face" onclick={() => go(`person/${g.id}`)}><FaceCrop face={g.cover} size={96} /></button>
+            <button class="face" aria-label="Unnamed person" onclick={() => go(`person/${g.id}`)} oncontextmenu={(e) => { e.preventDefault(); acting = g; }}><FaceCrop face={g.cover} size={84} /></button>
             <span class="muted small">{plural(g.count, 'photo')}</span>
-            <button class="link small" onclick={() => { naming = g; name = ''; }}>Add a name</button>
+            <button class="more" aria-label="Actions for this person" onclick={() => (acting = g)}><Icon name="more" size={18} /></button>
           </div>
         {/each}
       </div>
@@ -87,6 +87,20 @@
     {/if}
   {/if}
 </div>
+
+<Sheet open={acting !== null} title={acting?.name || 'This person'} onclose={() => (acting = null)} width={340}>
+  {#if acting}
+    {@const p = acting}
+    <div class="menu">
+      <button onclick={() => { naming = p; name = p.name; acting = null; }}>{p.name ? 'Rename' : 'Add a name'}</button>
+      {#if !p.id.startsWith('group:')}
+        <button onclick={() => { toggleMerge(p.id); acting = null; }}>{merging.includes(p.id) ? 'Unselect for merge' : 'Merge with another person…'}</button>
+        <button onclick={async () => { await api.setMe(p.id); acting = null; await load(); }}>This is me</button>
+        <button onclick={async () => { await api.hidePerson(p.id, true); acting = null; await load(); }}>Hide</button>
+      {/if}
+    </div>
+  {/if}
+</Sheet>
 
 <Sheet open={naming !== null} title={naming?.name ? 'Rename' : 'Who is this?'} onclose={() => (naming = null)} width={380}>
   {#if naming}
@@ -107,12 +121,18 @@
 <style>
   .people { padding: 16px; overflow: auto; height: 100%; }
   .intro { margin: 0 0 8px; }
-  .section { font-size: 12px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; margin: 16px 0 8px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 16px; }
+  .section { font-size: var(--t-sm); font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; margin: 16px 0 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 12px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: repeat(3, 1fr); gap: 8px; } }
+  .nm { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .more { border: 0; background: none; color: var(--ink-2); cursor: pointer; width: var(--tap); height: 32px; display: grid; place-items: center; border-radius: 8px; }
+  .more:hover { background: var(--surface-2); }
+  .menu { display: grid; }
+  .menu button { text-align: left; border: 0; border-top: 1px solid var(--line); background: none; color: var(--ink); font: inherit; padding: 14px 4px; min-height: var(--tap); cursor: pointer; }
+  .menu button:first-child { border-top: 0; }
   .card-p { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; padding: 6px; border-radius: 12px; }
   .card-p.sel { outline: 2px solid var(--accent); }
   .face { border: 0; padding: 0; background: none; cursor: pointer; border-radius: 50%; }
-  .acts { display: flex; gap: 8px; }
   .link { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; }
   .bar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .empty { display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; padding: 48px 16px; text-align: center; }

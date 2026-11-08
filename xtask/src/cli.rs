@@ -14,6 +14,11 @@ pub enum Command {
     Samples {
         out: PathBuf,
     },
+    /// `fixtures --preset takeout`: a synthetic Google Takeout in zip parts.
+    Takeout {
+        out: PathBuf,
+        seed: u64,
+    },
     Gazetteer {
         input: PathBuf,
         out: PathBuf,
@@ -27,10 +32,12 @@ pub enum Command {
 
 pub const USAGE: &str = "\
 usage:
-  cargo xtask fixtures [--preset small|medium|large] [--out DIR] [--seed N]
+  cargo xtask fixtures [--preset small|medium|large|takeout] [--out DIR] [--seed N]
                        [--metadata-only | --with-files]
       Generate a synthetic photo corpus (default: medium into fixtures-out/<preset>).
       `large` is metadata-only by default (manifest only, for benchmarks).
+      `takeout` writes a Google Takeout in three zip parts with every quirk in
+      docs/notes/takeout-format.md, and truth.json with what an import must make of it.
   cargo xtask samples [--out DIR]
       Regenerate the checked-in sample files (default: fixtures/samples).
   cargo xtask gazetteer [--in DIR] [--out FILE]
@@ -47,12 +54,17 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         None | Some("help" | "--help" | "-h") => Ok(Command::Help),
         Some("fixtures") => {
             let (mut preset, mut out, mut seed, mut meta) = (Preset::Medium, None, 1u64, None);
+            let mut takeout = false;
             while let Some(flag) = it.next() {
                 let mut value = |name: &str| it.next().ok_or(format!("{name} needs a value"));
                 match flag {
                     "--preset" => {
                         let v = value("--preset")?;
-                        preset = Preset::parse(v).ok_or(format!("unknown preset `{v}`"))?;
+                        if v == "takeout" {
+                            takeout = true;
+                        } else {
+                            preset = Preset::parse(v).ok_or(format!("unknown preset `{v}`"))?;
+                        }
                     }
                     "--out" => out = Some(PathBuf::from(value("--out")?)),
                     "--seed" => {
@@ -64,6 +76,10 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                     "--with-files" => meta = Some(false),
                     other => return Err(format!("unknown flag `{other}`")),
                 }
+            }
+            if takeout {
+                let out = out.unwrap_or_else(|| PathBuf::from("fixtures-out/takeout"));
+                return Ok(Command::Takeout { out, seed });
             }
             let out = out.unwrap_or_else(|| PathBuf::from("fixtures-out").join(preset.name()));
             Ok(Command::Fixtures {

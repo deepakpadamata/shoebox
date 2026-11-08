@@ -44,3 +44,9 @@ export function dateTime(ms: number): string {
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+
+/** "March 2025" for a month heading (`key` is any day of the month, as "2025-03-01"). */
+export function monthLabel(key: string): string {
+  const [y, m] = key.split('-').map(Number);
+  return `${['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][m - 1]} ${y}`;
+}

@@ -13,4 +13,12 @@ has_motion: boolean,
 /**
  * How long the video runs.
  */
-motion_ms: number, mime: string, size: number, width: number, height: number, camera: string | null, lens: string | null, gps: [number, number] | null, imported_by: string, pinned: boolean, copies: number, redundancy_target: number, has_thumb: boolean, has_preview: boolean, has_original: boolean, stored_on: Array<StoredOn>, albums: Array<string>, };
+motion_ms: number, mime: string, size: number, width: number, height: number, camera: string | null, lens: string | null, gps: [number, number] | null, imported_by: string, pinned: boolean, copies: number, redundancy_target: number, has_thumb: boolean, has_preview: boolean, has_original: boolean, stored_on: Array<StoredOn>, albums: Array<string>, 
+/**
+ * Safe under the library's rule: enough devices hold the original, or a keeper does.
+ */
+backed_up: boolean, 
+/**
+ * Names of the devices holding the original.
+ */
+held_by: Array<string>, };

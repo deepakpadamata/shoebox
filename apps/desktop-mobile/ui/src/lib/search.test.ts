@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { addRecent, chipIcon, clearRecent, complete, debounce, groupSuggestions, lastWord, loadRecent, queryFromParam, removeChip, searchPath, step, coverageLine, deviceIndexLine, phoneAloneLine, processingHeadline, processingRows } from './search';
+import { addRecent, chipIcon, clearRecent, complete, debounce, groupSuggestions, lastWord, loadRecent, queryFromParam, relaxSuggestion, removeChip, searchPath, step, coverageLine, deviceIndexLine, phoneAloneLine, processingHeadline, processingRows } from './search';
 
 function memory() {
   const m = new Map<string, string>();
@@ -19,9 +19,9 @@ describe('chips', () => {
   });
 
   it('has an icon per kind', () => {
-    expect(chipIcon('date')).toBe('📅');
-    expect(chipIcon('place')).toBe('📍');
-    expect(chipIcon('nonsense')).toBe('');
+    expect(chipIcon('date')).toBe('calendar');
+    expect(chipIcon('place')).toBe('place');
+    expect(chipIcon('nonsense')).toBeNull();
   });
 });
 
@@ -178,5 +178,19 @@ describe('processing status', () => {
     expect(deviceIndexLine({ ...base, stage: 'text' }, 'aa', true)).toBe('Search indexing: 120 photos a minute (pictures, text, faces) · now reading text in photos');
     expect(deviceIndexLine(base, 'zz', false)).toBe('');
     expect(deviceIndexLine({ ...base, index_here: false, indexers: [] }, 'aa', true)).toBe('Search indexing: off');
+  });
+});
+
+describe('relaxSuggestion', () => {
+  it('suggests nothing without chips', () => {
+    expect(relaxSuggestion([])).toBeNull();
+  });
+  it('offers the date first, since it narrows most', () => {
+    const r = relaxSuggestion([{ kind: 'place', label: 'Lisbon' }, { kind: 'date', label: '2026' }, { kind: 'camera', label: 'Pixel 8' }]);
+    expect(r?.text).toBe('Try without 2026');
+  });
+  it('falls back to the place, then the last chip', () => {
+    expect(relaxSuggestion([{ kind: 'camera', label: 'Pixel 8' }, { kind: 'place', label: 'Lisbon' }])?.text).toBe('Try without Lisbon');
+    expect(relaxSuggestion([{ kind: 'person', label: 'Ana' }, { kind: 'camera', label: 'Pixel 8' }])?.text).toBe('Try without Pixel 8');
   });
 });

@@ -6,7 +6,7 @@
 <span class="pill {tone}">{@render children()}</span>
 
 <style>
-  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-xs); font-weight: 600; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
   .ok { background: var(--ok-soft); color: var(--ok); }
   .warn { background: var(--warn-soft); color: var(--warn); }
   .risk { background: var(--risk-soft); color: var(--risk); }

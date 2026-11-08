@@ -1483,6 +1483,10 @@ impl AppCore {
         }
         let parts: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
         let weak = Arc::downgrade(self);
+        // Held across the spawn: a run that fails at once must not have its error wiped by the reset below.
+        let mut run = self.archive_import.lock().unwrap();
+        run.error = None;
+        run.report = None;
         let task = tokio::spawn(async move {
             let result = ln.import_archives(&parts, ImportOptions::default()).await;
             let Some(core) = weak.upgrade() else { return };
@@ -1508,12 +1512,8 @@ impl AppCore {
             let _ = core.save();
             core.emit(AppEvent::ArchiveImport);
         });
-        {
-            let mut run = self.archive_import.lock().unwrap();
-            run.error = None;
-            run.report = None;
-            run.task = Some(task);
-        }
+        run.task = Some(task);
+        drop(run);
         self.emit(AppEvent::ArchiveImport);
         Ok(())
     }

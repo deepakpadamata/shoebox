@@ -3,10 +3,12 @@
   // through the system share sheet.
   import { api, type SharedAlbumInfo } from '../lib/api';
   import { plural } from '../lib/format';
-  import { fail, toast } from '../lib/store.svelte';
+  import { fail, refreshAlbums, toast } from '../lib/store.svelte';
   import Sheet from './Sheet.svelte';
   import Button from './Button.svelte';
   import Toggle from './Toggle.svelte';
+  import Icon from './Icon.svelte';
+  import WebLinkSheet from './WebLinkSheet.svelte';
 
   interface Props {
     open: boolean;
@@ -64,6 +66,18 @@
     } catch (e) { fail(e); busy = ''; }
   }
 
+  // A web link is always an album's: the photos go into a new album and the link shows that.
+  let linkAlbum = $state<string | null>(null);
+  async function webLink() {
+    busy = 'link';
+    try {
+      const a = await api.createAlbum(`Link ${new Date().toLocaleDateString(undefined, { dateStyle: 'medium' })}`);
+      await api.albumAdd(a.id, ids);
+      await refreshAlbums();
+      linkAlbum = a.id;
+    } catch (e) { fail(e); } finally { busy = ''; }
+  }
+
   async function otherApps() {
     busy = 'apps';
     const r = anchor();
@@ -84,8 +98,9 @@
     </div>
   {:else}
     <div class="stack">
+      <Button kind="primary" block disabled={busy !== ''} onclick={otherApps}><Icon name="share" size={18} /> {busy === 'apps' ? `Getting ${plural(ids.length, 'original')} ready…` : 'Send to another app…'}</Button>
+      <div class="label">Add to a shared album</div>
       {#if albums.length}
-        <div class="label">Shared albums</div>
         <div class="list">
           {#each albums as a (a.id)}
             <button class="row" disabled={busy !== ''} onclick={() => pick(a.id)}>
@@ -97,15 +112,21 @@
       {/if}
       <form class="row-flex" onsubmit={(e) => { e.preventDefault(); createAndAdd(); }}>
         <input class="input grow" placeholder="New shared album…" bind:value={newName} disabled={busy !== ''} />
-        <Button type="submit" kind="primary" disabled={!newName.trim() || busy !== ''}>{busy === 'new' ? 'Creating…' : 'Create'}</Button>
+        <Button type="submit" disabled={!newName.trim() || busy !== ''}>{busy === 'new' ? 'Creating…' : 'Create'}</Button>
       </form>
-      <Button block disabled={busy !== ''} onclick={otherApps}>{busy === 'apps' ? `Getting ${plural(ids.length, 'original')} ready…` : 'Other apps…'}</Button>
+      <div class="label">Or</div>
+      <Button block disabled={busy !== ''} onclick={webLink}><Icon name="link" size={18} /> {busy === 'link' ? 'Making an album…' : 'Create a web link'}</Button>
+      <p class="muted small">A web link shows these photos in a browser, with nothing installed. They go into a new album first.</p>
     </div>
   {/if}
 </Sheet>
 
+{#if linkAlbum}
+  <WebLinkSheet open={true} album={linkAlbum} onclose={() => { linkAlbum = null; ondone(); }} />
+{/if}
+
 <style>
-  .label { font-size: 12px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
+  .label { font-size: var(--t-sm); font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
   .list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
   .row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border: 0; background: var(--surface); text-align: left; cursor: pointer; }
   .row + .row { border-top: 1px solid var(--line); }

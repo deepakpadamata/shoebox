@@ -36,33 +36,43 @@ keeps no copy of them, only the gallery does. Free-up also leaves alone what the
 
 ## First run
 
-1. **Create a library** on your first device. Give it a name and a role.
+1. **Create a library** on your first device. Give it a name; the device's role is chosen for you (a phone is a companion, a computer a keeper) and can be changed with *Change*.
 2. **Save the recovery kit.** You are shown 24 words (and a printable page). They are the only way back if
    *every* device is lost. Store them somewhere safe and offline, then confirm. A banner reminds you until you do.
-3. **Add a second device.** On the first device open *Devices → Add a device*, choose its role and show the
-   code. On the new device choose *Add this computer to an existing library*, scan or paste the code, then
+3. **Add a second device.** On the first device open *Settings → Backup → Add a device* (the QR code comes first; *Send pairing link instead* shares the text code). On the new device choose *Add this computer to an existing library*, scan or paste the code, then
    check that both screens show **the same six digits** and tap *They match*. If the digits differ, tap *They
    do not match*: someone is in the middle.
-4. **Bring photos in.** On a computer: *Import* a folder (the app can also watch a folder). On a phone: turn
+4. **Bring photos in.** First run ends with a *Bring your photos in* step (camera backup, adding a device, Google Photos). On a computer: *Import* a folder (the app can also watch a folder). On a phone: turn
    on camera backup in Settings; it uploads new photos to your other devices when conditions allow
    (Wi-Fi only, charging only and battery limits are yours to choose). Shoebox reads gallery photos where they are
    and keeps no second copy on the phone; delete a photo in the gallery and it is deleted from your library too
    (Recently Deleted, on every device). To add photos the backup does not see (albums you have not shared, a cloud
    drive), tap **＋** in the Library.
 
+   **Moving over from Google Photos (on a Mac or other computer).** Ask Google for your photos at
+   takeout.google.com: choose *Deselect all*, tick only *Google Photos*, pick *.zip* and the largest file size, and
+   wait for Google's email (a few hours to a few days). Download every part into one folder. In Shoebox choose
+   **＋ Import → From Google Photos…**, select all the parts at once (or the folder, if you unpacked them), and read
+   the summary before you start: how many photos, which albums, and the space needed against the space free. The
+   import keeps what Google knew: dates you corrected, places, favourites and albums; photos in Google Photos' bin
+   are left out, and a photo that appears in several albums is imported once. It runs in the background and you can
+   close the window; *Stop* pauses it, and if you quit the app the next start offers *Continue*. When it ends you
+   get a report of what came over and what did not. The files are copied into your library and read only once; your
+   downloaded parts stay where they are, so you can delete them afterwards.
+
 ## Sharing an album
 
-*Shared* lists the albums you share with other people (who may be on their own libraries).
+*Albums* lists your albums and the ones shared with you in one list (shared ones carry a *Shared* label and a badge for new photos).
 
 * **Your name.** People you share with see the name in *Settings → You*, the same on all your devices (until you set
   one, they see the device's name).
 * **All your devices take part.** Join or create a shared album on one device and your other devices join it by
   themselves; the other people see you once, not once per device. Leaving on one device leaves on all of them.
-* **Share an album you already have:** open it under *Albums* and choose *Share this album*. Its photos are shared,
+* **Share an album you already have:** open it under *Albums* and choose *Share*, then *Invite people*. Its photos are shared,
   and photos you add to the album later are shared too. (Removing a photo from your album does not remove it from
   the shared one.)
 * **Create** a shared album, then **Invite**: choose whether the person can add photos or only look. You get
-  a QR code and a text code; the person opens *Shared → Join with an invitation* and scans or pastes it. Both
+  a QR code and a text code; the person opens *Albums → ＋ → Join with an invitation* and scans or pastes it. *Send invitation…* hands the text to the system share sheet. Both
   of you need to be online while they join. An invitation works once and for seven days.
 * **Adding photos.** If a photo has a location, you are asked to *keep* or *remove* it before everyone sees where
   it was taken, and you can remember the choice for the album. Removing the location changes only the shared
@@ -79,22 +89,22 @@ old one and your library stays. It asks the Shoebox website twice a day and send
 
 ## When something goes wrong
 
-* **A device was lost or stolen.** On another device: *Devices → Remove* next to it. The remaining devices
+* **A device was lost or stolen.** On another device: *Backup → Devices*, open it and choose *Remove*. The remaining devices
   move to a new library space the lost device cannot read. If the lost device was an **admin** (the one
   you created the library on is), or you remove it from a device that is not one, you are asked for your
   24-word recovery phrase: that way a thief holding an admin device cannot remove you instead.
 * **All devices were lost.** Install Shoebox, choose *I lost my devices*, enter the 24 words and the link of
   any device that still has the library. (A keeper prints its link with `shoebox-keeper address`.) If that
   device has a screen, it asks whether to let the new device in: allow it there within two minutes.
-* **Someone may have seen your recovery phrase.** *Settings → Replace recovery phrase*, enter the current one,
+* **Someone may have seen your recovery phrase.** *Settings → Advanced → Replace recovery phrase*, enter the current one,
   and save the new kit it shows (once). Your devices switch to the new phrase as soon as they are in touch, and
   the old one opens nothing. Remove any device you do not recognise first.
 * **"Your library's recovery phrase was replaced".** Shown on your other devices after a replacement. If it
-  was you, get the new phrase to wherever you keep it; if not, check Devices for devices you do not know.
+  was you, get the new phrase to wherever you keep it; if not, check Backup → Devices for devices you do not know.
 * **"… became an admin of your library".** Shown on every device when a new admin appears, for example when
   someone restores with the recovery phrase. If it was not you, someone has your phrase: remove that device
-  (Devices → Remove, with the phrase) and keep the phrase somewhere safer.
-* **Photos show "not backed up".** You need another device online. Add a keeper, or open the app on your
+  (Backup → Devices → Remove, with the phrase) and keep the phrase somewhere safer.
+* **The status chip says "Only on this phone" or "At risk".** You need another device online. Add a keeper, or open the app on your
   laptop while it is on the same Wi-Fi.
 * **Ask for help.** *Settings → Help → Create a diagnostics report* makes a text with versions, counts and
   recent errors. It contains no photos, names, places or file names. Nothing is sent: copy it or save it.

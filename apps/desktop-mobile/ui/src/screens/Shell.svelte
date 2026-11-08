@@ -4,40 +4,57 @@
   import { go, param, section } from '../lib/route.svelte';
   import { app, fail, toast } from '../lib/store.svelte';
   import { plural } from '../lib/format';
+  import { safetyLine } from '../lib/safety';
+  import StatusChip from '../components/StatusChip.svelte';
   import { canPick, pickFiles, pickFolder } from '../lib/pick';
   import Banner from '../components/Banner.svelte';
   import Button from '../components/Button.svelte';
   import Sheet from '../components/Sheet.svelte';
+  import GoogleImportSheet from '../components/GoogleImportSheet.svelte';
   import Library from './Library.svelte';
   import Albums from './Albums.svelte';
-  import Shared from './Shared.svelte';
+  import AlbumPage from './AlbumPage.svelte';
   import Deleted from './Deleted.svelte';
-  import Devices from './Devices.svelte';
-  import Health from './Health.svelte';
+  import Backup from './Backup.svelte';
   import Settings from './Settings.svelte';
   import RecoveryKit from './RecoveryKit.svelte';
   import Search from './Search.svelte';
   import People from './People.svelte';
   import SearchField from '../components/SearchField.svelte';
+  import Icon, { type IconName } from '../components/Icon.svelte';
   import { queryFromParam, searchPath } from '../lib/search';
 
-  const nav = [
-    { id: 'library', label: 'Library', icon: '▦' },
-    { id: 'favorites', label: 'Favorites', icon: '♥' },
-    { id: 'albums', label: 'Albums', icon: '▤' },
-    { id: 'shared', label: 'Shared', icon: '👥' },
-    { id: 'people', label: 'People', icon: '☺' },
-    { id: 'deleted', label: 'Recently Deleted', icon: '🗑' },
+  // Frequency decides placement (U1-11): the daily jobs on top, the albums in a group of their
+  // own, and the rare ones (backup, trash, settings) in the footer.
+  const top: { id: string; label: string; icon: IconName; key: string }[] = [
+    { id: 'library', label: 'Photos', icon: 'photos', key: '1' },
+    { id: 'favorites', label: 'Favorites', icon: 'heart', key: '2' },
+    { id: 'people', label: 'People', icon: 'people', key: '3' },
   ];
-  const more = [
-    { id: 'devices', label: 'Devices', icon: '⇄' },
-    { id: 'health', label: 'Storage', icon: '◔' },
-    { id: 'settings', label: 'Settings', icon: '⚙︎' },
-  ];
+
+  // ⌘1–⌘3 for the top items, ⌘, for Settings.
+  function shortcuts(e: KeyboardEvent) {
+    if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+    if (e.key === ',') { e.preventDefault(); go('settings'); return; }
+    const t = top.find((n) => n.key === e.key);
+    if (t) { e.preventDefault(); go(t.id); }
+  }
+  let newAlbumOpen = $state(false);
+  let newAlbumName = $state('');
+  async function createAlbum() {
+    try {
+      const a = await api.createAlbum(newAlbumName);
+      newAlbumName = '';
+      newAlbumOpen = false;
+      go(`album/${a.id}`);
+    } catch (e) { fail(e); }
+  }
+  const line = $derived(safetyLine(app.backup_status, 'computer'));
 
   let importOpen = $state(false);
   $effect(() => { if (app.importRequest > 0) importOpen = true; });
   let importPath = $state('');
+  let googleOpen = $state(false);
   let busy = $state(false);
   let kitOpen = $state(false);
   let kitDismissed = $state(false);
@@ -57,31 +74,11 @@
     }
   }
   const when = (ms: number) => new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-  let albumName = $state('');
-  let renameOpen = $state(false);
-  let renameTo = $state('');
-
-  $effect(() => {
-    app.version;
-    const id = section() === 'album' ? param() : undefined;
-    if (!id) return;
-    api.albums().then((all) => (albumName = all.find((a) => a.id === id)?.name ?? 'Album')).catch(() => {});
-  });
-
-  async function rename() {
-    try {
-      await api.renameAlbum(param()!, renameTo);
-      albumName = renameTo.trim();
-      renameOpen = false;
-    } catch (e) {
-      fail(e);
-    }
-  }
   const sec = $derived(section());
   // The toolbar's search field follows the query on the search screen.
   let searchText = $state('');
   $effect(() => {
-    if (sec === 'search') searchText = queryFromParam(param());
+    searchText = sec === 'search' ? queryFromParam(param()) : '';
   });
   function search(q: string) {
     if (q) go(searchPath(q));
@@ -107,68 +104,73 @@
   }
 
   const title = $derived(
-    sec === 'album' && albumName ? albumName : { library: 'Library', favorites: 'Favorites', albums: 'Albums', album: 'Album', shared: 'Shared albums', deleted: 'Recently Deleted', devices: 'Devices', health: 'Storage', settings: 'Settings', search: 'Search', similar: 'Similar photos', people: 'People', person: 'Person' }[sec] ?? 'Library',
+    sec === 'album' ? '' : { library: 'Photos', favorites: 'Favorites', albums: 'Albums', album: 'Album', shared: 'Shared albums', deleted: 'Recently Deleted', backup: 'Backup', settings: 'Settings', search: 'Search', similar: 'Similar photos', people: 'People', person: 'Person' }[sec] ?? 'Library',
   );
 </script>
+
+<svelte:window onkeydown={shortcuts} />
 
 <div class="shell">
   <nav class="sidebar" aria-label="Sections">
     <div class="brand"><Logo size={22} />Shoebox</div>
-    <div class="grp">Library</div>
-    {#each nav as n}
-      <a class="it" class:on={sec === n.id || (n.id === 'albums' && sec === 'album')} href="#/{n.id}">
-        <span>{n.icon}</span>{n.label}
+    {#each top as n}
+      <a class="it" class:on={sec === n.id || (n.id === 'people' && sec === 'person')} href="#/{n.id}" title="{n.label} (⌘{n.key})">
+        <span class="ni"><Icon name={n.icon} size={18} /></span>{n.label}
         {#if n.id === 'library' && counts}<span class="n">{counts.photos.toLocaleString('en')}</span>{/if}
         {#if n.id === 'favorites' && counts}<span class="n">{counts.favorites}</span>{/if}
-        {#if n.id === 'deleted' && counts && counts.deleted}<span class="n">{counts.deleted}</span>{/if}
       </a>
     {/each}
-    <div class="grp">This device</div>
-    {#each more as n}
-      <a class="it" class:on={sec === n.id} href="#/{n.id}"><span>{n.icon}</span>{n.label}
-        {#if n.id === 'health' && atRisk > 0}<span class="n risk">{atRisk}</span>{/if}
-      </a>
-    {/each}
-    <div class="foot small muted">{app.state?.device_name} · {app.state?.role}</div>
+    <a class="grp link" class:on={sec === 'albums'} href="#/albums">Albums</a>
+    <div class="albums">
+      {#each app.albums as a (a.id)}
+        <a class="it" class:on={sec === 'album' && (param() === a.id || param() === a.sharedId)} href="#/album/{a.id}" title={a.name}>
+          <span class="ni"><Icon name="albums" size={18} /></span><span class="nm">{a.name}</span>
+          {#if a.shared}<span class="pill">Shared</span>{/if}
+          {#if a.unread > 0}<span class="badge" aria-label="{a.unread} new">{a.unread}</span>{/if}
+        </a>
+      {/each}
+      <button class="it new" onclick={() => (newAlbumOpen = true)}><span class="ni"><Icon name="add" size={18} /></span>New album</button>
+    </div>
+    <div class="foot">
+      <StatusChip variant="row" onclick={() => go('backup')} />
+      <a class="it" class:on={sec === 'deleted'} href="#/deleted"><span class="ni"><Icon name="trash" size={18} /></span>Recently Deleted{#if counts && counts.deleted}<span class="n">{counts.deleted}</span>{/if}</a>
+      <a class="it" class:on={sec === 'settings'} href="#/settings" title="Settings (⌘,)"><span class="ni"><Icon name="settings" size={18} /></span>Settings</a>
+      <div class="small muted device">{app.state?.device_name} · {app.state?.role}</div>
+    </div>
   </nav>
 
   <main class="main">
     <header class="toolbar">
       <h3>{title}</h3>
       <span class="grow"></span>
-      {#if sec === 'album'}<Button size="sm" kind="ghost" onclick={() => { renameTo = albumName; renameOpen = true; }}>Rename</Button>{/if}
       <div class="searchbox"><SearchField bind:value={searchText} onsubmit={search} oncancel={() => sec === 'search' && go('library')} shortcut /></div>
-      <span class="status small muted" title={app.syncError}>
-        <span class="sd" class:busy={app.syncing.length > 0} class:bad={!!app.syncError && app.syncing.length === 0}></span>
-        {app.syncing.length > 0 ? 'Syncing…' : app.syncError ? 'Some devices are not reachable' : 'Up to date'}
-      </span>
       {#if app.importProgress}<span class="small muted">Importing {app.importProgress.done} / {app.importProgress.total}…</span>{/if}
-      <Button size="sm" onclick={() => (importOpen = true)}>＋ Import</Button>
+      <Button size="sm" onclick={() => (importOpen = true)}><Icon name="add" size={16} /> Import</Button>
     </header>
 
     {#if app.removed || app.state?.membership === 'removed'}
-      <div class="banners"><Banner tone="risk" icon="⛔">This device was removed from the library. It no longer syncs; your photos on it stay until you delete them.</Banner></div>
+      <div class="banners"><Banner tone="risk" icon="block">This device was removed from the library. It no longer syncs; your photos on it stay until you delete them.</Banner></div>
     {:else if alert?.kind === 'phrase_replaced'}
-      <div class="banners"><Banner tone="risk" icon="🛡" action="Review" onaction={() => go('devices')} ondismiss={() => api.dismissAlert(alert.device_id).catch(fail)}>Your library's <b>recovery phrase was replaced</b> on another device ({when(alert.at_ms)}). Your old phrase no longer works; get the new one from whoever replaced it. If nobody you know did, check Devices for devices you do not know.</Banner></div>
+      <div class="banners"><Banner tone="risk" icon="shield" action="Review" onaction={() => go('backup/devices')} ondismiss={() => api.dismissAlert(alert.device_id).catch(fail)}>Your library's <b>recovery phrase was replaced</b> on another device ({when(alert.at_ms)}). Your old phrase no longer works; get the new one from whoever replaced it. If nobody you know did, check Devices for devices you do not know.</Banner></div>
     {:else if alert}
-      <div class="banners"><Banner tone="risk" icon="🛡" action="Review" onaction={() => go('devices')} ondismiss={() => api.dismissAlert(alert.device_id).catch(fail)}><b>{alert.device_name}</b> became an admin of your library ({when(alert.at_ms)}). If that was not you, someone may have your recovery phrase: remove that device in Devices.</Banner></div>
+      <div class="banners"><Banner tone="risk" icon="shield" action="Review" onaction={() => go('backup/devices')} ondismiss={() => api.dismissAlert(alert.device_id).catch(fail)}><b>{alert.device_name}</b> became an admin of your library ({when(alert.at_ms)}). If that was not you, someone may have your recovery phrase: remove that device in Devices.</Banner></div>
     {:else if app.state?.update}
-      <div class="banners"><Banner tone="info" icon="⬆︎" action="Download" onaction={() => window.open(app.state!.update!.page, '_blank')} ondismiss={() => api.dismissUpdate().catch(fail)}><b>Shoebox {app.state.update.version}</b> is available. Download it and install it over this one: your library and settings stay.</Banner></div>
-    {:else if atRisk > 0 && sec !== 'health'}
-      <div class="banners"><Banner tone="risk" action="View" onaction={() => go('health')}><b>{plural(atRisk, 'photo')}</b> {atRisk === 1 ? 'is' : 'are'} not backed up on enough devices yet.</Banner></div>
+      <div class="banners"><Banner tone="info" icon="download" action="Download" onaction={() => window.open(app.state!.update!.page, '_blank')} ondismiss={() => api.dismissUpdate().catch(fail)}><b>Shoebox {app.state.update.version}</b> is available. Download it and install it over this one: your library and settings stay.</Banner></div>
+    {:else if app.archive?.state === 'stopped'}
+      <div class="banners"><Banner tone="info" icon="download" action="Continue" onaction={() => (googleOpen = true)}>A Google Photos import did not finish. What it had done is kept.</Banner></div>
+    {:else if line.banner && sec !== 'backup'}
+      <div class="banners"><Banner tone={line.tone === 'risk' ? 'risk' : 'warn'} icon={line.tone === 'risk' ? 'warning' : 'pause'} action="View" onaction={() => go('backup')}>{line.long}</Banner></div>
     {:else if app.state && !app.state.recovery_kit_saved && !kitDismissed}
-      <div class="banners"><Banner tone="accent" icon="🔑" action="I saved it" onaction={() => (kitOpen = true)} ondismiss={() => (kitDismissed = true)}>Your recovery kit is the only way back if every device is lost. You have not confirmed saving it.</Banner></div>
+      <div class="banners"><Banner tone="accent" icon="key" action="I saved it" onaction={() => (kitOpen = true)} ondismiss={() => (kitDismissed = true)}>Your recovery kit is the only way back if every device is lost. You have not confirmed saving it.</Banner></div>
     {/if}
 
     <div class="content">
       {#if sec === 'library' || sec === ''}<Library source="all" />
       {:else if sec === 'favorites'}<Library source="favorites" />
       {:else if sec === 'albums'}<Albums />
-      {:else if sec === 'album'}{#key param()}<Library source="album" album={param()} />{/key}
-      {:else if sec === 'shared'}<Shared />
+      {:else if sec === 'album'}{#key param()}<AlbumPage id={param()!} />{/key}
       {:else if sec === 'deleted'}<Deleted />
-      {:else if sec === 'devices'}<Devices />
-      {:else if sec === 'health'}<Health />
+      {:else if sec === 'backup'}<Backup />
       {:else if sec === 'settings'}<Settings />
       {:else if sec === 'search'}<Search />
       {:else if sec === 'similar'}{#key param()}<Search similar={param()} />{/key}
@@ -185,17 +187,21 @@
     {#if canPick()}
       <Button kind="primary" block disabled={busy} onclick={async () => doImport(await pickFiles().catch((e) => { fail(e); return []; }))}>{busy ? 'Importing…' : 'Choose photos and videos…'}</Button>
       <Button block disabled={busy} onclick={async () => { const d = await pickFolder('Import a folder').catch((e) => { fail(e); return null; }); if (d) doImport([d]); }}>Choose a folder…</Button>
-    {:else}
+    {/if}
+    <Button block disabled={busy} onclick={() => { importOpen = false; googleOpen = true; }}>From Google Photos…</Button>
+    {#if !canPick()}
       <input class="input" placeholder="/Users/you/Pictures" bind:value={importPath} onkeydown={(e) => e.key === 'Enter' && doImport([importPath.trim()])} />
       <Button kind="primary" block disabled={busy || !importPath.trim()} onclick={() => doImport([importPath.trim()])}>{busy ? 'Importing…' : 'Import'}</Button>
     {/if}
   </div>
 </Sheet>
 
-<Sheet open={renameOpen} title="Rename album" onclose={() => (renameOpen = false)} width={380}>
-  <form class="stack" onsubmit={(e) => { e.preventDefault(); rename(); }}>
-    <input class="input" bind:value={renameTo} />
-    <Button type="submit" kind="primary" block disabled={!renameTo.trim()}>Rename</Button>
+<GoogleImportSheet open={googleOpen} onclose={() => (googleOpen = false)} />
+
+<Sheet open={newAlbumOpen} title="New album" onclose={() => (newAlbumOpen = false)} width={380}>
+  <form class="stack" onsubmit={(e) => { e.preventDefault(); createAlbum(); }}>
+    <input class="input" placeholder="Album name" aria-label="Album name" bind:value={newAlbumName} />
+    <Button type="submit" kind="primary" block disabled={!newAlbumName.trim()}>Create album</Button>
   </form>
 </Sheet>
 
@@ -218,22 +224,25 @@
   .shell { display: flex; height: 100%; background: var(--surface); }
   .sidebar { width: 220px; flex: none; background: var(--surface-2); border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; overflow: auto; }
   .brand { font-weight: 700; font-size: 15px; padding: 4px 8px 8px; display: flex; align-items: center; gap: 8px; }
-  .grp { font-size: 11px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; margin: 16px 8px 6px; }
+  .grp { font-size: var(--t-xs); font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; margin: 16px 8px 6px; }
   .it { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; font-size: 13.5px; text-decoration: none; }
   .it:hover { background: var(--surface-3); }
   .it.on { background: var(--surface-3); font-weight: 600; }
-  .it .n { margin-left: auto; color: var(--ink-3); font-size: 12px; }
-  .it .n.risk { color: var(--risk); font-weight: 700; }
-  .foot { margin-top: auto; padding: 10px 8px 0; }
+  .it .n { margin-left: auto; color: var(--ink-3); font-size: var(--t-sm); }
+  .grp.link { text-decoration: none; display: block; }
+  .grp.link:hover, .grp.link.on { color: var(--ink); }
+  .albums { display: grid; gap: 1px; }
+  .it .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .it .pill { font-size: var(--t-xs); padding: 1px 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-weight: 600; flex: none; }
+  .it .badge { min-width: 18px; padding: 0 5px; text-align: center; border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-size: var(--t-xs); font-weight: 700; flex: none; }
+  .it.new { border: 0; background: none; font: inherit; font-size: 13.5px; color: var(--ink-2); cursor: pointer; width: 100%; text-align: left; }
+  .foot { margin-top: auto; padding: 10px 0 0; display: grid; gap: 2px; }
+  .foot .device { padding: 8px 8px 0; }
   .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .toolbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); }
   .toolbar h3 { margin: 0; font-size: 17px; }
   .searchbox { width: min(320px, 34vw); }
   .banners { padding: 10px 18px 0; }
-  .status { display: inline-flex; align-items: center; gap: 6px; }
-  .sd { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
-  .sd.busy { background: var(--info); }
-  .sd.bad { background: var(--warn); }
   .content { flex: 1; min-height: 0; overflow: hidden; }
   .input { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 0 12px; color: var(--ink); font: inherit; width: 100%; }
 </style>

@@ -7,8 +7,12 @@
   import Segmented from '../components/Segmented.svelte';
   import { canScan, scanQr } from '../lib/scan';
   import RecoveryKit from './RecoveryKit.svelte';
+  import AddDeviceSheet from '../components/AddDeviceSheet.svelte';
+  import BackupCard from '../components/BackupCard.svelte';
+  import GoogleImportSheet from '../components/GoogleImportSheet.svelte';
+  import Icon from '../components/Icon.svelte';
 
-  type Step = 'welcome' | 'create' | 'kit' | 'join' | 'code' | 'recover';
+  type Step = 'welcome' | 'create' | 'kit' | 'bring' | 'join' | 'code' | 'recover';
   let step = $state<Step>('welcome');
   let name = $state('');
   // A phone or tablet is a Companion; a computer is usually the keeper.
@@ -20,12 +24,16 @@
   let link = $state('');
   let phrase = $state('');
   let busy = $state(false);
+  let changeRole = $state(false);
+  let addOpen = $state(false);
+  let googleOpen = $state(false);
   let created = $state<CreatedLibrary | null>(null);
 
   async function create() {
     busy = true;
     try {
       created = await api.createLibrary(name.trim() || defaultName, role);
+      app.setup = true;
       step = 'kit';
     } catch (e) {
       fail(e);
@@ -70,6 +78,24 @@
     }
   }
 
+  // The last step: bring photos in. A phone backs up its camera roll from the start.
+  async function startBring() {
+    step = 'bring';
+    await refreshState().catch(() => {});
+    const st = app.backup;
+    if (handheld && st && st.permission !== 'unavailable' && !st.policy.enabled) {
+      try {
+        app.backup = await api.backupConfigure({ ...st.policy, enabled: true });
+        api.backupRun().then(async () => (app.backup = await api.backupStatus())).catch(() => {});
+      } catch (e) {
+        fail(e);
+      }
+    }
+  }
+  function finish() {
+    app.setup = false;
+  }
+
   async function answer(accept: boolean) {
     await api.confirmPairing(accept).catch(fail);
     if (!accept) {
@@ -105,16 +131,31 @@
       <p class="muted small">Other devices will show this name.</p>
       <div class="stack">
         <input class="input" placeholder={handheld ? 'Pixel 9' : 'MacBook Pro'} bind:value={name} />
-        {@render roleChoice()}
+        <div class="small muted">
+          {thisDevice === 'this phone' ? 'This phone' : 'This computer'} {role === 'keeper' ? 'will keep a copy of every original' : role === 'companion' ? 'will keep recent and favorite photos in full' : 'will only browse'}.
+          {#if !changeRole}<button class="link" onclick={() => (changeRole = true)}>Change</button>{/if}
+        </div>
+        {#if changeRole}{@render roleChoice()}{/if}
         <Button kind="primary" block disabled={busy} onclick={create}>{busy ? 'Creating…' : 'Create library'}</Button>
         <Button kind="ghost" block onclick={() => (step = 'welcome')}>Back</Button>
       </div>
     {:else if step === 'kit' && created}
       <h2>Save your recovery kit</h2>
-      <RecoveryKit phrase={created.phrase} kitText={created.kit_text} onsaved={() => { created = null; }} />
+      <RecoveryKit phrase={created.phrase} kitText={created.kit_text} onsaved={() => { created = null; startBring(); }} />
+    {:else if step === 'bring'}
+      <h2>Bring your photos in</h2>
+      <p class="muted small">Your library is ready. Three ways to fill it; you can do any of them later.</p>
+      <div class="stack">
+        {#if handheld && app.backup && app.backup.permission !== 'unavailable'}
+          <BackupCard compact />
+        {/if}
+        <Button block onclick={() => (addOpen = true)}><Icon name="devices" size={18} /> Add {handheld ? 'a computer' : 'another device'}</Button>
+        <Button block onclick={() => (googleOpen = true)}><Icon name="download" size={18} /> Import from Google Photos</Button>
+        <Button kind="primary" block onclick={finish}>Open my library</Button>
+      </div>
     {:else if step === 'join'}
       <h2>Add {thisDevice}</h2>
-      <p class="muted small">On a device that is already in the library, open <b>Devices → Add a device</b> and paste the code it shows.</p>
+      <p class="muted small">On a device that is already in the library, open <b>Backup → Devices → Add a device</b> and paste the code it shows.</p>
       <div class="stack">
         <input class="input" placeholder="Name this device" bind:value={name} />
         {#if canScan()}<Button block onclick={scan}>Scan the QR code</Button>{/if}
@@ -151,6 +192,9 @@
   </div>
 </div>
 
+<AddDeviceSheet open={addOpen} onclose={() => (addOpen = false)} />
+<GoogleImportSheet open={googleOpen} onclose={() => (googleOpen = false)} />
+
 <style>
   .onboarding { height: 100%; display: grid; place-items: center; background: var(--bg); padding: 20px; overflow: auto; }
   .panel { width: min(460px, 100%); padding: 28px 28px 24px; }
@@ -159,9 +203,10 @@
   h1 { text-align: center; font-size: 28px; }
   h2 { font-size: 21px; }
   p.muted { margin: 0 0 16px; }
-  .label { font-size: 12px; font-weight: 700; color: var(--ink-2); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
+  .label { font-size: var(--t-sm); font-weight: 700; color: var(--ink-2); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
   .input { width: 100%; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 10px 12px; color: var(--ink); font: inherit; }
   .code { display: flex; gap: 8px; justify-content: center; font: 700 30px var(--mono); margin: 12px 0 18px; }
   .code span { width: 40px; height: 52px; background: var(--surface-2); border-radius: 10px; display: grid; place-items: center; }
   .err { color: var(--risk); }
+  .link { border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
 </style>

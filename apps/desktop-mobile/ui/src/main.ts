@@ -2,6 +2,7 @@ import { mount } from 'svelte';
 import './app.css';
 import App from './App.svelte';
 import { applyTextSize, savedTextSize } from './lib/textsize';
+import { paintTheme, savedTheme } from './lib/theme';
 
 // The Android WebView does not report the status and navigation bars through env(): the shell
 // exposes them (`ShoeboxInsets`, see MainActivity.kt) and they become the --safe-* variables.
@@ -18,6 +19,7 @@ addEventListener('resize', applyInsets);
 setTimeout(applyInsets, 300);
 
 applyTextSize(savedTextSize());
+paintTheme(savedTheme());
 
 // No webview menu (Reload, Inspect…) on right-click, except where there is text to copy or edit.
 // Development builds keep it for the inspector.

@@ -959,3 +959,69 @@ async fn transfers_are_empty_when_nothing_moves() {
     );
     assert_eq!(t.paused, None);
 }
+
+/// U1-07: the histogram, the status and each photo's `backed_up` tell the same story. A lone
+/// keeper holds everything (safe under the rule: a keeper holds it) but is one device, so the
+/// library is "single_device", never "backed up".
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_backup_status_health_and_each_photo_agree() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    let health = core.health().await.unwrap();
+    let target = health.redundancy_target as usize;
+    let status = core.safety_status().await.unwrap();
+    assert_eq!(status.state, "single_device");
+    assert_eq!(status.devices, 1);
+
+    let page = core.library_page(None, 50).await.unwrap();
+    assert_eq!(page.items.len(), 3);
+    let mut safe = 0;
+    for p in &page.items {
+        let d = core.photo_detail(&p.id).await.unwrap();
+        assert_eq!(d.backed_up, p.backed_up, "viewer and grid disagree");
+        assert!(d.held_by.contains(&"MacBook".to_string()));
+        safe += d.backed_up as u32;
+    }
+    // The keeper holds them all, so none is a 1-copy photo in the histogram.
+    assert_eq!(safe, 3);
+    let safe_in_hist: u32 = health.copies_histogram
+        [target.min(health.copies_histogram.len() - 1)..]
+        .iter()
+        .sum();
+    assert_eq!(safe_in_hist, safe);
+    assert_eq!(health.at_risk, 0);
+    assert_eq!(status.count, 0, "nothing unsafe");
+}
+
+/// U1-03: an album with no chosen cover shows its newest photo; a chosen cover wins, and an
+/// empty album has none.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_album_cover_is_the_newest_photo_until_one_is_chosen() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    // Newest first.
+    let items = core.library_page(None, 10).await.unwrap().items;
+    let ids: Vec<String> = items.iter().map(|p| p.id.clone()).collect();
+    let empty = core.create_album("Empty").await.unwrap();
+    let a = core.create_album("Trip").await.unwrap();
+    core.album_add(&a.id, &ids).await.unwrap();
+    let albums = core.albums().await.unwrap();
+    let get = |id: &str| albums.iter().find(|x| x.id == id).unwrap().clone();
+    assert_eq!(get(&empty.id).cover, None);
+    assert_eq!(
+        get(&a.id).cover.as_deref(),
+        Some(ids[0].as_str()),
+        "the newest photo"
+    );
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    core.set_album_cover(&a.id, &ids[2]).await.unwrap();
+    let albums = core.albums().await.unwrap();
+    let a2 = albums.iter().find(|x| x.id == a.id).unwrap();
+    assert_eq!(
+        a2.cover.as_deref(),
+        Some(ids[2].as_str()),
+        "the chosen cover wins"
+    );
+    assert_eq!(a2.name, "Trip", "naming is untouched");
+    core.shutdown().await.unwrap();
+}

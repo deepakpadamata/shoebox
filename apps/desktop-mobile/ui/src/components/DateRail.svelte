@@ -95,7 +95,7 @@
   /* Idle, only a strip at the edge takes the mouse; on touch, nothing does until the pill shows. */
   .rail { position: absolute; top: 0; right: 0; bottom: 0; width: 24px; z-index: 5; touch-action: none; user-select: none; cursor: pointer; }
   .rail.awake { width: 48px; }
-  .label { position: absolute; right: 44px; pointer-events: none; transform: translateY(-50%); font-size: 11px; font-weight: 600; color: var(--ink-3);
+  .label { position: absolute; right: 44px; pointer-events: none; transform: translateY(-50%); font-size: var(--t-xs); font-weight: 600; color: var(--ink-3);
     background: color-mix(in srgb, var(--bg) 80%, transparent); padding: 1px 4px; border-radius: 6px; opacity: 0; transition: opacity 0.15s; }
   .rail.active .label { opacity: 1; }
   .handle { position: absolute; right: 6px; width: 30px; height: 48px; border-radius: 15px; display: grid; place-items: center; opacity: 0;

@@ -22,9 +22,9 @@ use tracing::{debug, warn};
 /// being written when the first event arrives).
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(400);
 /// Emit a progress event every this many files (and always at the end).
-const PROGRESS_EVERY: usize = 10;
+pub(crate) const PROGRESS_EVERY: usize = 10;
 /// Publish holdings after this many newly stored blobs, so a crash loses little.
-const HOLDINGS_BATCH: usize = 300;
+pub(crate) const HOLDINGS_BATCH: usize = 300;
 /// A Live Photo's video is a few seconds; a longer file next to a picture of the same name is a clip of
 /// its own.
 const MAX_COMPANION_MS: u32 = 10_000;
@@ -119,7 +119,7 @@ fn collect_files(paths: &[PathBuf], failed: &mut Vec<(PathBuf, String)>) -> Vec<
 }
 
 /// Whether a video is short enough to be the moving half of a Live Photo.
-fn is_companion_clip(r: &ImportResult) -> bool {
+pub(crate) fn is_companion_clip(r: &ImportResult) -> bool {
     r.kind == MediaKind::Video && r.duration_ms.is_some_and(|d| d <= MAX_COMPANION_MS)
 }
 
@@ -294,7 +294,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 }
                 Ok(Ok(result)) => {
                     self.ingest_into(&path, &result, &opts, &mut held, &mut report)
-                        .await
+                        .await;
                 }
             }
             if held.len() >= HOLDINGS_BATCH {
@@ -392,42 +392,57 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 
     /// Ingest one analysed file and record the outcome in `report`; a motion photo's video goes in
-    /// with it.
-    async fn ingest_into(
+    /// with it. Returns the photo and whether it is new, unless it failed.
+    pub(crate) async fn ingest_into(
         &self,
         path: &Path,
         result: &ImportResult,
         opts: &ImportOptions,
         held: &mut Vec<(Blake3Hash, BlobKind)>,
         report: &mut ImportReport,
-    ) {
-        let id = match self.ingest(path, result, opts, held).await {
+    ) -> Option<(PhotoId, bool)> {
+        self.ingest_as(path, path, result, opts, held, report).await
+    }
+
+    /// As [`ingest_into`](Self::ingest_into), reading the file at `path` but reporting it as `name`
+    /// (an archive entry is read from a temporary file).
+    pub(crate) async fn ingest_as(
+        &self,
+        path: &Path,
+        name: &Path,
+        result: &ImportResult,
+        opts: &ImportOptions,
+        held: &mut Vec<(Blake3Hash, BlobKind)>,
+        report: &mut ImportReport,
+    ) -> Option<(PhotoId, bool)> {
+        let (id, new) = match self.ingest(path, result, opts, held).await {
             Ok(Outcome::Imported(id)) => {
                 report.imported.push(id);
-                id
+                (id, true)
             }
             Ok(Outcome::Duplicate(id)) => {
                 report.duplicates.push(id);
-                id
+                (id, false)
             }
             Err(e) => {
-                report.failed.push((path.to_path_buf(), format!("{e:#}")));
-                return;
+                report.failed.push((name.to_path_buf(), format!("{e:#}")));
+                return None;
             }
         };
-        report.by_path.push((path.to_path_buf(), id));
+        report.by_path.push((name.to_path_buf(), id));
         if let Some(video) = &result.embedded_video {
             // The picture is in; a video that cannot be kept does not undo that.
             match self.attach_embedded(path, video, id, held).await {
                 Ok(true) => report.with_video.push(id),
                 Ok(false) => {}
-                Err(e) => warn!("the video in {} was not kept: {e:#}", path.display()),
+                Err(e) => warn!("the video in {} was not kept: {e:#}", name.display()),
             }
         }
+        Some((id, new))
     }
 
     /// Give `photo` the video `r` (a clip imported from its own file). `Ok(false)`: it had it already.
-    async fn attach_clip(
+    pub(crate) async fn attach_clip(
         &self,
         path: &Path,
         r: &ImportResult,

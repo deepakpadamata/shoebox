@@ -329,6 +329,10 @@ ts_type! {
         pub has_original: bool,
         pub stored_on: Vec<StoredOn>,
         pub albums: Vec<String>,
+        /// Safe under the library's rule: enough devices hold the original, or a keeper does.
+        pub backed_up: bool,
+        /// Names of the devices holding the original.
+        pub held_by: Vec<String>,
     }
 }
 
@@ -418,6 +422,67 @@ ts_type! {
         pub duplicates: u32,
         pub skipped: u32,
         pub failed: Vec<String>,
+    }
+}
+
+ts_type! {
+    /// What importing a Google Takeout would do (`plan_archive_import`): nothing is written.
+    pub struct ArchivePlanInfo {
+        /// Photos and videos still to read.
+        pub photos: u32,
+        /// Done by an earlier run of these files.
+        pub already: u32,
+        /// Copies in album and year folders, imported once.
+        pub copies: u32,
+        pub trashed: u32,
+        pub not_photos: u32,
+        pub albums: Vec<ArchiveAlbumInfo>,
+        /// Photos whose date, place or favourite Google's files give.
+        pub with_export_data: u32,
+        pub unmatched: u32,
+        pub ambiguous: u32,
+        /// Files that could not be opened, each `name: reason`.
+        pub part_errors: Vec<String>,
+        pub needed_bytes: f64,
+        pub free_bytes: Option<f64>,
+        pub is_takeout: bool,
+    }
+}
+
+ts_type! {
+    pub struct ArchiveAlbumInfo {
+        pub title: String,
+        pub photos: u32,
+    }
+}
+
+ts_type! {
+    /// How far a Google Photos import is (`archive_import_status`).
+    pub struct ArchiveImportInfo {
+        /// `idle`, `running`, `stopped` (unfinished: continue it), or `done`.
+        pub state: String,
+        /// The files being imported, as chosen.
+        pub paths: Vec<String>,
+        /// Why the last run ended early, if it did.
+        pub error: Option<String>,
+        /// The last finished run's report.
+        pub report: Option<ArchiveReportInfo>,
+    }
+}
+
+ts_type! {
+    pub struct ArchiveReportInfo {
+        pub imported: u32,
+        pub duplicates: u32,
+        pub skipped: u32,
+        pub failed: Vec<String>,
+        pub albums: Vec<ArchiveAlbumInfo>,
+        pub export_dates: u32,
+        pub export_places: u32,
+        pub favorites: u32,
+        pub trashed: u32,
+        pub unmatched: u32,
+        pub part_errors: Vec<String>,
     }
 }
 
@@ -548,6 +613,22 @@ ts_type! {
 }
 
 ts_type! {
+    /// The one answer to "are my photos safe?" (U1-07), the same words on every screen.
+    pub struct SafetyStatus {
+        /// `safe`, `single_device`, `busy`, `waiting` or `at_risk`.
+        pub state: String,
+        /// Photos not yet safe (`busy`, `waiting`, `at_risk`, `single_device`); all photos when `safe`.
+        pub count: u32,
+        /// Devices in the library, those removed not counted.
+        pub devices: u32,
+        /// `waiting` and `at_risk`: seconds since the device named in `reason` was last reachable.
+        pub since_secs: Option<u32>,
+        /// `waiting` and `at_risk`: the device the photos are waiting for.
+        pub reason: Option<String>,
+    }
+}
+
+ts_type! {
     /// Library health (mockup 6a).
     pub struct Health {
         pub photos: u32,
@@ -592,6 +673,8 @@ ts_type! {
         Sync { peer: String, phase: String },
         Fetched { photo: Option<String>, kind: String },
         ImportProgress { done: u32, total: u32 },
+        /// A Google Photos import started, stopped or finished: read `archive_import_status`.
+        ArchiveImport,
         PairingCode { sas: String, peer_name: String, peer_role: String },
         PairingDone,
         PairingFailed { reason: String },
@@ -606,6 +689,8 @@ ts_type! {
         GalleryDeletionsHeld { count: u32 },
         /// Something changed in a shared album (new photos, members, downloads).
         SharedChanged { album: String },
+        /// The answer to "are my photos safe?" changed.
+        Safety { status: SafetyStatus },
     }
 }
 

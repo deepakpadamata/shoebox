@@ -132,6 +132,15 @@ class PhotoLibraryPlugin(private val activity: Activity) : Plugin(activity) {
         JSObject()
     }
 
+    /** The system share sheet for a line of text: an invitation or a pairing link (U1-21). */
+    @Command
+    fun shareText(invoke: Invoke) = guarded(invoke, "cannot share") {
+        val text = invoke.getArgs().getString("text") ?: throw IllegalArgumentException("missing text")
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+        activity.startActivity(Intent.createChooser(send, null))
+        JSObject()
+    }
+
     /** A poster frame: of a gallery file (`path`), or of a video in the blob store (`blob`, `size`). */
     @Command
     fun videoFrame(invoke: Invoke) {

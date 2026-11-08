@@ -85,6 +85,26 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Command::Takeout { out, seed } => {
+            let samples =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/samples");
+            match xtask::takeout::generate(&out, &samples, seed, 3) {
+                Ok(s) => {
+                    println!(
+                        "{} entries in {} parts written to {}\ntruth: {}",
+                        s.entries,
+                        s.parts.len(),
+                        out.display(),
+                        s.truth.display()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Command::Samples { out } => match write_samples(&out) {
             Ok(files) => {
                 println!(

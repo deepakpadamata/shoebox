@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from '../components/Icon.svelte';
   // The recovery kit is shown once after creating a library (and its reminder reopens this view
   // only to confirm it was saved: the phrase itself is not stored anywhere on this device).
   import { api } from '../lib/api';
@@ -37,14 +38,14 @@
 
 <div class="stack">
   {#if phrase}
-    <p class="small muted">These 24 words are the only way to get back into this library if every device is lost. Anyone with them can take it over. Print them or store them in a password manager, not next to your photos.</p>
+    <p class="small muted"><b>What this protects.</b> These 24 words bring your library back if every device is lost or broken. <b>Nobody else has them</b>: not us, and not any of your devices, so nobody can recover them for you. Anyone who has them can take the library over, so keep them in a password manager or print them, not next to your photos.</p>
     <ol class="words selectable">
       {#each words as w, i}<li><span class="n">{i + 1}</span>{w}</li>{/each}
     </ol>
     <div class="row-flex">
-      <Button size="sm" onclick={download}>⤓ Save as file</Button>
-      <Button size="sm" onclick={copy}>⧉ Copy</Button>
-      <Button size="sm" onclick={() => window.print()}>🖨 Print</Button>
+      <Button size="sm" onclick={download}><Icon name="download" size={16} /> Save as file</Button>
+      <Button size="sm" onclick={copy}><Icon name="link" size={16} /> Copy</Button>
+      <Button size="sm" onclick={() => window.print()}><Icon name="print" size={16} /> Print</Button>
     </div>
     <label class="row-flex small"><input type="checkbox" bind:checked={confirmed} /> I have saved my recovery kit somewhere safe</label>
     <Button kind="primary" block disabled={!confirmed} onclick={done}>Continue</Button>

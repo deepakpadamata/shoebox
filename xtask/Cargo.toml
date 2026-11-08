@@ -14,6 +14,7 @@ png = "0.18"
 serde.workspace = true
 serde_json = "1"
 shoebox-search.workspace = true
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 kamadak-exif = "0.6"

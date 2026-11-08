@@ -1,12 +1,22 @@
 // App-wide reactive state: what the shell needs everywhere. Screens keep their own data and
 // refetch when `app.version` changes (the app core says something changed).
-import { api, loadNativeVideo, onAppEvent, type AppEvent, type AppState, type LibraryCounts } from './api';
+import { mergeAlbums, type AlbumEntry } from './albumlist';
+import { api, loadNativeVideo, onAppEvent, type AppEvent, type AppState, type LibraryCounts, type SafetyStatus } from './api';
+
+/** Small UI signals between screens: the phone's Albums header asks the Albums screen to open its ＋ menu. */
+export const ui = $state({ albumsMenu: 0 });
 
 export const app = $state({
   loading: true,
+  /** First-run set-up is not over: the library exists, but the last steps (recovery kit, bringing photos in) are still showing. */
+  setup: false,
   error: '',
   state: null as AppState | null,
+  /** The one answer to "are my photos safe?" (U1-07), computed in Rust. */
+  backup_status: null as SafetyStatus | null,
   counts: null as LibraryCounts | null,
+  /** Personal and shared albums in one list (U1-19); the sidebar and the Albums screen read it. */
+  albums: [] as AlbumEntry[],
   /** Bumped whenever the library or the device list changed. */
   version: 0,
   devicesVersion: 0,
@@ -22,6 +32,8 @@ export const app = $state({
   /** The Devices screen's "Add a device" sheet is open (it shows the pairing code itself). */
   addDeviceOpen: false,
   importProgress: null as null | { done: number; total: number },
+  /** The Google Photos import: running, unfinished, or just done (with its report). */
+  archive: null as null | import('../bindings/ArchiveImportInfo').ArchiveImportInfo,
   removed: false,
   /** Other devices reachable right now, and recent at-risk counts for the ETA. */
   peersOnline: 0,
@@ -67,6 +79,11 @@ export async function refreshPeers() {
   app.peersOnline = list.filter((d) => !d.is_this_device && d.online && !d.revoked).length;
 }
 
+export async function refreshAlbums() {
+  const [personal, shared] = await Promise.all([api.albums(), api.sharedAlbums().catch(() => [])]);
+  app.albums = mergeAlbums(personal, shared);
+}
+
 export async function refreshState() {
   app.state = await api.appState();
   if (app.state.has_library) {
@@ -74,6 +91,9 @@ export async function refreshState() {
     noteRisk(app.counts.at_risk);
     refreshPeers().catch(() => {});
     app.backup = await api.backupStatus().catch(() => null);
+    app.backup_status = await api.safetyStatus().catch(() => null);
+    refreshAlbums().catch(() => {});
+    app.archive = await api.archiveImportStatus().catch(() => null);
   }
 }
 
@@ -83,13 +103,16 @@ function handle(e: AppEvent) {
   if (e === 'LibraryChanged') {
     app.version++;
     clearTimeout(countsTimer);
-    countsTimer = setTimeout(() => api.counts().then((c) => { app.counts = c; noteRisk(c.at_risk); }).catch(() => {}), 400);
+    countsTimer = setTimeout(() => { api.counts().then((c) => { app.counts = c; noteRisk(c.at_risk); }).catch(() => {}); refreshAlbums().catch(() => {}); }, 400);
   } else if (e === 'DevicesChanged' || e === 'LibraryRotated') {
     app.devicesVersion++;
     app.version++;
     refreshPeers().catch(() => {});
     // This device's own name or role may be what changed.
     refreshState().catch(() => {});
+  } else if (e === 'ArchiveImport') {
+    api.archiveImportStatus().then((a) => (app.archive = a)).catch(() => {});
+    app.version++;
   } else if (e === 'SecurityChanged') {
     refreshState().catch(() => {});
   } else if (e === 'RemovedFromLibrary') {
@@ -107,8 +130,11 @@ function handle(e: AppEvent) {
       const { done, total } = e.ImportProgress;
       app.importProgress = done >= total ? null : { done, total };
       app.version++;
+    } else if ('Safety' in e) {
+      app.backup_status = e.Safety.status;
     } else if ('SharedChanged' in e) {
       app.sharedVersion++;
+      refreshAlbums().catch(() => {});
     } else if ('PeerConnected' in e || 'PeerDisconnected' in e) {
       app.devicesVersion++;
     } else if ('BackupProgress' in e) {

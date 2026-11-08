@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redesign: Albums &amp; Sharing</title><link rel="stylesheet" href="assets/redesign.css"></head>
+<body><div class="doc">
+<header><h1>4 · Albums &amp; sharing</h1>
+<p>Sharing becomes a property of an album, not a separate place. An album has one Share button that offers three clear choices, and a selection's share sheet puts the system share sheet first. Covers come from the newest photo when none is set. Fixes F2, F5, F6, F7, F11, F12.</p></header>
+<nav class="pages"><a href="index.html">Overview</a><a href="01-navigation.html">Navigation</a><a href="02-photos.html">Photos &amp; selection</a><a href="03-viewer.html">Viewer</a><a class="on" href="04-albums-sharing.html">Albums &amp; sharing</a><a href="05-backup.html">Backup</a><a href="06-settings.html">Settings</a><a href="07-onboarding.html">Onboarding</a><a href="08-search.html">Search</a></nav>
+
+<section class="board">
+<h2>Phone: album, share choices, selection share</h2>
+<p class="why">Today an album has "Share this album" (which jumps to a different screen in the Shared section) and "Share a link" (which starts by asking for a service URL). The title reads "Album" and there is no Add photos button. The redesign is a single album screen. Its header shows the cover, the name, the members and the actions Add photos, Share and ⋯.</p>
+<div class="row">
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="scroll">
+        <div class="photo" data-seed="3" style="height:230px;position:relative"><div style="position:absolute;inset:auto 0 0 0;padding:40px 16px 14px;background:linear-gradient(transparent,rgba(0,0,0,.55));color:#fff"><div style="font-size:12px;opacity:.85">‹ Albums</div><div style="font-size:28px;font-weight:800">Lisbon</div><div style="font-size:13px;opacity:.9">86 photos · 2–9 Nov · shared with Anna, Ravi</div></div></div>
+        <div style="display:flex;gap:8px;padding:12px 16px">
+          <span class="btn sm primary" style="flex:1">＋ Add photos</span><span class="btn sm" style="flex:1">⇪ Share</span><span class="btn sm">⋯</span>
+        </div>
+        <div style="display:flex;gap:6px;padding:0 16px 10px"><span class="seg" style="flex:1"><span class="on">Photos</span><span>Activity · 3</span></span></div>
+        <div class="tiles" data-n="20" data-seed="3" data-live="2"></div>
+      </div>
+      <nav class="tabbar"><a href="#"><span class="ic">▦</span>Photos</a><a class="on" href="#"><span class="ic">▤</span>Albums</a><a href="#"><span class="ic">⌕</span>Search</a><a href="#"><span class="ic">⚙︎</span>Settings</a></nav>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Album.</b> The real name is the title (F7), a cover is always shown (F6), and Add photos is the primary action. A shared album also shows Activity. The ⋯ menu holds Rename, Set cover, Album settings, Leave and Delete.</div>
+  </div>
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="photo" data-seed="3" style="height:230px"></div>
+      <div class="scrim"></div>
+      <div class="sheet"><div class="grab"></div>
+        <h3>Share "Lisbon"</h3>
+        <div class="card" style="margin:0 0 10px;background:var(--surface-2)">
+          <div class="rowi"><span class="lead" style="background:var(--accent-soft);color:var(--accent)">☺＋</span><div class="tx"><b>Invite people</b><span>They see new photos as you add them, and can add their own</span></div><span class="chev"></span></div>
+          <div class="rowi"><span class="lead">🔗︎</span><div class="tx"><b>Web link</b><span>Anyone with the link can view in a browser</span></div><span class="chev"></span></div>
+          <div class="rowi"><span class="lead">⇪</span><div class="tx"><b>Send copies</b><span>WhatsApp, Messages, email…</span></div><span class="chev"></span></div>
+        </div>
+        <div class="sect" style="padding-left:4px">Shared with</div>
+        <div class="card" style="margin:0;background:var(--surface-2)">
+          <div class="rowi"><div class="photo" data-seed="61" style="width:32px;height:32px;border-radius:99px"></div><div class="tx"><b>Anna</b><span>Can add photos</span></div><span class="muted">›</span></div>
+          <div class="rowi"><div class="photo" data-seed="62" style="width:32px;height:32px;border-radius:99px"></div><div class="tx"><b>Ravi</b><span>Can view</span></div><span class="muted">›</span></div>
+        </div>
+      </div>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>One Share button, three plain choices.</b> Each choice says what the other person gets. If no link service is set up, "Web link" explains that and sets one up in a single step, rather than opening on a URL field (F11).</div>
+  </div>
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="tiles" data-n="12" data-seed="5" data-sel="1,2,5" data-selecting></div>
+      <div class="scrim"></div>
+      <div class="sheet"><div class="grab"></div>
+        <h3>Share 3 photos</h3>
+        <div style="display:flex;gap:14px;overflow:hidden;margin-bottom:14px">
+          <div style="text-align:center;font-size:12px"><div style="width:56px;height:56px;border-radius:16px;background:#25d366;margin-bottom:4px"></div>WhatsApp</div>
+          <div style="text-align:center;font-size:12px"><div style="width:56px;height:56px;border-radius:16px;background:#2f6db5;margin-bottom:4px"></div>Messages</div>
+          <div style="text-align:center;font-size:12px"><div style="width:56px;height:56px;border-radius:16px;background:#c2412d;margin-bottom:4px"></div>Gmail</div>
+          <div style="text-align:center;font-size:12px"><div style="width:56px;height:56px;border-radius:16px;background:var(--surface-3);display:grid;place-items:center;margin-bottom:4px;font-size:20px">⋯</div>More</div>
+        </div>
+        <div class="card" style="margin:0;background:var(--surface-2)">
+          <div class="rowi"><span class="lead">▤</span><div class="tx"><b>Add to a shared album</b><span>Lisbon · Family 2026 · New…</span></div><span class="chev"></span></div>
+          <div class="rowi"><span class="lead">🔗︎</span><div class="tx"><b>Create a web link</b><span>For these 3 photos</span></div><span class="chev"></span></div>
+        </div>
+      </div>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Selection share.</b> The apps people actually use come first, from the Android share sheet (direct-share targets) or the macOS share menu. Shoebox's own options sit below them. Today the first control is an empty "New shared album" field (F2).</div>
+  </div>
+</div>
+</section>
+
+<section class="board">
+<h2>Invite flow: remote first, QR for in person</h2>
+<p class="why">Today an invitation is a QR code plus a 300-character code in a text box. The redesign makes a link-like invitation that you send through the system share sheet, which covers most cases because friends are usually somewhere else. QR is the second choice, for when you are together. The long code stays behind "Copy code" for edge cases. The person joining taps the link and sees the album name and who invited them.</p>
+<div class="row">
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar" style="align-items:center"><span class="back">‹ Lisbon</span><h1 style="font-size:20px;text-align:center">Invite people</h1><span style="width:60px"></span></div>
+      <div class="card pad">
+        <b style="font-size:15px">What can they do?</b>
+        <div class="seg" style="margin:10px 0 4px"><span class="on">View &amp; add photos</span><span>View only</span></div>
+        <div class="muted">You can change this per person later.</div>
+      </div>
+      <div style="padding:6px 16px"><span class="btn primary block">⇪ Send invitation…</span></div>
+      <div style="text-align:center;color:var(--ink-3);margin:10px 0">or, if they're with you</div>
+      <div class="card pad" style="text-align:center">
+        <div style="width:170px;height:170px;margin:0 auto 10px;background:repeating-linear-gradient(90deg,var(--ink) 0 6px,transparent 6px 11px),repeating-linear-gradient(0deg,var(--ink) 0 5px,transparent 5px 12px);background-blend-mode:difference;border-radius:8px;opacity:.85"></div>
+        <div class="muted">Let them scan this with Shoebox</div>
+        <div style="margin-top:8px"><span class="btn sm">Copy code</span></div>
+      </div>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Invite.</b> Send invitation is the primary action and opens the system share sheet. QR comes second. Permissions are set with one segmented control.</div>
+  </div>
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar"><h1>Albums</h1><button class="iconbtn">＋</button></div>
+      <div class="card pad" style="background:var(--info-soft);display:flex;gap:12px;align-items:center">
+        <div class="photo" data-seed="17" style="width:56px;height:56px;border-radius:10px;flex:none"></div>
+        <div style="flex:1"><b>Anna invited you to "Family 2026"</b><div class="muted">1,204 photos</div></div>
+      </div>
+      <div style="display:flex;gap:8px;padding:0 16px 12px"><span class="btn sm primary" style="flex:1">Join</span><span class="btn sm" style="flex:1">Not now</span></div>
+      <div class="card">
+        <div class="rowi"><span class="lead">♥</span><div class="tx"><b>Favorites</b><span>142 photos</span></div><span class="chev"></span></div>
+        <div class="rowi"><span class="lead">☺</span><div class="tx"><b>People</b><span>12 people</span></div><span class="chev"></span></div>
+      </div>
+      <div class="sect">Albums</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px">
+        <div><div class="photo" data-seed="3" style="aspect-ratio:1;border-radius:12px"></div><b style="display:block;margin-top:6px">Lisbon</b><span class="muted" style="font-size:13px">86 · <span class="pill info">Shared</span></span></div>
+        <div><div class="photo" data-seed="8" style="aspect-ratio:1;border-radius:12px"></div><b style="display:block;margin-top:6px">The boys</b><span class="muted" style="font-size:13px">212</span></div>
+      </div>
+      <div style="flex:1"></div>
+      <div class="card" style="margin-top:12px"><div class="rowi"><span class="lead">🗑︎</span><div class="tx"><b>Recently Deleted</b><span>Kept for 30 days</span></div><span class="chev"></span></div></div>
+      <nav class="tabbar"><a href="#"><span class="ic">▦</span>Photos</a><a class="on" href="#"><span class="ic">▤</span>Albums</a><a href="#"><span class="ic">⌕</span>Search</a><a href="#"><span class="ic">⚙︎</span>Settings</a></nav>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Joining.</b> An invitation opened from a link shows up as a card at the top of Albums. "Join with an invitation" (paste a code) moves to the ＋ menu. Recently Deleted sits at the bottom of the list.</div>
+  </div>
+  <div class="notes">
+    <h3>What merges</h3>
+    <ol>
+      <li><code>Albums.svelte</code> and <code>Shared.svelte</code> become one list. "Shared" is a filter chip on desktop and a pill on each card.</li>
+      <li><code>SharedAlbum.svelte</code> keeps its Activity and People tabs, but uses the main <code>Viewer.svelte</code> for photos.</li>
+      <li>Album covers: use the stored cover if one is set, otherwise the newest photo. A "Set as cover" item goes in the viewer's ⋯ menu.</li>
+      <li>Rename comes to the phone (in ⋯).</li>
+      <li>The web link stays a power feature. With no service set up, the row says "Needs a link service, set up once" and the setup asks one question at a time.</li>
+    </ol>
+  </div>
+</div>
+</section>
+
+<section class="board">
+<h2>Desktop: albums grid</h2>
+<div class="desk"><div class="win">
+  <aside class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <a href="#"><span class="ic">▦</span>Photos<span class="n">12,431</span></a>
+    <a href="#"><span class="ic">♥</span>Favorites<span class="n">142</span></a>
+    <a href="#"><span class="ic">☺</span>People</a>
+    <div class="grp">Albums</div>
+    <a class="on" href="#"><span class="ic">▤</span>All albums</a>
+    <a href="#"><span class="ic">▤</span>Lisbon<span class="n"><span class="pill info">Shared</span></span></a>
+    <a href="#"><span class="ic">▤</span>The boys</a>
+    <a href="#"><span class="ic">▤</span>Garden</a>
+    <a href="#"><span class="ic">▤</span>Family 2026<span class="n"><span class="pill info">3 new</span></span></a>
+    <div class="foot">
+      <a href="#" style="background:var(--ok-soft)"><span class="ic" style="color:var(--ok)">◉</span><span><b style="display:block;font-size:13px">All backed up</b><span class="muted" style="font-size:12px">2 copies · Mac + Pi</span></span></a>
+      <a href="#"><span class="ic">⚙︎</span>Settings</a>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="tb"><h1>Albums</h1><div class="seg" style="width:240px;margin-left:12px"><span class="on">All</span><span>Mine</span><span>Shared</span></div><div class="grow"></div><span class="btn sm">Join with code…</span><span class="btn sm primary">＋ New album</span></div>
+    <div class="content" style="padding:20px;display:grid;grid-template-columns:repeat(5,1fr);gap:20px;align-content:start">
+      <div><div class="photo" data-seed="3" style="aspect-ratio:1;border-radius:12px"></div><b style="display:block;margin-top:6px">Lisbon</b><span class="muted">86 · <span class="pill info">Shared</span></span></div>
+      <div><div class="photo" data-seed="8" style="aspect-ratio:1;border-radius:12px"></div><b style="display:block;margin-top:6px">The boys</b><span class="muted">212</span></div>
+      <div><div class="photo" data-seed="13" style="aspect-ratio:1;border-radius:12px"></div><b style="display:block;margin-top:6px">Garden</b><span class="muted">40</span></div>
+      <div><div class="photo" data-seed="17" style="aspect-ratio:1;border-radius:12px"></div><b style="display:block;margin-top:6px">Family 2026</b><span class="muted">1,204 · <span class="pill info">3 new</span></span></div>
+      <div><div class="photo" data-seed="19" style="aspect-ratio:1;border-radius:12px"></div><b style="display:block;margin-top:6px">Scans</b><span class="muted">530</span></div>
+      <div><div class="photo" data-seed="23" style="aspect-ratio:1;border-radius:12px"></div><b style="display:block;margin-top:6px">Wedding</b><span class="muted">1,880 · <span class="pill info">Shared</span></span></div>
+      <div><div style="aspect-ratio:1;border-radius:12px;border:2px dashed var(--line);display:grid;place-items:center;color:var(--ink-3);font-size:28px">＋</div><b style="display:block;margin-top:6px" class="muted">New album</b></div>
+    </div>
+  </div>
+</div></div>
+<div class="cap wide"><b>Desktop albums.</b> One grid with an All / Mine / Shared filter, covers on every card, and a ＋ New album button. The People row that duplicated the sidebar is removed.</div>
+</section>
+</div>
+<script src="assets/redesign.js"></script>
+</body></html>

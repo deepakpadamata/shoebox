@@ -37,6 +37,10 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
 
+[target.'cfg(unix)'.dependencies]
+# Free space before an import (I1-04), without unsafe code.
+rustix = { version = "1", features = ["fs"] }
+
 [dev-dependencies]
 tempfile.workspace = true
 shoebox-store-mem.workspace = true

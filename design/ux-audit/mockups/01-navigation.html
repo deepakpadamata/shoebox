@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redesign: Navigation</title><link rel="stylesheet" href="assets/redesign.css"></head>
+<body><div class="doc">
+<header><h1>1 · Navigation</h1>
+<p>Navigation follows how often people do each job. Look at photos (daily), check they are safe (a daily glance), find one (weekly), share or organise (weekly or monthly). Device management, roles and maintenance move one level down. Fixes F8, F15, F18, F20.</p></header>
+<nav class="pages"><a href="index.html">Overview</a><a class="on" href="01-navigation.html">Navigation</a><a href="02-photos.html">Photos &amp; selection</a><a href="03-viewer.html">Viewer</a><a href="04-albums-sharing.html">Albums &amp; sharing</a><a href="05-backup.html">Backup</a><a href="06-settings.html">Settings</a><a href="07-onboarding.html">Onboarding</a><a href="08-search.html">Search</a></nav>
+
+<section class="board">
+<h2>Phone: four tabs</h2>
+<p class="why">Today the tabs are <b>Library · Albums · Shared · Devices</b>, with Favorites, Recently Deleted, Storage and Settings hidden behind an avatar sheet titled "This device". The redesign uses <b>Photos · Albums · Search · Settings</b>. Shared albums live inside Albums. Favorites and People are the first rows of Albums. Backup (devices, storage, the queue) is the first section of Settings. Everyday safety lives on Photos: a status chip replaces "● Syncing…", always says what is going on, and opens the Backup page in one tap.</p>
+<div class="row">
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar"><h1>Photos</h1><span class="status busy"><span class="dot"></span>Backing up 23</span><button class="iconbtn">＋</button></div>
+      <div class="scroll">
+        <div class="dayh">Today <small>Sat 8 Nov</small></div>
+        <div class="tiles" data-n="8" data-seed="11" data-live="1" data-fav="4"></div>
+        <div class="dayh">Thursday <small>6 Nov · Lisbon</small></div>
+        <div class="tiles" data-n="12" data-seed="5" data-video="6"></div>
+        <div class="dayh">Last weekend <small>1–2 Nov</small></div>
+        <div class="tiles" data-n="12" data-seed="21"></div>
+      </div>
+      <nav class="tabbar"><a class="on" href="#"><span class="ic">▦</span>Photos</a><a href="#"><span class="ic">▤</span>Albums</a><a href="#"><span class="ic">⌕</span>Search</a><a href="#"><span class="ic">⚙︎</span>Settings</a></nav>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Photos.</b> The chip carries the one safety signal. It turns amber or red with a short reason ("Mac offline 3 days") and the Settings tab gets a dot. ＋ stays for Add photos.</div>
+  </div>
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar"><h1>Albums</h1><button class="iconbtn">＋</button></div>
+      <div class="scroll">
+        <div class="card">
+          <div class="rowi"><span class="lead">♥</span><div class="tx"><b>Favorites</b><span>142 photos</span></div><span class="chev"></span></div>
+          <div class="rowi"><span class="lead">☺</span><div class="tx"><b>People</b><span>Anna, Ravi, Mum and 9 more</span></div><span class="chev"></span></div>
+        </div>
+        <div class="sect">Albums</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px">
+          <div><div class="photo" data-seed="3" style="aspect-ratio:1;border-radius:12px"></div><b style="display:block;margin-top:6px">Lisbon</b><span class="muted" style="font-size:13px">86 · <span class="pill info">Shared</span></span></div>
+          <div><div class="photo" data-seed="8" style="aspect-ratio:1;border-radius:12px"></div><b style="display:block;margin-top:6px">The boys</b><span class="muted" style="font-size:13px">212</span></div>
+          <div><div class="photo" data-seed="13" style="aspect-ratio:1;border-radius:12px"></div><b style="display:block;margin-top:6px">Garden</b><span class="muted" style="font-size:13px">40</span></div>
+          <div><div class="photo" data-seed="17" style="aspect-ratio:1;border-radius:12px"></div><b style="display:block;margin-top:6px">Family 2026</b><span class="muted" style="font-size:13px">1,204 · <span class="pill info">Shared</span></span></div>
+        </div>
+      </div>
+      <nav class="tabbar"><a href="#"><span class="ic">▦</span>Photos</a><a class="on" href="#"><span class="ic">▤</span>Albums</a><a href="#"><span class="ic">⌕</span>Search</a><a href="#"><span class="ic">⚙︎</span>Settings</a></nav>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Albums.</b> Favorites and People move from hidden places to the top. Shared is a pill, not a separate tab. More in <a href="04-albums-sharing.html">Albums &amp; sharing</a>.</div>
+  </div>
+  <div class="notes">
+    <h3>Why these four</h3>
+    <ol>
+      <li><b>Search becomes a tab.</b> It is a weekly job and the engine is a strength (chips, suggestions), but today the entry point is a 36 px icon. A tab also gives recent searches a home.</li>
+      <li><b>Settings becomes a tab.</b> People expect to find Settings without hunting, and a gear on another screen isn't obvious. Settings starts with Backup, so the safety details are one tap away from both Photos (the chip) and Settings.</li>
+      <li><b>Devices and Storage fold into Backup.</b> People open Devices to answer "is it backed up?". The Backup page answers that first and lists devices below. The daily answer is already on Photos, so Backup doesn't need a tab of its own.</li>
+      <li><b>No avatar menu.</b> Everything in it gets a real place: Favorites goes to Albums; Storage and Devices go to Settings → Backup; Settings gets its own tab; Recently Deleted goes to the bottom of Albums and to Photos ⋯.</li>
+      <li><b>One icon set.</b> Monochrome outline icons (Material Symbols on Android, SF Symbols-style on the Mac) replace the mix of emoji and glyphs (F20).</li>
+      <li><b>Material 3 nav bar:</b> an active pill indicator, labels always shown, 80 dp tall with a 48 dp target per item.</li>
+    </ol>
+  </div>
+</div>
+</section>
+
+<section class="board">
+<h2>Desktop: sidebar by frequency</h2>
+<p class="why">Today's sidebar is a flat list: Library, Favorites, People, Albums, Shared, Devices, Storage, Recently Deleted, Settings. The redesign groups it by job. <b>Library</b> holds what you browse. <b>Albums</b> holds the albums themselves, so one click opens one; shared albums have a badge. <b>Backup</b> is a single status row that tells you its state without a click. Settings sits at the bottom, as in macOS apps.</p>
+<div class="desk"><div class="win">
+  <aside class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <a class="on" href="#"><span class="ic">▦</span>Photos<span class="n">12,431</span></a>
+    <a href="#"><span class="ic">♥</span>Favorites<span class="n">142</span></a>
+    <a href="#"><span class="ic">☺</span>People</a>
+    <div class="grp">Albums</div>
+    <a href="#"><span class="ic">▤</span>Lisbon<span class="n"><span class="pill info">Shared</span></span></a>
+    <a href="#"><span class="ic">▤</span>The boys</a>
+    <a href="#"><span class="ic">▤</span>Garden</a>
+    <a href="#"><span class="ic">▤</span>Family 2026<span class="n"><span class="pill info">3 new</span></span></a>
+    <a href="#" class="muted"><span class="ic">＋</span>New album</a>
+    <div class="foot">
+      <a href="#" style="background:var(--ok-soft)"><span class="ic" style="color:var(--ok)">◉</span><span><b style="display:block;font-size:13px">All backed up</b><span class="muted" style="font-size:12px">2 copies · Mac + Pi</span></span></a>
+      <a href="#"><span class="ic">🗑︎</span>Recently Deleted</a>
+      <a href="#"><span class="ic">⚙︎</span>Settings</a>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="tb"><h1>Photos</h1><div class="grow"></div><div class="search">⌕ Search photos, people, places<kbd>⌘F</kbd></div><span class="btn sm">Import…</span><span class="btn sm primary">Share</span></div>
+    <div class="content">
+      <div class="dayh">Today <small>Sat 8 Nov</small></div>
+      <div class="tiles" style="--cols:8" data-n="16" data-seed="11" data-live="1"></div>
+      <div class="dayh">Thursday <small>6 Nov · Lisbon</small></div>
+      <div class="tiles" style="--cols:8" data-n="16" data-seed="5" data-video="6"></div>
+    </div>
+  </div>
+</div></div>
+<div class="cap wide"><b>Desktop.</b> The Backup row in the sidebar footer is the same status as the phone chip, using the same words and the same rule. Devices and Storage are tabs inside Backup (<a href="05-backup.html">see Backup</a>). The search field is cleared when you leave results (F14). Menu-bar items cover the rest: File ▸ Import, Edit ▸ Select All, View ▸ Zoom, Window ▸ Backup.</div>
+</section>
+</div>
+<script src="assets/redesign.js"></script>
+</body></html>

@@ -63,6 +63,11 @@ pub const COMMANDS: &[&str] = &[
     "delete_permanently",
     "import_paths",
     "import_picked",
+    "plan_archive_import",
+    "start_archive_import",
+    "stop_archive_import",
+    "forget_archive_import",
+    "archive_import_status",
     "answer_gallery_deletions",
     "pin_original",
     "fetch_now",
@@ -85,6 +90,7 @@ pub const COMMANDS: &[&str] = &[
     "replace_recovery_phrase",
     "dismiss_alert",
     "health",
+    "safety_status",
     "free_up_space",
     "settings",
     "set_redundancy_target",
@@ -94,9 +100,11 @@ pub const COMMANDS: &[&str] = &[
     "watch_folder",
     "export_library",
     "share_files",
+    "share_text",
     "leave_library",
     "transfers",
     "rename_album",
+    "set_album_cover",
     "set_poster",
     "backup_status",
     "backup_configure",
@@ -258,6 +266,23 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             .import_paths(&arg::<Vec<String>>(&args, "paths")?)
             .await?),
         "import_picked" => out(core.import_picked(arg(&args, "files")?).await?),
+        "plan_archive_import" => out(core
+            .plan_archive_import(&arg::<Vec<String>>(&args, "paths")?)
+            .await?),
+        "start_archive_import" => {
+            core.start_archive_import(&arg::<Vec<String>>(&args, "paths")?)
+                .await?;
+            Ok(json!({}))
+        }
+        "stop_archive_import" => {
+            core.stop_archive_import();
+            Ok(json!({}))
+        }
+        "forget_archive_import" => {
+            core.forget_archive_import()?;
+            Ok(json!({}))
+        }
+        "archive_import_status" => out(core.archive_import_status()),
         "answer_gallery_deletions" => {
             core.answer_gallery_deletions(arg(&args, "delete")?).await?;
             Ok(json!({}))
@@ -346,6 +371,7 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
             Ok(json!({}))
         }
         "health" => out(core.health().await?),
+        "safety_status" => out(core.safety_status().await?),
         "free_up_space" => out(core.free_up_space(arg(&args, "dry_run")?).await?),
         "settings" => out(core.settings().await?),
         "set_keep_rules" => {
@@ -367,6 +393,14 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
         }
         "watch_folder" => {
             core.watch_folder(&arg::<String>(&args, "dir")?).await?;
+            Ok(json!({}))
+        }
+        "set_album_cover" => {
+            core.set_album_cover(
+                &arg::<String>(&args, "album")?,
+                &arg::<String>(&args, "photo")?,
+            )
+            .await?;
             Ok(json!({}))
         }
         "rename_album" => {
@@ -554,6 +588,8 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
                 .await?;
             out(json!({ "paths": paths }))
         }
+        // The platform's share UI is the shell's; the HTTP bridge has none (the UI copies).
+        "share_text" => bail!("Sharing to other apps is not available here."),
         "leave_library" => out(json!({ "kept": core.leave_library().await? })),
         "transfers" => out(core.transfers().await?),
         other => bail!("unknown command `{other}`"),

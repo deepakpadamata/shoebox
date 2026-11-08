@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PhotoSummary } from './api';
-import { buildLayout, dateMarks, dayAt, offsetOfDay, visibleRows } from './timeline';
+import { buildLayout, dateMarks, dayAt, offsetOfDay, packedLabel, visibleRows } from './timeline';
 
 function photo(i: number, day: number): PhotoSummary {
   return {
@@ -82,5 +82,49 @@ describe('timeline layout', () => {
       { top: heads[2].top, year: 2025, month: 1 },
       { top: heads[3].top, year: 2024, month: 12 },
     ]);
+  });
+});
+
+describe('packing and months (U1-18)', () => {
+  const heads = (l: ReturnType<typeof buildLayout>) => l.rows.filter((r) => r.type === 'head');
+  const at = (i: number, y: number, m: number, d: number): PhotoSummary => ({ ...photo(i, d), taken_at: new Date(y, m - 1, d, 12).getTime() - i });
+
+  it('puts consecutive quiet days under one heading', () => {
+    // Wed 5, Tue 4, Mon 3: one photo each.
+    const items = [at(0, 2024, 5, 5), at(1, 2024, 5, 4), at(2, 2024, 5, 3)];
+    const l = buildLayout(items, { ...opts, pack: true });
+    expect(heads(l)).toHaveLength(1);
+    const h = heads(l)[0];
+    expect(h.type === 'head' && h.count).toBe(3);
+    expect(h.type === 'head' && h.days?.map((d) => d.count)).toEqual([1, 1, 1]);
+    expect(packedLabel(h.type === 'head' ? h.days! : [])).toBe('Fri 3 May · Sat 4 · Sun 5');
+  });
+
+  it('leaves a busy day between quiet ones as its own heading', () => {
+    const busy = [...Array(9)].map((_, i) => at(10 + i, 2024, 5, 4));
+    const items = [at(0, 2024, 5, 6), at(1, 2024, 5, 5), ...busy, at(30, 2024, 5, 3), at(31, 2024, 5, 2)];
+    const l = buildLayout(items, { ...opts, pack: true });
+    expect(heads(l).map((h) => (h.type === 'head' ? h.count : 0))).toEqual([2, 9, 2]);
+    expect(heads(l).map((h) => (h.type === 'head' ? !!h.days : false))).toEqual([true, false, true]);
+  });
+
+  it('does not pack a lone quiet day, and a packed group selects as a range', () => {
+    const l = buildLayout([at(0, 2024, 5, 5), ...[...Array(9)].map((_, i) => at(10 + i, 2024, 5, 4))], { ...opts, pack: true });
+    expect(heads(l).every((h) => h.type === 'head' && !h.days)).toBe(true);
+    const p = buildLayout([at(0, 2024, 5, 5), at(1, 2024, 5, 4)], { ...opts, pack: true });
+    const h = heads(p)[0];
+    expect(h.type === 'head' && [h.from, h.count]).toEqual([0, 2]);
+  });
+
+  it('groups by month when zoomed all the way out', () => {
+    const items = [at(0, 2025, 3, 2), at(1, 2025, 3, 1), at(2, 2025, 1, 20), at(3, 2025, 1, 2), at(4, 2024, 12, 5)];
+    const l = buildLayout(items, { ...opts, group: 'month' });
+    expect(heads(l).map((h) => (h.type === 'head' ? [h.day, h.count] : []))).toEqual([['2025-03-01', 2], ['2025-01-01', 2], ['2024-12-01', 1]]);
+    expect(dateMarks(l)).toHaveLength(3);
+  });
+
+  it('handles empty input', () => {
+    expect(buildLayout([], { ...opts, pack: true }).rows).toEqual([]);
+    expect(buildLayout([], { ...opts, group: 'month' }).rows).toEqual([]);
   });
 });

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from './Icon.svelte';
   import { blobUrl } from '../lib/api';
   import { ensurePoster } from '../lib/poster';
   import { dateTime } from '../lib/format';
@@ -7,8 +8,9 @@
     transferring?: boolean; selected?: boolean; selecting?: boolean; hasThumb?: boolean;
     hasPoster?: boolean; needsPoster?: boolean; hasOriginal?: boolean; backedUp?: boolean; index?: number; takenAt?: number;
     onclick?: (e: MouseEvent) => void;
+    oncontextmenu?: (e: MouseEvent) => void;
   }
-  let { id, size, favorite = false, video = false, live = false, copies, target = 2, transferring = false, selected = false, selecting = false, hasThumb = true, hasPoster = false, needsPoster = false, hasOriginal = false, backedUp = true, index, takenAt, onclick }: Props = $props();
+  let { id, size, favorite = false, video = false, live = false, copies, target = 2, transferring = false, selected = false, selecting = false, hasThumb = true, hasPoster = false, needsPoster = false, hasOriginal = false, backedUp = true, index, takenAt, onclick, oncontextmenu }: Props = $props();
   // A video nobody has made a poster for yet gets one here if this device has the original;
   // until then a neutral tile. (One made elsewhere arrives like any thumbnail.)
   let madePoster = $state(false);
@@ -24,7 +26,7 @@
   const risk = $derived(copies !== undefined && copies < target && !backedUp);
 </script>
 
-<button class="tile" class:selected data-index={index} style="width:{size}px;height:{size}px" {onclick} aria-label={label} aria-pressed={selecting ? selected : undefined}>
+<button class="tile" class:selected data-index={index} style="width:{size}px;height:{size}px" {onclick} {oncontextmenu} aria-label={label} aria-pressed={selecting ? selected : undefined}>
   {#if poster}
     <img src={blobUrl(id, 'poster')} alt="" loading="lazy" decoding="async" draggable="false" />
   {:else if hasThumb && !video}
@@ -32,9 +34,9 @@
   {:else}
     <span class="placeholder" aria-hidden="true"></span>
   {/if}
-  {#if favorite}<span class="fav" aria-label="Favorite">♥</span>{/if}
-  {#if video}<span class="vid" aria-label="Video">▶</span>{:else if live}<span class="vid" aria-label="Live Photo">◎ LIVE</span>{/if}
-  {#if transferring}<span class="b sync" title="Transferring">↻</span>
+  {#if favorite}<span class="fav" aria-label="Favorite"><Icon name="heart" size={14} fill /></span>{/if}
+  {#if video}<span class="vid" aria-label="Video"><Icon name="play" size={14} fill /></span>{:else if live}<span class="vid" aria-label="Live Photo"><Icon name="live" size={14} /> LIVE</span>{/if}
+  {#if transferring}<span class="b sync" title="Transferring"><Icon name="sync" size={12} /></span>
   {:else if risk}<span class="b risk" title="Only {copies} {copies === 1 ? 'copy' : 'copies'}">{copies} {copies === 1 ? 'copy' : 'copies'}</span>{/if}
   <span class="sel" class:on={selecting} aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 12.5l3.2 3.2L17 9" /></svg></span>
 </button>
@@ -48,7 +50,7 @@
   .b.risk { background: var(--risk); color: #fff; }
   .b.sync { background: var(--info); color: #fff; }
   .vid { position: absolute; left: 5px; bottom: 4px; font-size: 10px; color: #fff; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
-  .fav { position: absolute; left: 5px; top: 3px; font-size: 11px; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+  .fav { position: absolute; left: 5px; top: 3px; font-size: var(--t-xs); color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
   /* The select circle: on every tile while selecting, and on the one under the mouse. */
   .sel { position: absolute; right: 4px; top: 4px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
     opacity: 0; transition: opacity 0.12s; cursor: pointer; }

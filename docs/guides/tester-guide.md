@@ -23,12 +23,16 @@ device holds it. A phone alone only has its own copy.
 
 1. Install the app on the device with the most photos and choose *Create a library*. Write the recovery phrase on paper:
    it is the only way back in if every device is lost.
-2. Add your other devices: *Devices → Add a device*. On the phone or the second computer, choose *Join* and scan the QR
-   code, or type the six-digit code.
+2. Add your other devices: *Settings → Backup → Add a device* (on the Mac, *Backup* in the sidebar). On the phone or the
+   second computer, choose *Join* and scan the QR code, or type the six-digit code.
 3. Turn on backup:
-   * on Android, *Back up camera roll* (camera photos by default, *Choose folders* for more);
+   * on Android, first run offers *Back up camera roll* (camera photos by default; *Settings → Camera* to choose folders);
    * on a Mac, *Settings → Back up the Photos library*, or *Import* for folders.
-4. Watch *Devices*: the card on top says what is moving and how long is left.
+4. Watch the status chip at the top of *Photos* (the *Backup* row in the Mac sidebar): it says whether every photo has a
+   second copy. Tap it for the Backup page.
+
+**Phone navigation.** Four tabs: *Photos · Albums · Search · Settings*. Backup is the first section of Settings.
+On the Mac the sidebar lists Photos, Favorites and People, then Albums, then Backup status, Recently Deleted and Settings.
 
 [The user guide](user-guide.md) explains the ideas (keepers, companions, viewers, Recently Deleted, shared albums).
 
@@ -50,6 +54,11 @@ device holds it. A phone alone only has its own copy.
     a long run shows a progress notification. It stops when the phone is hot or unplugged. This is new and has not yet
     run for a night on a real phone: tell us how it goes;
   * a computer or keeper does the same faster, and shares the work with your phones.
+* **Importing from Google Photos is new** (Mac and other computers, *＋ Import → From Google Photos…*; not on phones yet).
+  It has been tried on public samples and generated test exports, **not on a current real Takeout**: please try one,
+  start with a small export, and tell us about photos with a wrong date, a missing album or a file it left out. A
+  Takeout needs free disk space for the photos about to be copied in, plus 512 MB. Windows has no free-space check yet.
+  The iCloud export is not supported yet.
 * **Shared links on the web (Shoebox Cloud)** are only available if the service is running for your group. Ask whoever gave
   you this build.
 

@@ -5,11 +5,16 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
   @Volatile private var top = 0
   @Volatile private var bottom = 0
+
+  // TauriActivity turns this off; the UI keeps a history entry for each open sheet and sub-page
+  // (U1-02), so system Back has to reach the WebView's history first.
+  override val handleBackNavigation: Boolean = true
 
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
@@ -33,6 +38,16 @@ class MainActivity : TauriActivity() {
       @JavascriptInterface fun top() = this@MainActivity.top
       @JavascriptInterface fun bottom() = this@MainActivity.bottom
     }, "ShoeboxInsets")
+    webView.addJavascriptInterface(object {
+      // Dark status-bar icons on a light theme (src/lib/theme.ts); light icons on a dark one.
+      @JavascriptInterface fun setLightBars(light: Boolean) {
+        runOnUiThread {
+          val c = WindowCompat.getInsetsController(window, window.decorView)
+          c.isAppearanceLightStatusBars = light
+          c.isAppearanceLightNavigationBars = light
+        }
+      }
+    }, "ShoeboxTheme")
     webView.addJavascriptInterface(object {
       // "Keep the screen on until backup finishes" (mockup 5e).
       @JavascriptInterface fun setKeepAwake(on: Boolean) {

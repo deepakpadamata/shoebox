@@ -1,6 +1,7 @@
 // Search helpers (S1-05): chips, suggestions and recent searches. Pure functions, unit-tested;
 // the screens hold the state.
 import type { SearchChip } from '../bindings/SearchChip';
+import type { IconName } from '../components/Icon.svelte';
 import type { SearchSuggestion } from '../bindings/SearchSuggestion';
 
 /** The query with one chip's words taken out (spans are in characters). */
@@ -10,23 +11,36 @@ export function removeChip(text: string, chip: Pick<SearchChip, 'start' | 'end'>
   return out.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * For a search with no results: the chip to offer removing ("Try without 2026"). Dates narrow a
+ * search most, then places, then anything else; among equals the later one in the query.
+ */
+export function relaxSuggestion<C extends Pick<SearchChip, 'kind' | 'label'>>(chips: C[]): { chip: C; text: string } | null {
+  if (!chips.length) return null;
+  const rank = (k: string) => (k === 'date' ? 0 : k === 'place' ? 1 : 2);
+  let best = chips.length - 1;
+  for (let i = chips.length - 1; i >= 0; i--) if (rank(chips[i].kind) < rank(chips[best].kind)) best = i;
+  const chip = chips[best];
+  return { chip, text: `Try without ${chip.label}` };
+}
+
 /** Suggestion groups in the order they are shown. */
-export const GROUPS: { kind: string; title: string; icon: string }[] = [
-  { kind: 'person', title: 'People', icon: '☺' },
-  { kind: 'place', title: 'Places', icon: '📍' },
-  { kind: 'album', title: 'Albums', icon: '▤' },
-  { kind: 'thing', title: 'Things', icon: '◇' },
-  { kind: 'camera', title: 'Cameras', icon: '📷' },
-  { kind: 'lens', title: 'Lenses', icon: '◎' },
+export const GROUPS: { kind: string; title: string; icon: IconName }[] = [
+  { kind: 'person', title: 'People', icon: 'person' },
+  { kind: 'place', title: 'Places', icon: 'place' },
+  { kind: 'album', title: 'Albums', icon: 'albums' },
+  { kind: 'thing', title: 'Things', icon: 'thing' },
+  { kind: 'camera', title: 'Cameras', icon: 'camera' },
+  { kind: 'lens', title: 'Lenses', icon: 'live' },
 ];
 
-export function chipIcon(kind: string): string {
-  return { date: '📅', kind: '▶', favourite: '♥' }[kind] ?? GROUPS.find((g) => g.kind === kind)?.icon ?? '';
+export function chipIcon(kind: string): IconName | null {
+  return ({ date: 'calendar', kind: 'play', favourite: 'heart' } as Record<string, IconName>)[kind] ?? GROUPS.find((g) => g.kind === kind)?.icon ?? null;
 }
 
 export interface Group {
   title: string;
-  icon: string;
+  icon: IconName;
   items: SearchSuggestion[];
 }
 

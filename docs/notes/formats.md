@@ -53,6 +53,8 @@ Each signature or keyed hash starts with its domain, so one can never be replaye
 | `shoebox/share-manifest-key/v1` | the key that opens a share manifest, derived from the link's share key (W1-03) |
 | `shoebox/cloud-request/v1` | a signed request to Shoebox Cloud (`CloudAuth`): method, path and query, time, body hash (W1-04) |
 | `shoebox/share-signer/v1` | the key a share manifest is signed with, derived from the share key (W1-05) |
+| `shoebox/import-album/v1` | an imported album's id: BLAKE3 of the source kind and the album's title, so importing again adds to the same album (`import_archive.rs`, I1-07) |
+| `shoebox/import-run/v1` | an archive import's run id: BLAKE3 of the parts' names and sizes, naming its journal (`import_archive.rs`, I1-04) |
 | `SBXS` (the magic) | a sealed share manifest's signature covers every byte from the magic on |
 
 Sealed cloud blobs are 4 MiB pieces of XChaCha20-Poly1305 (16-byte tags, no header); locked by golden bytes in

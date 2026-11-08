@@ -107,6 +107,9 @@ struct AppFile {
     /// `LibraryTicket` text: the library capability plus first peers.
     ticket: Option<String>,
     relay: Option<String>,
+    /// The Google Photos import that has not finished, as chosen: continued from its journal.
+    #[serde(default)]
+    pending_archive_import: Vec<String>,
 }
 
 fn parse_role(s: &str) -> Result<Role> {
@@ -140,6 +143,41 @@ fn parse_device(s: &str) -> Result<EndpointId> {
         .and_then(|b| b.try_into().ok())
         .ok_or_else(|| anyhow!("`{s}` is not a device id"))?;
     Ok(EndpointId(bytes))
+}
+
+/// The library's rule: a photo is safe once enough devices hold its original, or once a keeper
+/// does. The one place it is written; summaries, the viewer, health and the status all use it.
+pub(crate) fn is_backed_up(
+    copies: usize,
+    target: usize,
+    holders: &[shoebox_core::model::Holding],
+    keepers: &HashSet<EndpointId>,
+) -> bool {
+    copies >= target
+        || holders
+            .iter()
+            .any(|h| h.kind == BlobKind::Original && keepers.contains(&h.device))
+}
+
+/// The devices in the library that are keepers and not removed.
+pub(crate) async fn keeper_set(ln: &LibraryNode<Library>) -> Result<HashSet<EndpointId>> {
+    Ok(ln
+        .store()
+        .device_list()
+        .await?
+        .devices
+        .iter()
+        .filter(|d| d.role == Role::Keeper && !d.revoked)
+        .map(|d| d.device)
+        .collect())
+}
+
+/// The newest photo that is not deleted: an album's cover when none was chosen.
+pub(crate) fn newest_cover(recs: &[PhotoRecord]) -> Option<Blake3Hash> {
+    recs.iter()
+        .filter(|r| r.deleted_at.value.is_none())
+        .max_by_key(|r| (r.taken_at, r.id))
+        .map(|r| r.id)
 }
 
 fn parse_album(s: &str) -> Result<AlbumId> {
@@ -227,6 +265,26 @@ pub struct AppCore {
     pub(crate) backup_running: tokio::sync::Mutex<()>,
     /// Which photo each blob belongs to, and the fetch queue's counts, for [`AppCore::transfers`].
     transfer_cache: tokio::sync::Mutex<TransferCache>,
+    /// The running Google Photos import and how the last one ended.
+    archive_import: Mutex<ArchiveRun>,
+    /// When each other device was last reachable, kept in `seen.json` so a restart does not
+    /// forget how long one has been away (U1-07).
+    seen: Mutex<SeenBook>,
+    /// The last answer sent to the UI, so only a change is sent again.
+    safety_sent: Mutex<Option<crate::types::SafetyStatus>>,
+}
+
+#[derive(Default)]
+struct SeenBook {
+    at_ms: HashMap<String, u64>,
+    saved: Option<std::time::Instant>,
+}
+
+#[derive(Default)]
+struct ArchiveRun {
+    task: Option<tokio::task::JoinHandle<()>>,
+    error: Option<String>,
+    report: Option<crate::types::ArchiveReportInfo>,
 }
 
 /// Rebuilt at most this often: the Devices screen asks every second or two.
@@ -315,7 +373,11 @@ impl AppCore {
             backup: tokio::sync::Mutex::new(backup_state),
             backup_running: tokio::sync::Mutex::new(()),
             transfer_cache: tokio::sync::Mutex::new(TransferCache::default()),
+            archive_import: Mutex::new(ArchiveRun::default()),
+            seen: Mutex::new(SeenBook::default()),
+            safety_sent: Mutex::new(None),
         });
+        core.load_seen();
         core.forward_node_events();
         core.start_update_checks();
         let ticket = core.file.lock().unwrap().ticket.clone();
@@ -356,6 +418,10 @@ impl AppCore {
     /// Stop everything and release the data directory.
     pub async fn shutdown(&self) -> Result<()> {
         for h in self.followers.lock().unwrap().drain(..) {
+            h.abort();
+        }
+        if let Some(h) = self.archive_import.lock().unwrap().task.take() {
+            // The journal keeps the place: the next start continues.
             h.abort();
         }
         *self.shared.write().await = None;
@@ -668,7 +734,18 @@ impl AppCore {
                     }
                 }
             });
-            self.followers.lock().unwrap().extend([follow, linked]);
+            let weak = Arc::downgrade(self);
+            let safety = tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    let Some(core) = weak.upgrade() else { break };
+                    core.publish_safety().await;
+                }
+            });
+            self.followers
+                .lock()
+                .unwrap()
+                .extend([follow, linked, safety]);
         } else {
             shared.set_person(ln.person_id());
         }
@@ -994,15 +1071,7 @@ impl AppCore {
             return Ok(vec![]);
         }
         let target = ln.redundancy_target().await? as usize;
-        let keepers: HashSet<EndpointId> = ln
-            .store()
-            .device_list()
-            .await?
-            .devices
-            .iter()
-            .filter(|d| d.role == Role::Keeper && !d.revoked)
-            .map(|d| d.device)
-            .collect();
+        let keepers = keeper_set(ln).await?;
         let blobs = self.node.blobs().clone();
         let protected = Arc::new(blobs.protected().await?);
         // (thumbnail stored, original kept), many requests in flight. Owned values only: a
@@ -1026,8 +1095,10 @@ impl AppCore {
         let mut out = Vec::with_capacity(recs.len());
         for (rec, (has_thumb, has_original)) in recs.iter().zip(stored) {
             let holders = ln.store().holders(&rec.original.hash).await?;
-            let originals = || holders.iter().filter(|h| h.kind == BlobKind::Original);
-            let copies = originals().count();
+            let copies = holders
+                .iter()
+                .filter(|h| h.kind == BlobKind::Original)
+                .count();
             let is_video = rec.original.mime.starts_with("video/");
             let placeholder = rec.thumb.hash == rec.original.hash;
             out.push(PhotoSummary {
@@ -1037,8 +1108,7 @@ impl AppCore {
                 is_video,
                 live: ln.store().motion(&rec.id).await?.is_some(),
                 copies: copies as u32,
-                // Safe once enough devices hold it, or once any keeper does.
-                backed_up: copies >= target || originals().any(|h| keepers.contains(&h.device)),
+                backed_up: is_backed_up(copies, target, &holders, &keepers),
                 has_thumb,
                 has_poster: is_video && !placeholder && has_thumb,
                 needs_poster: is_video && placeholder,
@@ -1266,7 +1336,16 @@ impl AppCore {
             Some(_) => ln.clip_available(&id).await?,
             None => false,
         };
+        let target = ln.redundancy_target().await? as usize;
+        let keepers = keeper_set(&ln).await?;
+        let held_by: Vec<String> = stored_on
+            .iter()
+            .filter(|s| s.kinds.iter().any(|k| k == "original"))
+            .map(|s| s.name.clone())
+            .collect();
         Ok(PhotoDetail {
+            backed_up: is_backed_up(copies as usize, target, &holders, &keepers),
+            held_by,
             id: rec.id.to_string(),
             taken_at: rec.taken_at.0 as f64,
             favorite: rec.favorite.value,
@@ -1350,6 +1429,141 @@ impl AppCore {
         })
     }
 
+    // ---------- Google Photos import (I1-10) ----------
+
+    /// What importing these Takeout files (zip or tgz parts, or an unpacked folder) would do.
+    pub async fn plan_archive_import(&self, paths: &[String]) -> Result<ArchivePlanInfo> {
+        let ln = self.ln().await?;
+        let parts: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+        let p = ln.plan_archives(&parts).await?;
+        Ok(ArchivePlanInfo {
+            photos: p.photos as u32,
+            already: p.already as u32,
+            copies: p.copies as u32,
+            trashed: p.trashed as u32,
+            not_photos: p.not_photos as u32,
+            albums: p
+                .albums
+                .into_iter()
+                .map(|(title, photos)| ArchiveAlbumInfo {
+                    title,
+                    photos: photos as u32,
+                })
+                .collect(),
+            with_export_data: p.with_export_data as u32,
+            unmatched: p.unmatched as u32,
+            ambiguous: p.ambiguous as u32,
+            part_errors: p
+                .part_errors
+                .iter()
+                .map(|(f, e)| format!("{}: {e}", f.display()))
+                .collect(),
+            needed_bytes: p.needed_bytes as f64,
+            free_bytes: p.free_bytes.map(|b| b as f64),
+            is_takeout: p.is_takeout,
+        })
+    }
+
+    /// Start (or continue) a Google Photos import in the background. The files are remembered, so
+    /// an import the app was closed in the middle of is offered again.
+    pub async fn start_archive_import(self: &Arc<Self>, paths: &[String]) -> Result<()> {
+        if paths.is_empty() {
+            bail!("no files chosen");
+        }
+        let ln = self.ln().await?;
+        {
+            let run = self.archive_import.lock().unwrap();
+            if run.task.as_ref().is_some_and(|t| !t.is_finished()) {
+                bail!("an import is already running");
+            }
+        }
+        {
+            self.file.lock().unwrap().pending_archive_import = paths.to_vec();
+            self.save()?;
+        }
+        let parts: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+        let weak = Arc::downgrade(self);
+        let task = tokio::spawn(async move {
+            let result = ln.import_archives(&parts, ImportOptions::default()).await;
+            let Some(core) = weak.upgrade() else { return };
+            {
+                let mut run = core.archive_import.lock().unwrap();
+                run.task = None;
+                match result {
+                    Ok(r) => {
+                        run.error = None;
+                        run.report = Some(archive_report(&r));
+                        let mut file = core.file.lock().unwrap();
+                        // Parts that could not be read leave the import open to try again.
+                        if r.part_errors.is_empty() && r.import.failed.is_empty() {
+                            file.pending_archive_import.clear();
+                        }
+                    }
+                    Err(e) => {
+                        run.report = None;
+                        run.error = Some(format!("{e:#}"));
+                    }
+                }
+            }
+            let _ = core.save();
+            core.emit(AppEvent::ArchiveImport);
+        });
+        {
+            let mut run = self.archive_import.lock().unwrap();
+            run.error = None;
+            run.report = None;
+            run.task = Some(task);
+        }
+        self.emit(AppEvent::ArchiveImport);
+        Ok(())
+    }
+
+    /// Stop the running import; what it finished stays, and starting again continues.
+    pub fn stop_archive_import(&self) {
+        if let Some(t) = self.archive_import.lock().unwrap().task.take() {
+            t.abort();
+        }
+        self.emit(AppEvent::ImportProgress { done: 0, total: 0 });
+        self.emit(AppEvent::ArchiveImport);
+    }
+
+    /// Drop the unfinished import and the last report (the journal stays on disk).
+    pub fn forget_archive_import(&self) -> Result<()> {
+        {
+            let mut run = self.archive_import.lock().unwrap();
+            if let Some(t) = run.task.take() {
+                t.abort();
+            }
+            run.error = None;
+            run.report = None;
+        }
+        self.file.lock().unwrap().pending_archive_import.clear();
+        self.save()?;
+        self.emit(AppEvent::ArchiveImport);
+        Ok(())
+    }
+
+    pub fn archive_import_status(&self) -> ArchiveImportInfo {
+        let paths = self.file.lock().unwrap().pending_archive_import.clone();
+        let run = self.archive_import.lock().unwrap();
+        let running = run.task.as_ref().is_some_and(|t| !t.is_finished());
+        let state = if running {
+            "running"
+        } else if !paths.is_empty() {
+            "stopped"
+        } else if run.report.is_some() {
+            "done"
+        } else {
+            "idle"
+        };
+        ArchiveImportInfo {
+            state: state.into(),
+            paths,
+            error: run.error.clone(),
+            report: run.report.clone(),
+        }
+    }
+
     pub async fn pin_original(&self, id: &str, pin: bool) -> Result<()> {
         let ln = self.ln().await?;
         let id = parse_hash(id)?;
@@ -1376,22 +1590,33 @@ impl AppCore {
     pub async fn albums(&self) -> Result<Vec<AlbumInfo>> {
         let ln = self.ln().await?;
         let links = self.shared_links().await;
-        Ok(ln
-            .store()
-            .albums()
-            .await?
-            .into_iter()
-            .map(|a| {
-                let id = hex::encode(a.id.0);
-                AlbumInfo {
-                    shared_as: links.iter().find(|(p, _)| *p == id).map(|(_, s)| s.clone()),
-                    id,
-                    name: a.name,
-                    cover: a.cover.map(|c| c.to_string()),
-                    item_count: a.item_count as u32,
+        let mut out = vec![];
+        for a in ln.store().albums().await? {
+            let id = hex::encode(a.id.0);
+            // No stored cover: the newest photo in the album, chosen when read so there is
+            // nothing to sync (U1-03).
+            let cover = match a.cover {
+                Some(c) => Some(c),
+                None if a.item_count > 0 => {
+                    let mut recs = vec![];
+                    for pid in ln.store().album_items(&a.id, Page::all()).await? {
+                        if let Some(rec) = ln.store().photo(&pid).await? {
+                            recs.push(rec);
+                        }
+                    }
+                    newest_cover(&recs)
                 }
-            })
-            .collect())
+                None => None,
+            };
+            out.push(AlbumInfo {
+                shared_as: links.iter().find(|(p, _)| *p == id).map(|(_, s)| s.clone()),
+                id,
+                name: a.name,
+                cover: cover.map(|c| c.to_string()),
+                item_count: a.item_count as u32,
+            });
+        }
+        Ok(out)
     }
 
     pub async fn create_album(&self, name: &str) -> Result<AlbumInfo> {
@@ -1463,6 +1688,32 @@ impl AppCore {
                 id,
                 name: Lww::new(name.to_string(), hlc),
                 cover: Lww::new(None, shoebox_core::Hlc::GENESIS),
+                items: shoebox_core::merge::OrSet::new(),
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Choose the photo an album shows as its cover (the latest choice wins on every device).
+    pub async fn set_album_cover(&self, album: &str, photo: &str) -> Result<()> {
+        let ln = self.ln().await?;
+        let id = parse_album(album)?;
+        let photo = parse_hash(photo)?;
+        ensure!(
+            ln.store().albums().await?.iter().any(|a| a.id == id),
+            "no such album"
+        );
+        let hlc = shoebox_core::Hlc {
+            physical_ms: now_ms(),
+            counter: 0,
+            device: ln.device(),
+        };
+        // Only the cover is new: the name and items lose to what exists.
+        ln.store()
+            .upsert_album(AlbumMeta {
+                id,
+                name: Lww::new(String::new(), shoebox_core::Hlc::GENESIS),
+                cover: Lww::new(Some(photo), hlc),
                 items: shoebox_core::merge::OrSet::new(),
             })
             .await?;
@@ -1722,6 +1973,82 @@ impl AppCore {
 
     // ---------- health & storage ----------
 
+    fn seen_path(&self) -> PathBuf {
+        self.dir.join("seen.json")
+    }
+
+    fn load_seen(&self) {
+        if let Ok(b) = std::fs::read(self.seen_path()) {
+            if let Ok(m) = serde_json::from_slice(&b) {
+                self.seen.lock().unwrap().at_ms = m;
+            }
+        }
+    }
+
+    /// The answer to "are my photos safe?" (U1-07): one of five states, computed from the
+    /// library's own rule, the devices and what is moving.
+    pub async fn safety_status(&self) -> Result<crate::types::SafetyStatus> {
+        use crate::safety::{compute, DeviceFact, Inputs};
+        let ln = self.ln().await?;
+        let photos = ln
+            .store()
+            .photos_by_time(TimeRange::ALL, Page::all())
+            .await?
+            .len() as u32;
+        let not_safe = ln.at_risk(Page::all()).await?.len() as u32;
+        let devices = self.devices().await?;
+        let snap = self.node.transfers();
+        let transferring = !snap.downloads.is_empty() || !snap.uploads.is_empty();
+        let now = now_ms();
+        let mut facts = vec![];
+        {
+            let mut book = self.seen.lock().unwrap();
+            let mut changed = false;
+            for d in &devices {
+                let first = !book.at_ms.contains_key(&d.id);
+                if d.online || first {
+                    book.at_ms.insert(d.id.clone(), now);
+                    changed |= first;
+                }
+                let seen = book.at_ms[&d.id];
+                facts.push(DeviceFact {
+                    name: d.name.clone(),
+                    stores: d.role != "viewer",
+                    revoked: d.revoked,
+                    is_this_device: d.is_this_device,
+                    online: d.online,
+                    unseen_for: (!d.online)
+                        .then(|| std::time::Duration::from_millis(now.saturating_sub(seen))),
+                });
+            }
+            let due = book
+                .saved
+                .is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(600));
+            if changed || due {
+                book.saved = Some(std::time::Instant::now());
+                let _ = std::fs::write(self.seen_path(), serde_json::to_vec(&book.at_ms)?);
+            }
+        }
+        Ok(compute(&Inputs {
+            photos,
+            not_safe,
+            devices: facts,
+            transferring,
+        }))
+    }
+
+    /// Tell the UI when the answer changes: called every few seconds while the library is open.
+    pub(crate) async fn publish_safety(&self) {
+        let Ok(now) = self.safety_status().await else {
+            return;
+        };
+        let mut sent = self.safety_sent.lock().unwrap();
+        if sent.as_ref() != Some(&now) {
+            *sent = Some(now.clone());
+            self.emit(AppEvent::Safety { status: now });
+        }
+    }
+
     pub async fn health(&self) -> Result<Health> {
         let ln = self.ln().await?;
         let photos = ln
@@ -1730,17 +2057,22 @@ impl AppCore {
             .await?;
         let target = ln.redundancy_target().await? as usize;
         let mut hist = vec![0u32; target.max(2) + 2];
+        let keepers = keeper_set(&ln).await?;
         let (mut here, mut here_bytes) = (0u32, 0f64);
         for rec in &photos {
-            let copies = ln
-                .store()
-                .holders(&rec.original.hash)
-                .await?
+            let holders = ln.store().holders(&rec.original.hash).await?;
+            let copies = holders
                 .iter()
                 .filter(|h| h.kind == BlobKind::Original)
                 .count();
+            // A photo a keeper holds is safe whatever the count: it goes where the safe ones go.
+            let bucket = if is_backed_up(copies, target, &holders, &keepers) {
+                copies.max(target)
+            } else {
+                copies
+            };
             let last = hist.len() - 1;
-            hist[copies.min(last)] += 1;
+            hist[bucket.min(last)] += 1;
             if self.node.blobs().has(&rec.original.hash).await? {
                 here += 1;
                 here_bytes += rec.original.size as f64;
@@ -2149,6 +2481,7 @@ fn adopt_dev_library(dir: &Path) -> Result<Option<AppFile>> {
         alerts: vec![],
         update_checks: None,
         dismissed_update: None,
+        pending_archive_import: vec![],
     }))
 }
 
@@ -2186,5 +2519,85 @@ fn chip_kind(f: &shoebox_search::FilterKind) -> &'static str {
         Media(_) => "kind",
         Favourite => "favourite",
         Name { kind, .. } => name_kind(*kind),
+    }
+}
+
+fn archive_report(r: &shoebox_node::ArchiveImportReport) -> ArchiveReportInfo {
+    ArchiveReportInfo {
+        imported: r.import.imported.len() as u32,
+        duplicates: r.import.duplicates.len() as u32,
+        skipped: r.import.skipped.len() as u32,
+        failed: r
+            .import
+            .failed
+            .iter()
+            .map(|(p, why)| format!("{}: {why}", p.display()))
+            .collect(),
+        albums: r
+            .albums
+            .iter()
+            .map(|(title, photos)| ArchiveAlbumInfo {
+                title: title.clone(),
+                photos: *photos as u32,
+            })
+            .collect(),
+        export_dates: r.export_dates as u32,
+        export_places: r.export_places as u32,
+        favorites: r.favorites as u32,
+        trashed: r.trashed as u32,
+        unmatched: (r.unmatched + r.ambiguous) as u32,
+        part_errors: r
+            .part_errors
+            .iter()
+            .map(|(p, e)| format!("{}: {e}", p.display()))
+            .collect(),
+    }
+}
+
+#[cfg(test)]
+mod cover_tests {
+    use super::*;
+    use shoebox_core::model::{BlobRef, ExifSummary};
+
+    fn rec(n: u8, taken: i64, deleted: bool) -> PhotoRecord {
+        let hlc = shoebox_core::Hlc {
+            physical_ms: 1,
+            counter: 0,
+            device: EndpointId([1; 32]),
+        };
+        let blob = BlobRef {
+            hash: Blake3Hash([n; 32]),
+            size: 1,
+            mime: "image/jpeg".into(),
+        };
+        PhotoRecord {
+            id: Blake3Hash([n; 32]),
+            original: blob.clone(),
+            preview: blob.clone(),
+            thumb: blob,
+            taken_at: Timestamp(taken),
+            exif: ExifSummary::default(),
+            imported_by: EndpointId([1; 32]),
+            favorite: Lww::new(false, hlc),
+            deleted_at: Lww::new(deleted.then_some(Timestamp(5)), hlc),
+        }
+    }
+
+    #[test]
+    fn cover_is_the_newest_photo() {
+        let recs = [rec(1, 100, false), rec(2, 300, false), rec(3, 200, false)];
+        assert_eq!(newest_cover(&recs), Some(Blake3Hash([2; 32])));
+    }
+
+    #[test]
+    fn cover_ignores_deleted_photos() {
+        let recs = [rec(1, 100, false), rec(2, 300, true)];
+        assert_eq!(newest_cover(&recs), Some(Blake3Hash([1; 32])));
+    }
+
+    #[test]
+    fn empty_album_has_no_cover() {
+        assert_eq!(newest_cover(&[]), None);
+        assert_eq!(newest_cover(&[rec(1, 1, true)]), None);
     }
 }

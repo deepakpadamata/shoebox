@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redesign: Photos</title><link rel="stylesheet" href="assets/redesign.css"></head>
+<body><div class="doc">
+<header><h1>2 · Photos &amp; selection</h1>
+<p>The timeline already works well, so the changes are small. Sparse days are packed into one row. Zooming out groups by month. The selection bar gets labels, and Delete moves to the far end of it. Fixes F3, F15, F23.</p></header>
+<nav class="pages"><a href="index.html">Overview</a><a href="01-navigation.html">Navigation</a><a class="on" href="02-photos.html">Photos &amp; selection</a><a href="03-viewer.html">Viewer</a><a href="04-albums-sharing.html">Albums &amp; sharing</a><a href="05-backup.html">Backup</a><a href="06-settings.html">Settings</a><a href="07-onboarding.html">Onboarding</a><a href="08-search.html">Search</a></nav>
+
+<section class="board">
+<h2>Timeline states</h2>
+<p class="why">Days with only a few photos share a row ("Mon 3 · Tue 4 · Wed 5"), so a quiet week no longer takes up a whole screen. Pinching out past the smallest density switches to month headers, with the date rail on the right. The status chip shows the state. If something is wrong, a banner explains it once, in one sentence, and offers one action.</p>
+<div class="row">
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar"><h1>Photos</h1><span class="status"><span class="dot"></span>All backed up</span><button class="iconbtn">＋</button></div>
+      <div class="scroll">
+        <div class="dayh">Today <small>Sat 8 Nov</small></div>
+        <div class="tiles" data-n="8" data-seed="11" data-live="1" data-fav="4"></div>
+        <div class="dayh">Earlier this week <small>Mon 3 · Tue 4 · Wed 5</small></div>
+        <div class="tiles" data-n="4" data-seed="31"></div>
+        <div class="dayh">Thursday <small>6 Nov · Lisbon</small></div>
+        <div class="tiles" data-n="16" data-seed="5" data-video="6"></div>
+        <div class="dayh">Last weekend <small>1–2 Nov</small></div>
+        <div class="tiles" data-n="12" data-seed="21"></div>
+      </div>
+      <nav class="tabbar"><a class="on" href="#"><span class="ic">▦</span>Photos</a><a href="#"><span class="ic">▤</span>Albums</a><a href="#"><span class="ic">⌕</span>Search</a><a href="#"><span class="ic">⚙︎</span>Settings</a></nav>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Normal.</b> The day headers are 15 px (up from 13). Sparse days are combined: three one-photo days take one row instead of three.</div>
+  </div>
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar"><h1>Photos</h1><span class="status warn"><span class="dot"></span>Mac offline · 3 days</span><button class="iconbtn">＋</button></div>
+      <div class="scroll">
+        <div class="card pad" style="background:var(--warn-soft);display:flex;gap:12px;align-items:flex-start">
+          <span style="font-size:22px">⚠︎</span>
+          <div style="flex:1"><b style="font-size:15px">214 new photos are only on this phone</b><div class="muted" style="margin:2px 0 10px">Your Mac hasn't been on since Wednesday. Turn it on, or connect to the same Wi-Fi.</div><span class="btn sm">See backup</span></div>
+        </div>
+        <div class="monthh">November</div>
+        <div class="tiles" style="--cols:6" data-n="24" data-seed="40"></div>
+        <div class="monthh">October</div>
+        <div class="tiles" style="--cols:6" data-n="36" data-seed="41" data-video="7"></div>
+      </div>
+      <nav class="tabbar"><a class="on" href="#"><span class="ic">▦</span>Photos</a><a href="#"><span class="ic">▤</span>Albums</a><a href="#"><span class="ic">⌕</span>Search</a><a href="#"><span class="ic"><span class="badge"></span>⚙︎</span>Settings</a></nav>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>At risk, zoomed out.</b> The chip and banner use plain words: who is offline, how many photos are affected, what to do. Tapping the chip opens the Backup page, and the Settings tab gets a dot. Zoomed out, photos are grouped by month (F23).</div>
+  </div>
+  <div>
+    <div class="phone"><div class="sb">9:41</div><div class="body">
+      <div class="appbar" style="align-items:center"><button class="iconbtn plain">✕</button><h1 style="font-size:20px">3 selected</h1><span class="btn sm">Select day</span></div>
+      <div class="scroll">
+        <div class="dayh">Thursday <small>6 Nov · Lisbon</small></div>
+        <div class="tiles" data-n="16" data-seed="5" data-sel="1,2,5" data-selecting></div>
+        <div class="dayh">Last weekend <small>1–2 Nov</small></div>
+        <div class="tiles" data-n="12" data-seed="21" data-selecting></div>
+      </div>
+      <div class="actbar">
+        <div class="a"><span class="ic">⇪</span>Share</div>
+        <div class="a"><span class="ic">▤＋</span>Add to album</div>
+        <div class="a"><span class="ic">♡</span>Favorite</div>
+        <div class="a"><span class="ic">⋯</span>More</div>
+        <div class="a del"><span class="ic">🗑︎</span>Delete</div>
+      </div>
+    </div><div class="home"></div></div>
+    <div class="cap"><b>Selection.</b> Every action has a label. Share is first, under the thumb. Delete is last and red. Rare actions go under More: Keep on this phone, Remove from album, Copy to…. The bar replaces the tab bar so there is only one bottom layer.</div>
+  </div>
+</div>
+</section>
+
+<section class="board">
+<h2>Selection on desktop</h2>
+<p class="why">On desktop the action bar sits in the toolbar, where macOS users look for it, and every action is also in the menu bar and the right-click menu. Shortcuts: ⌘A selects all, ⇧-click selects a range, Space opens Quick Look, ⌫ deletes, with a confirmation that names the number of photos and devices.</p>
+<div class="desk"><div class="win">
+  <aside class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <a class="on" href="#"><span class="ic">▦</span>Photos<span class="n">12,431</span></a>
+    <a href="#"><span class="ic">♥</span>Favorites<span class="n">142</span></a>
+    <a href="#"><span class="ic">☺</span>People</a>
+    <div class="grp">Albums</div>
+    <a href="#"><span class="ic">▤</span>Lisbon<span class="n"><span class="pill info">Shared</span></span></a>
+    <a href="#"><span class="ic">▤</span>The boys</a>
+    <a href="#"><span class="ic">▤</span>Garden</a>
+    <div class="foot">
+      <a href="#" style="background:var(--ok-soft)"><span class="ic" style="color:var(--ok)">◉</span><span><b style="display:block;font-size:13px">All backed up</b><span class="muted" style="font-size:12px">2 copies · Mac + Pi</span></span></a>
+      <a href="#"><span class="ic">⚙︎</span>Settings</a>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="tb" style="background:var(--accent-soft)"><button class="iconbtn plain">✕</button><h1>3 selected</h1><div class="grow"></div>
+      <span class="btn sm primary">⇪ Share…</span><span class="btn sm">▤ Add to album</span><span class="btn sm">♡ Favorite</span><span class="btn sm">⋯</span><span class="btn sm danger">🗑︎ Delete</span></div>
+    <div class="content rel">
+      <div class="dayh">Thursday <small>6 Nov · Lisbon</small></div>
+      <div class="tiles" style="--cols:8" data-n="16" data-seed="5" data-sel="1,2,5" data-selecting></div>
+      <div class="dayh">Last weekend <small>1–2 Nov</small></div>
+      <div class="tiles" style="--cols:8" data-n="16" data-seed="21" data-selecting></div>
+      <div style="position:absolute;left:330px;top:120px;width:220px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:5px;font-size:13px">
+        <div style="padding:6px 10px">Share…</div><div style="padding:6px 10px">Add to album ▸</div><div style="padding:6px 10px">Favorite</div>
+        <div style="height:1px;background:var(--line);margin:4px 0"></div>
+        <div style="padding:6px 10px">Export copies…</div><div style="padding:6px 10px">Show in Finder</div><div style="padding:6px 10px">Find similar</div>
+        <div style="height:1px;background:var(--line);margin:4px 0"></div>
+        <div style="padding:6px 10px;color:var(--risk)">Delete 3 photos…</div>
+      </div>
+    </div>
+  </div>
+</div></div>
+<div class="cap wide"><b>Desktop selection.</b> The toolbar becomes the selection bar, with labelled buttons and Share as the primary action. The right-click menu offers the same actions plus the rare ones (Export copies, Show in Finder, Find similar).</div>
+</section>
+</div>
+<script src="assets/redesign.js"></script>
+</body></html>

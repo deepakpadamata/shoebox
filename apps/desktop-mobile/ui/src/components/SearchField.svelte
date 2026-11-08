@@ -3,6 +3,7 @@
   // typing, recent searches (this device only) when empty, arrows to move, Enter to search,
   // Esc to clear and then to close.
   import { onDestroy } from 'svelte';
+  import Icon from './Icon.svelte';
   import { api, type SearchSuggestion } from '../lib/api';
   import { addRecent, clearRecent, complete, debounce, groupSuggestions, lastWord, loadRecent, step } from '../lib/search';
 
@@ -56,6 +57,8 @@
     open = false;
     at = -1;
     if (q.trim()) recent = addRecent(q);
+    // The keyboard would otherwise stay over the results.
+    input?.blur();
     onsubmit(q.trim());
   }
 
@@ -114,14 +117,14 @@
 <svelte:window onkeydown={globalKey} />
 
 <div class="field" class:focused>
-  <span class="glass" aria-hidden="true">⌕</span>
+  <span class="glass" aria-hidden="true"><Icon name="search" size={18} /></span>
   <input bind:this={input} bind:value type="search" {placeholder} aria-label="Search photos" autocomplete="off" spellcheck="false"
     role="combobox" aria-expanded={showList} aria-controls="search-suggestions" aria-activedescendant={at >= 0 ? `sugg-${at}` : undefined}
     {oninput} onkeydown={keydown}
     onfocus={() => { focused = true; open = true; recent = loadRecent(); }}
     onblur={() => setTimeout(() => (focused = false), 150)} />
   {#if value}
-    <button class="clear" aria-label="Clear" onmousedown={(e) => e.preventDefault()} onclick={() => { value = ''; suggestions = []; input?.focus(); onsubmit(''); }}>✕</button>
+    <button class="clear" aria-label="Clear" onmousedown={(e) => e.preventDefault()} onclick={() => { value = ''; suggestions = []; input?.focus(); onsubmit(''); }}><Icon name="close" size={16} /></button>
   {:else if shortcut}
     <kbd class="hint" aria-hidden="true">/</kbd>
   {/if}
@@ -132,7 +135,7 @@
         <div class="g">Recent <button class="link" onmousedown={(e) => e.preventDefault()} onclick={() => { clearRecent(); recent = []; }}>Clear</button></div>
         {#each recent as text, i}
           <button id="sugg-{i}" role="option" aria-selected={at === i} class="r" class:on={at === i} onmousedown={(e) => e.preventDefault()} onclick={() => choose({ kind: 'recent', text })}>
-            <span class="i" aria-hidden="true">🕘</span>{text}
+            <span class="i" aria-hidden="true"><Icon name="clock" size={16} /></span>{text}
           </button>
         {/each}
       {:else}
@@ -142,7 +145,7 @@
           {#each g.items as s, k}
             {@const i = offsets[gi] + k}
             <button id="sugg-{i}" role="option" aria-selected={at === i} class="r" class:on={at === i} onmousedown={(e) => e.preventDefault()} onclick={() => choose({ kind: 'name', s })}>
-              <span class="i" aria-hidden="true">{g.icon}</span>{s.name}
+              <span class="i" aria-hidden="true"><Icon name={g.icon} size={16} /></span>{s.name}
             </button>
           {/each}
         {/each}
@@ -159,11 +162,11 @@
   input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 14px; outline: none; height: 100%; }
   input::-webkit-search-cancel-button { display: none; }
   .clear { border: 0; background: transparent; color: var(--ink-3); cursor: pointer; padding: 4px; font-size: 13px; }
-  .hint { font: inherit; font-size: 11px; color: var(--ink-3); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
+  .hint { font: inherit; font-size: var(--t-xs); color: var(--ink-3); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
   .list { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; right: 0; max-height: 60vh; overflow: auto; padding: 6px 0;
     background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
-  .g { display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px 4px; }
-  .link { border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 11px; cursor: pointer; text-transform: none; letter-spacing: 0; }
+  .g { display: flex; justify-content: space-between; font-size: var(--t-xs); font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px 4px; }
+  .link { border: 0; background: transparent; color: var(--accent); font: inherit; font-size: var(--t-xs); cursor: pointer; text-transform: none; letter-spacing: 0; }
   .r { display: flex; width: 100%; gap: 8px; align-items: center; padding: 7px 12px; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
   .r.on, .r:hover { background: var(--surface-3); }
   .i { width: 18px; text-align: center; }

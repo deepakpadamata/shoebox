@@ -4824,6 +4824,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7147,6 +7159,7 @@ name = "shoebox-media"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "flate2",
  "image",
  "jpeg-encoder",
  "kamadak-exif",
@@ -7154,9 +7167,11 @@ dependencies = [
  "libheif-sys",
  "serde_json",
  "shoebox-core",
+ "tar",
  "tempfile",
  "thiserror 2.0.21",
  "xtask",
+ "zip",
 ]
 
 [[package]]
@@ -7192,6 +7207,7 @@ dependencies = [
  "notify",
  "postcard",
  "reqwest",
+ "rustix",
  "rustls",
  "serde",
  "serde_json",
@@ -8917,6 +8933,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86a801b3cea342a06d468c8710662aa29e5e05e4f5c0d62f00bbb7f2ad7941c2"
 
 [[package]]
+name = "typed-path"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ce898823d8cd0f028662d2f349694b1af0a5cc9be83f1d213a00d3147445e1e"
+
+[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10038,6 +10060,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shoebox-search",
+ "zip",
 ]
 
 [[package]]
@@ -10101,7 +10124,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "hex",
- "nix",
+ "nix 0.29.0",
  "ordered-stream",
  "rand 0.8.8",
  "serde",
@@ -10303,6 +10326,23 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "zip"
+version = "9.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23f17fbc870bfac28c6228aed7d6e6df352e26bf7015c4313727e16a7a01ce5e"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "getrandom 0.4.3",
+ "indexmap 2.14.2",
+ "libc",
+ "memchr",
+ "nix 0.31.3",
+ "typed-path",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

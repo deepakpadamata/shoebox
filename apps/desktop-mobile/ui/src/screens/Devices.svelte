@@ -1,25 +1,28 @@
 <script lang="ts">
+  import Icon from '../components/Icon.svelte';
   // Devices (mockup 07): one list of who has the library, how each is connected, what it keeps and
   // what it is sending or getting right now, under a card that says what is moving and opens into
   // this device's queue. Adding a device with a QR code and the six-digit code, roles, removing.
   import { onDestroy, onMount, untrack } from 'svelte';
-  import { api, blobUrl, type DeviceInfo, type DeviceStorageInfo, type PairStart, type SearchStatus, type TransferItem, type Transfers } from '../lib/api';
+  import { api, blobUrl, type DeviceInfo, type DeviceStorageInfo, type SearchStatus, type TransferItem, type Transfers } from '../lib/api';
   import { deviceIndexLine } from '../lib/search';
   import { GrowthRates, rowActivity, speed, summarize } from '../lib/activity';
   import { bytes, plural } from '../lib/format';
   import { viewport } from '../lib/viewport.svelte';
-  import { pullRefresh } from '../lib/gestures';
-  import { refreshEverything } from '../lib/refresh';
   import { app, fail, toast } from '../lib/store.svelte';
   import Avatar from '../components/Avatar.svelte';
   import Button from '../components/Button.svelte';
   import List from '../components/List.svelte';
   import Pill from '../components/Pill.svelte';
-  import QR from '../components/QR.svelte';
+  import AddDeviceSheet from '../components/AddDeviceSheet.svelte';
+  import { ROLE_HELP, roleDoes, roleLabel } from '../lib/roles';
   import Row from '../components/Row.svelte';
   import Segmented from '../components/Segmented.svelte';
   import Sheet from '../components/Sheet.svelte';
 
+  // `devices`: the list and every device action; `activity`: only what is moving right now (both
+  // live on the Backup page, U1-12).
+  let { mode = 'devices' }: { mode?: 'devices' | 'activity' } = $props();
   let devices = $state<DeviceInfo[]>([]);
   let storage = $state<DeviceStorageInfo[]>([]);
   let transfers = $state<Transfers | null>(null);
@@ -48,8 +51,6 @@
   const nameOf = (id: string | null) => devices.find((d) => d.id === id)?.name ?? 'another device';
   const kindLabel: Record<string, string> = { thumb: 'Thumbnail', preview: 'Preview', original: 'Original', other: 'Library data' };
   let addOpen = $state(false);
-  let role = $state('companion');
-  let pair = $state<PairStart | null>(null);
   let revoking = $state<DeviceInfo | null>(null);
   let phrase = $state('');
   let changing = $state<DeviceInfo | null>(null);
@@ -70,11 +71,7 @@
     }
   }
   let newRole = $state('companion');
-  const roleHelp: Record<string, string> = {
-    companion: 'Keeps previews of everything and the full-size photos you pin, favourite or took recently; the rest lives on your keepers. For phones, tablets and laptops.',
-    keeper: 'Keeps every original: the backstop. Best for an always-on computer or a small box at home.',
-    viewer: 'Sees previews only and cannot add or change photos. Good for a shared tablet or a TV.',
-  };
+  const roleHelp = ROLE_HELP;
   let busy = $state(false);
   const me = $derived(devices.find((d) => d.is_this_device));
   // Admins remove ordinary devices on their own; an admin device, or a removal from a device
@@ -112,47 +109,6 @@
     app.devicesVersion;
     untrack(() => { load().catch(() => {}); });
   });
-
-  async function startPairing() {
-    busy = true;
-    app.pairingError = '';
-    try {
-      pair = await api.pairStart(role);
-    } catch (e) {
-      fail(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function answer(accept: boolean) {
-    await api.confirmPairing(accept).catch(fail);
-    if (!accept) { app.pairing = null; pair = null; }
-  }
-
-  // The sheet closes itself once the pairing finished (the list refreshes through the event).
-  let pairSeen = app.pairVersion;
-  $effect(() => {
-    const v = app.pairVersion;
-    untrack(() => {
-      if (addOpen && v > pairSeen) {
-        toast('Device added');
-        closeAdd();
-      }
-      pairSeen = v;
-    });
-  });
-
-  $effect(() => {
-    app.addDeviceOpen = addOpen;
-    return () => { app.addDeviceOpen = false; };
-  });
-
-  function closeAdd() {
-    addOpen = false;
-    pair = null;
-    app.pairing = null;
-  }
 
   function openRole(d: DeviceInfo) {
     changing = d;
@@ -194,21 +150,15 @@
   const pathLabel = (d: DeviceInfo) => (!d.online ? 'Offline' : ({ lan: 'Same network', direct: 'Direct', relay: 'Via relay', none: 'Connecting' })[d.path] ?? d.path);
 </script>
 
-<div class="page" use:pullRefresh={{ onRefresh: refreshEverything }}>
+<div class="page" class:bare={mode === 'activity'}>
+  {#if mode === 'devices'}
   <div class="row-flex head">
     <div class="grow muted small">Devices that hold this library. Everything stays between them.</div>
-    <Button kind="primary" size="sm" onclick={() => { addOpen = true; pair = null; }}>＋ Add a device</Button>
+    <Button kind="primary" size="sm" onclick={() => { addOpen = true; }}><Icon name="add" size={16} /> Add a device</Button>
   </div>
-
-  {#if devices.length > 0 && devices.filter((d) => !d.revoked).length === 1}
-    <div class="callout">
-      <b>This is your only device</b>
-      <span class="muted small">Photos on one device are one lost phone away from gone. Add a second device (a computer, or a small always-on keeper) and your library is backed up between them.</span>
-      <div><Button kind="primary" size="sm" onclick={() => { addOpen = true; pair = null; }}>Add a device</Button></div>
-    </div>
   {/if}
 
-  {#if transfers}
+  {#if transfers && mode === 'activity'}
     <div class="card activity {summary.tone}">
       <div class="headline">
         <span class="spinner" aria-hidden="true"></span>
@@ -243,7 +193,7 @@
     </div>
   {/if}
 
-  {#if viewport.mobile}
+  {#if mode !== 'activity' && viewport.mobile}
     <List>
       {#each rows as { d, s, act, idx } (d.id)}
         <button class="prow" onclick={() => (detail = d)}>
@@ -251,7 +201,7 @@
             <Avatar name={d.name} size={38} />
             <div class="grow left">
               <div class="t1">{d.name}{#if d.is_this_device}<span class="muted">&nbsp;(this device)</span>{/if}</div>
-              <div class="t2 muted">{d.role}{d.admin ? ' · admin' : ''}</div>
+              <div class="t2 muted">{roleDoes(d.role)}{d.admin ? ' · admin' : ''}</div>
             </div>
             {#if !d.is_this_device}<Pill tone={pathTone(d)}>{pathLabel(d)}</Pill>{/if}
             <span class="dot" class:on={d.online} class:relay={d.path === 'relay'}></span>
@@ -265,14 +215,14 @@
       {/each}
     </List>
     <p class="tiny muted">Orange: originals; grey: previews and thumbnails. As this device last heard; photos outside Shoebox are not counted.</p>
-  {:else}
+  {:else if mode !== 'activity'}
     <div class="table">
       <div class="thead"><span>Device</span><span>Connection</span><span>Keeps</span><span>Right now</span><span></span></div>
       {#each rows as { d, s, act, idx } (d.id)}
         <div class="trow">
           <div class="row-flex who">
             <Avatar name={d.name} size={36} />
-            <div class="left"><div class="t1">{d.name}{#if d.is_this_device}<span class="muted">&nbsp;(this device)</span>{/if}</div><div class="t2 muted">{d.role}{d.admin ? ' · admin' : ''}</div></div>
+            <div class="left"><div class="t1">{d.name}{#if d.is_this_device}<span class="muted">&nbsp;(this device)</span>{/if}</div><div class="t2 muted">{roleDoes(d.role)}{d.admin ? ' · admin' : ''}</div></div>
           </div>
           <div class="row-flex conn">
             {#if d.is_this_device}<Pill>This device</Pill>{:else}<Pill tone={pathTone(d)}>{pathLabel(d)}</Pill><span class="dot" class:on={d.online} class:relay={d.path === 'relay'}></span>{#if d.latency_ms != null}<span class="tiny muted">{d.latency_ms} ms</span>{/if}{/if}
@@ -287,7 +237,7 @@
             {#if menuFor === d.id}
               <div class="menu" role="menu">
                 {#if !d.admin}<button role="menuitem" onclick={() => { menuFor = null; promoting = d; phrase = ''; }}>Make admin…</button>{/if}
-                <button role="menuitem" onclick={() => { menuFor = null; openRole(d); }}>Change role…</button>
+                <button role="menuitem" onclick={() => { menuFor = null; openRole(d); }}>Change what it does…</button>
                 {#if !d.is_this_device}<button role="menuitem" class="danger" onclick={() => { menuFor = null; revoking = d; phrase = ''; }}>Remove…</button>{/if}
               </div>
             {/if}
@@ -298,7 +248,7 @@
     <p class="tiny muted">Bars share one scale. Orange: originals; grey: previews and thumbnails. As this device last heard; photos outside Shoebox are not counted.</p>
   {/if}
 
-  {#if devices.some((d) => d.revoked)}
+  {#if mode === 'devices' && devices.some((d) => d.revoked)}
     <div class="section">Removed</div>
     <List>
       {#each devices.filter((d) => d.revoked) as d (d.id)}
@@ -319,7 +269,7 @@
     {@const act = rowActivity(d, transfers, devices, storage, total, rates)}
     <div class="stack">
       <dl class="kv small">
-        <dt>Role</dt><dd>{d.role}{d.admin ? ' · admin' : ''}</dd>
+        <dt>What it does</dt><dd>{roleDoes(d.role)} <span class="tag">{roleLabel(d.role)}{d.admin ? ' · admin' : ''}</span></dd>
         <dt>Connection</dt><dd>{d.is_this_device ? 'This device' : `${pathLabel(d)}${d.latency_ms != null ? ` · ${d.latency_ms} ms` : ''}`}</dd>
         <dt>Originals</dt><dd>{s.originals.toLocaleString('en')} · {bytes(s.original_bytes)}</dd>
         <dt>Previews and thumbnails</dt><dd>{bytes(s.other_bytes)}</dd>
@@ -327,37 +277,20 @@
       </dl>
       <div class="acts">
         {#if !d.admin}<Button kind="ghost" block onclick={() => { detail = null; promoting = d; phrase = ''; }}>Make admin…</Button>{/if}
-        <Button kind="ghost" block onclick={() => { detail = null; openRole(d); }}>Change role…</Button>
-        {#if !d.is_this_device}<Button kind="danger" block onclick={() => { detail = null; revoking = d; phrase = ''; }}>Remove from library…</Button>{/if}
+        <Button kind="ghost" block onclick={() => { detail = null; openRole(d); }}>Change what it does…</Button>
       </div>
+      {#if !d.is_this_device}
+        <div class="danger-card">
+          <b>Remove from library</b>
+          <span class="small muted">{d.name} loses access and stops syncing. Photos already on it stay there until someone deletes them. Everyone else keeps working.</span>
+          <Button kind="danger" block onclick={() => { detail = null; revoking = d; phrase = ''; }}>Remove {d.name}…</Button>
+        </div>
+      {/if}
     </div>
   {/if}
 </Sheet>
 
-<Sheet open={addOpen} title="Add a device" onclose={closeAdd} width={440}>
-  {#if app.pairing}
-    <p class="muted small">Does <b>{app.pairing.peer_name}</b> show the same six digits?</p>
-    <div class="code" aria-label="Pairing code">{#each app.pairing.sas.split('') as d}<span>{d}</span>{/each}</div>
-    <div class="stack">
-      <Button kind="primary" block onclick={() => answer(true)}>They match</Button>
-      <Button block onclick={() => answer(false)}>They do not match</Button>
-    </div>
-  {:else if pair}
-    <div class="center stack">
-      <QR svg={pair.qr_svg} />
-      <p class="small muted">Scan this on the new device, or paste the code below. It works once and expires in five minutes.</p>
-      <textarea class="ticket mono" readonly rows="3" onclick={(e) => e.currentTarget.select()}>{pair.ticket}</textarea>
-      <Button size="sm" onclick={() => navigator.clipboard.writeText(pair!.ticket).then(() => toast('Copied'))}>Copy code</Button>
-      {#if app.pairingError}<div class="err small">{app.pairingError}</div>{/if}
-    </div>
-  {:else}
-    <div class="stack">
-      <p class="muted small">What will the new device do?</p>
-      <Segmented bind:value={role} options={[{ value: 'companion', label: 'Companion' }, { value: 'keeper', label: 'Keeper' }, { value: 'viewer', label: 'Viewer' }]} />
-      <Button kind="primary" block disabled={busy} onclick={startPairing}>Show pairing code</Button>
-    </div>
-  {/if}
-</Sheet>
+<AddDeviceSheet open={addOpen} onclose={() => (addOpen = false)} />
 
 <Sheet open={!!promoting} title="Make an admin" onclose={() => { promoting = null; phrase = ''; }} width={400}>
   {#if promoting}
@@ -403,10 +336,11 @@
 
 <style>
   .callout { display: flex; flex-direction: column; gap: 6px; padding: 14px; margin: 10px 0; border-radius: 12px; background: var(--accent-soft); }
-  .page { padding: 18px; max-width: 1080px; overflow: auto; height: 100%; }
-  @media (max-width: 720px) { .page { padding: 12px 14px; } }
+  .page { padding: 18px; max-width: 1080px; }
+  .page.bare { padding: 0; }
+  @media (max-width: 720px) { .page { padding: 12px 14px; } .page.bare { padding: 0; } }
   .head { margin-bottom: 14px; }
-  .section { font-size: 12px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; margin: 20px 0 8px; }
+  .section { font-size: var(--t-sm); font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; margin: 20px 0 8px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-3); display: inline-block; flex: none; }
   .dot.on { background: var(--ok); }
   .dot.relay { background: var(--warn); }
@@ -418,7 +352,7 @@
   .grow { flex: 1; min-width: 0; }
   .left { text-align: left; min-width: 0; }
   .ink { color: var(--ink); }
-  .tiny { font-size: 11.5px; }
+  .tiny { font-size: var(--t-xs); }
   .mono { font-family: var(--mono); }
   .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
   .activity { padding: 14px 16px; display: grid; gap: 9px; margin-bottom: 14px; }
@@ -443,10 +377,10 @@
   .act.idle { color: var(--ink-3); }
   .table { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
   .thead, .trow { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(110px, .8fr) minmax(200px, 1.6fr) minmax(160px, 1.3fr) 34px; gap: 14px; align-items: center; padding: 12px 14px; }
-  .thead { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding-top: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .thead { color: var(--ink-3); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .06em; padding-top: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
   .trow + .trow { border-top: 1px solid var(--line); }
   .who { gap: 10px; min-width: 0; }
-  .t1 { font-weight: 600; } .t2 { font-size: 12.5px; }
+  .t1 { font-weight: 600; } .t2 { font-size: var(--t-sm); }
   .conn { gap: 8px; }
   .keeps b, .prow b { white-space: nowrap; }
   .keeps { display: grid; gap: 5px; }
@@ -464,6 +398,8 @@
   .chev { color: var(--ink-3); font-size: 20px; }
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; }
   .kv dt { color: var(--ink-2); } .kv dd { margin: 0; text-align: right; }
+  .tag { font-size: var(--t-xs); padding: 2px 8px; border-radius: 99px; background: var(--surface-2); color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+  .danger-card { display: grid; gap: 8px; padding: 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--risk) 30%, transparent); background: var(--risk-soft); }
   .acts { display: grid; gap: 4px; border-top: 1px solid var(--line); padding-top: 8px; }
   .between { justify-content: space-between; }
   .bar { display: flex; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }

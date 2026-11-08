@@ -25,6 +25,62 @@ struct Anchor {
     h: f64,
 }
 
+#[derive(Deserialize)]
+struct TextArgs {
+    text: String,
+    anchor: Option<Anchor>,
+}
+
+/// The `share_text` command: a line of text (an invitation, a pairing link) to the platform's
+/// share UI (U1-21). Where there is no share UI the UI copies the text instead.
+pub async fn share_text(app: &tauri::AppHandle, args: Value) -> Result<Value, String> {
+    let args: TextArgs = serde_json::from_value(args).map_err(|e| format!("bad arguments: {e}"))?;
+    show_text(app, args.text, args.anchor).await?;
+    Ok(json!({}))
+}
+
+#[cfg(target_os = "android")]
+async fn show_text(
+    app: &tauri::AppHandle,
+    text: String,
+    _anchor: Option<Anchor>,
+) -> Result<(), String> {
+    let handle = app.state::<crate::android_photos::PhotoLibrary>().0.clone();
+    tokio::task::spawn_blocking(move || {
+        handle.run_mobile_plugin::<Value>("shareText", json!({ "text": text }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+async fn show_text(
+    app: &tauri::AppHandle,
+    text: String,
+    anchor: Option<Anchor>,
+) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("the Shoebox window is closed")?;
+    app.run_on_main_thread(move || {
+        if let Err(e) = macos::show_picker_text(&window, &text, anchor) {
+            tracing::warn!("share picker: {e}");
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "macos")))]
+async fn show_text(
+    _app: &tauri::AppHandle,
+    _text: String,
+    _anchor: Option<Anchor>,
+) -> Result<(), String> {
+    Err("Sharing to other apps is not available on this system yet.".into())
+}
+
 /// The `share_files` command, as the app shell runs it.
 pub async fn share_files(
     app: &tauri::AppHandle,
@@ -96,7 +152,7 @@ mod macos {
     use objc2::rc::Retained;
     use objc2::AllocAnyThread;
     use objc2_app_kit::{NSSharingServicePicker, NSView};
-    use objc2_foundation::{NSArray, NSPoint, NSRect, NSRectEdge, NSSize, NSURL};
+    use objc2_foundation::{NSArray, NSPoint, NSRect, NSRectEdge, NSSize, NSString, NSURL};
     use std::cell::RefCell;
     use std::path::PathBuf;
 
@@ -110,13 +166,33 @@ mod macos {
         paths: &[PathBuf],
         anchor: Option<Anchor>,
     ) -> Result<(), String> {
-        let ptr = window.ns_view().map_err(|e| e.to_string())?;
-        // SAFETY: Tauri hands out the window's content view, alive while the window is.
-        let view: &NSView = unsafe { &*(ptr as *const NSView) };
         let urls: Vec<Retained<NSURL>> = paths.iter().filter_map(NSURL::from_file_path).collect();
         // SAFETY: an array of URLs is an array of objects; the picker accepts file URLs.
         let items: Retained<NSArray> =
             unsafe { Retained::cast_unchecked(NSArray::from_retained_slice(&urls)) };
+        present(window, items, anchor)
+    }
+
+    pub fn show_picker_text(
+        window: &tauri::WebviewWindow,
+        text: &str,
+        anchor: Option<Anchor>,
+    ) -> Result<(), String> {
+        let strings = [NSString::from_str(text)];
+        // SAFETY: an array of strings is an array of objects; the picker accepts strings.
+        let items: Retained<NSArray> =
+            unsafe { Retained::cast_unchecked(NSArray::from_retained_slice(&strings)) };
+        present(window, items, anchor)
+    }
+
+    fn present(
+        window: &tauri::WebviewWindow,
+        items: Retained<NSArray>,
+        anchor: Option<Anchor>,
+    ) -> Result<(), String> {
+        let ptr = window.ns_view().map_err(|e| e.to_string())?;
+        // SAFETY: Tauri hands out the window's content view, alive while the window is.
+        let view: &NSView = unsafe { &*(ptr as *const NSView) };
         let picker = unsafe {
             NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items)
         };

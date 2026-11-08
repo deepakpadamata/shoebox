@@ -37,6 +37,9 @@ async fn command(app: tauri::AppHandle, cmd: String, args: Option<Value>) -> Res
     if cmd == "share_files" {
         return crate::share::share_files(&app, &core, args.unwrap_or(Value::Null)).await;
     }
+    if cmd == "share_text" {
+        return crate::share::share_text(&app, args.unwrap_or(Value::Null)).await;
+    }
     let reply = dispatch(&core, &cmd, args.unwrap_or(Value::Null))
         .await
         .map_err(|e| user_message(&e))?;

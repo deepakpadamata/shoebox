@@ -4,6 +4,10 @@
   /* System bars / notch. On Android the shell reports them (see main.ts); elsewhere env() works. */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Type scale, spacing and the smallest touch target (U1-06). */
+  --t-xs: 12px; --t-sm: 13px; --t-md: 15px; --t-lg: 17px; --t-xl: 22px; --t-2xl: 28px;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+  --tap: 48px;
   --bg: #ecebe6;
   --surface: #ffffff;
   --surface-2: #f5f4f0;
@@ -133,6 +137,12 @@ body {
   background: var(--bg);
   color: var(--ink);
   font: 14px/1.4 var(--font);
+}
+/* On a phone body text is at least 15 px. */
+@media (max-width: 720px) {
+  body { font-size: var(--t-md); }
+}
+body {
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
@@ -154,7 +164,7 @@ a {
   color: var(--ink-2);
 }
 .small {
-  font-size: 12.5px;
+  font-size: var(--t-sm);
 }
 .center {
   text-align: center;
@@ -205,4 +215,17 @@ a {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* A heading over a group of settings (U1-14). */
+.set-section {
+  font-size: var(--t-sm);
+  font-weight: 700;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 20px 0 8px;
+}
+.set-section:first-child {
+  margin-top: 0;
 }

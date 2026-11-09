@@ -339,7 +339,17 @@ impl AppCore {
     /// What changed since the token, saved before the token moves: new and edited assets wait in
     /// `pending`, tracked library assets reported removed wait for the gallery check.
     async fn merge_scan(&self, source: &dyn PhotoSource) -> Result<()> {
-        let token = self.backup.lock().await.token.clone();
+        let permission = source.permission().await?;
+        let token = {
+            let mut st = self.backup.lock().await;
+            // Photos that came into view when access widened are older than the token and are not
+            // changes the platform reports: look at everything again.
+            if st.last_permission == Some(Permission::Limited) && permission == Permission::Granted
+            {
+                st.token = None;
+            }
+            st.token.clone()
+        };
         let scan = source.scan(token).await?;
         let mut st = self.backup.lock().await;
         for a in scan.assets {
@@ -815,10 +825,18 @@ impl AppCore {
             skipped: 0,
             failed: vec![],
         };
-        if !files && source.permission().await? != Permission::Granted {
+        let before = source.permission().await?;
+        if !files && before != Permission::Granted {
             // Deletions so far count as deletions; what vanishes across the prompt was unshared.
             let _ = self.check_gallery(&*source, &ln, false).await;
-            let answer = source.request_permission().await?;
+            let answer = if before == Permission::Limited {
+                // Asked already: the system prompt does not come again. Share more through the
+                // platform's own picker, then look at what is shared now.
+                source.manage_access().await?;
+                source.permission().await?
+            } else {
+                source.request_permission().await?
+            };
             {
                 let _running = self.backup_running.lock().await;
                 self.release_unshared(&*source, &ln).await?;

@@ -551,6 +551,10 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
                 opt::<String>(&args, "location")?,
             )
             .await?;
+            if let Some(on) = opt::<bool>(&args, "save_all")? {
+                core.shared_set_save_all(&arg::<String>(&args, "album")?, on)
+                    .await?;
+            }
             Ok(json!({}))
         }
         "shared_seen" => {

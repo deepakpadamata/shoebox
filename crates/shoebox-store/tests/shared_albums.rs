@@ -86,6 +86,13 @@ async fn two_households_share_an_album_and_roles_are_enforced() {
     // A contributor from another household joins with the invitation text.
     let text = owner.invite(&id, MemberRole::Contributor, 7).await.unwrap();
     assert!(decode_invite(&text).is_ok());
+    // What the share sheet sends is a sentence with the code last; message apps wrap and add words.
+    let sentence =
+        format!("Join my Shoebox album “Trip”. Open Shoebox, then paste this:\n\n{text}");
+    assert!(decode_invite(&sentence).is_ok());
+    let wrapped = format!("{} \n{}\nThanks!", &text[..40], &text[40..]);
+    assert!(decode_invite(&wrapped).is_ok());
+    assert!(decode_invite(&format!("{sentence} (expires soon)")).is_ok());
     let joined = friend.join(&text, "Ben's phone").await.unwrap();
     assert_eq!(joined, id);
     friend.sync_now(&id).await.unwrap();

@@ -10,7 +10,8 @@ pub mod commands;
 mod core;
 pub mod diagnostics;
 mod export;
-#[cfg(target_os = "macos")]
+// ImageIO is on iPhone and iPad too.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 mod heic_macos;
 pub mod keystore;
 pub mod notify;
@@ -26,9 +27,9 @@ mod web_links;
 #[cfg(feature = "http")]
 pub mod http;
 
-#[cfg(all(feature = "tauri-app", target_os = "macos"))]
+#[cfg(all(feature = "tauri-app", any(target_os = "macos", target_os = "ios")))]
 mod macos_photos;
-#[cfg(all(feature = "tauri-app", target_os = "macos"))]
+#[cfg(all(feature = "tauri-app", any(target_os = "macos", target_os = "ios")))]
 mod ocr_macos;
 #[cfg(feature = "tauri-app")]
 mod share;

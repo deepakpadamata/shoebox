@@ -1,4 +1,5 @@
-//! The Mac's Photos library as a [`PhotoSource`] (P1-04): a thin client of the ShoeboxPhotos Swift
+//! The Mac's Photos library, and an iPhone's or iPad's camera roll (I2-01), as a [`PhotoSource`]
+//! (P1-04): a thin client of the ShoeboxPhotos Swift
 //! package (`native/ShoeboxPhotos`, P1-03), linked by `build.rs`. Every call blocks in PhotoKit,
 //! so each runs on a blocking thread.
 //!
@@ -8,6 +9,8 @@
 // The C entry points of the Swift bridge.
 #![allow(unsafe_code)]
 
+#[cfg(target_os = "ios")]
+use crate::photos_source::Picked;
 use crate::photos_source::{Asset, Conditions, Permission, PhotoSource, Scan};
 use anyhow::{anyhow, Context, Result};
 use futures::future::BoxFuture;
@@ -23,6 +26,12 @@ extern "C" {
     fn sbp_read(id: *const c_char, dir: *const c_char, network: bool) -> *mut c_char;
     fn sbp_frame(id: *const c_char) -> *mut c_char;
     fn sbp_free(p: *mut c_char);
+    #[cfg(target_os = "ios")]
+    fn sbp_pick(files: bool, dir: *const c_char) -> *mut c_char;
+    #[cfg(target_os = "ios")]
+    fn sbp_conditions() -> *mut c_char;
+    #[cfg(target_os = "ios")]
+    fn sbp_manage_limited() -> *mut c_char;
 }
 
 /// The bridge's reply: `{"ok": …}` or `{"error": "…"}`.
@@ -74,12 +83,27 @@ fn permission(state: &str) -> Permission {
     }
 }
 
-/// The system Photos library on this Mac. `scratch` holds originals between reading and import.
-pub struct MacPhotoSource {
+/// The system photo library of this Mac, iPhone or iPad. `scratch` holds originals between
+/// reading and import.
+pub struct PhotoKitSource {
     scratch: PathBuf,
 }
 
-impl MacPhotoSource {
+#[cfg(target_os = "ios")]
+#[derive(Deserialize)]
+struct ConditionsReply {
+    on_wifi: bool,
+    charging: bool,
+    battery_pct: u8,
+}
+
+#[cfg(target_os = "ios")]
+#[derive(Deserialize)]
+struct Chosen {
+    path: String,
+}
+
+impl PhotoKitSource {
     pub fn new(scratch: impl Into<PathBuf>) -> Self {
         Self {
             scratch: scratch.into(),
@@ -112,7 +136,7 @@ impl MacPhotoSource {
     }
 }
 
-impl PhotoSource for MacPhotoSource {
+impl PhotoSource for PhotoKitSource {
     fn permission(&self) -> BoxFuture<'_, Result<Permission>> {
         // SAFETY: no arguments; the reply is freed by `decode`.
         Box::pin(blocking(|| {
@@ -124,6 +148,16 @@ impl PhotoSource for MacPhotoSource {
         // SAFETY: as above.
         Box::pin(blocking(|| {
             decode::<String>(unsafe { sbp_request_permission() }).map(|s| permission(&s))
+        }))
+    }
+
+    /// iOS: its own picker for the photos shared with the app. A Mac's Photos library has no
+    /// partial sharing.
+    #[cfg(target_os = "ios")]
+    fn manage_access(&self) -> BoxFuture<'_, Result<()>> {
+        // SAFETY: no arguments; the reply is freed by `decode`. Blocks until the picker is closed.
+        Box::pin(blocking(|| {
+            decode::<bool>(unsafe { sbp_manage_limited() }).map(|_| ())
         }))
     }
 
@@ -141,6 +175,7 @@ impl PhotoSource for MacPhotoSource {
     }
 
     /// A Mac is taken to have a network; mains power is what downloads from iCloud wait for.
+    #[cfg(target_os = "macos")]
     fn conditions(&self) -> BoxFuture<'_, Result<Conditions>> {
         Box::pin(async {
             Ok(Conditions {
@@ -148,6 +183,47 @@ impl PhotoSource for MacPhotoSource {
                 charging: crate::search_models::on_mains(),
                 battery_pct: 100,
             })
+        })
+    }
+
+    #[cfg(target_os = "ios")]
+    fn conditions(&self) -> BoxFuture<'_, Result<Conditions>> {
+        // SAFETY: no arguments; the reply is freed by `decode`.
+        Box::pin(blocking(|| {
+            let r: ConditionsReply = decode(unsafe { sbp_conditions() })?;
+            Ok(Conditions {
+                on_wifi: r.on_wifi,
+                charging: r.charging,
+                battery_pct: r.battery_pct,
+            })
+        }))
+    }
+
+    /// The system photo picker, or the document picker for `files`. What is chosen is copied into
+    /// a directory of its own, and each copy is a [`Picked::Copy`] whose handle is its path.
+    #[cfg(target_os = "ios")]
+    fn pick(&self, files: bool) -> BoxFuture<'_, Result<Vec<Picked>>> {
+        let scratch = self.scratch.clone();
+        Box::pin(blocking(move || {
+            std::fs::create_dir_all(&scratch)?;
+            let mut nonce = [0u8; 8];
+            getrandom::fill(&mut nonce).map_err(|e| anyhow!("{e}"))?;
+            let dir = scratch.join(format!("picked-{}", hex::encode(nonce)));
+            let cdir = CString::new(dir.to_string_lossy().as_bytes())?;
+            // SAFETY: `cdir` outlives the call; the reply is freed by `decode`. Blocks until the
+            // person has chosen or cancelled.
+            let chosen: Vec<Chosen> = decode(unsafe { sbp_pick(files, cdir.as_ptr()) })?;
+            Ok(chosen.into_iter().map(|c| Picked::Copy(c.path)).collect())
+        }))
+    }
+
+    /// The picker already made a copy, named like the original; the caller deletes it.
+    #[cfg(target_os = "ios")]
+    fn read_picked(&self, handle: &str) -> BoxFuture<'_, Result<PathBuf>> {
+        let path = PathBuf::from(handle);
+        Box::pin(async move {
+            anyhow::ensure!(path.is_file(), "the chosen file is no longer there");
+            Ok(path)
         })
     }
 
@@ -170,6 +246,10 @@ impl PhotoSource for MacPhotoSource {
     }
 
     fn kind(&self) -> &'static str {
-        "photos_library"
+        if cfg!(target_os = "ios") {
+            "camera_roll"
+        } else {
+            "photos_library"
+        }
     }
 }

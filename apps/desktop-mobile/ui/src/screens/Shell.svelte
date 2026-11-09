@@ -2,11 +2,11 @@
   import Logo from '../components/Logo.svelte';
   import { api } from '../lib/api';
   import { go, param, section } from '../lib/route.svelte';
-  import { app, fail, toast } from '../lib/store.svelte';
+  import { app, fail, refreshState, toast } from '../lib/store.svelte';
   import { plural } from '../lib/format';
   import { safetyLine } from '../lib/safety';
   import StatusChip from '../components/StatusChip.svelte';
-  import { canPick, pickFiles, pickFolder } from '../lib/pick';
+  import { canPick, isHandheld, pickFiles, pickFolder } from '../lib/pick';
   import Banner from '../components/Banner.svelte';
   import Button from '../components/Button.svelte';
   import Sheet from '../components/Sheet.svelte';
@@ -103,6 +103,22 @@
     }
   }
 
+  // A tablet adds from its own photos or files, through the platform's pickers (the core's `import_picked`).
+  async function addFromDevice(files: boolean) {
+    busy = true;
+    try {
+      const r = await api.importPicked(files);
+      importOpen = false;
+      refreshState().catch(() => {});
+      if (r.failed.length) fail(new Error(r.failed[0]));
+      else toast(`Added ${plural(r.imported, 'photo')}${r.duplicates ? `, ${r.duplicates} already in the library` : ''}${r.skipped ? `, ${plural(r.skipped, 'file')} not a photo or video` : ''}`);
+    } catch (e) {
+      fail(e);
+    } finally {
+      busy = false;
+    }
+  }
+
   const title = $derived(
     sec === 'album' ? '' : { library: 'Photos', favorites: 'Favorites', albums: 'Albums', album: 'Album', shared: 'Shared albums', deleted: 'Recently Deleted', backup: 'Backup', settings: 'Settings', search: 'Search', similar: 'Similar photos', people: 'People', person: 'Person' }[sec] ?? 'Library',
   );
@@ -184,12 +200,15 @@
 <Sheet open={importOpen} title="Import photos" onclose={() => (importOpen = false)} width={440}>
   <div class="stack">
     <p class="muted small">Copies already in the library are skipped. Your originals stay where they are.</p>
-    {#if canPick()}
+    {#if isHandheld()}
+      <Button kind="primary" block disabled={busy} onclick={() => addFromDevice(false)}>{busy ? 'Adding…' : 'Add from your photos…'}</Button>
+      <Button block disabled={busy} onclick={() => addFromDevice(true)}>Choose files…</Button>
+    {:else if canPick()}
       <Button kind="primary" block disabled={busy} onclick={async () => doImport(await pickFiles().catch((e) => { fail(e); return []; }))}>{busy ? 'Importing…' : 'Choose photos and videos…'}</Button>
       <Button block disabled={busy} onclick={async () => { const d = await pickFolder('Import a folder').catch((e) => { fail(e); return null; }); if (d) doImport([d]); }}>Choose a folder…</Button>
     {/if}
     <Button block disabled={busy} onclick={() => { importOpen = false; googleOpen = true; }}>From Google Photos…</Button>
-    {#if !canPick()}
+    {#if !canPick() && !isHandheld()}
       <input class="input" placeholder="/Users/you/Pictures" bind:value={importPath} onkeydown={(e) => e.key === 'Enter' && doImport([importPath.trim()])} />
       <Button kind="primary" block disabled={busy || !importPath.trim()} onclick={() => doImport([importPath.trim()])}>{busy ? 'Importing…' : 'Import'}</Button>
     {/if}
@@ -221,7 +240,8 @@
 </Sheet>
 
 <style>
-  .shell { display: flex; height: 100%; background: var(--surface); }
+  /* On a tablet the status bar and home indicator sit over the web view: keep clear of them (0 on a computer). */
+  .shell { display: flex; height: 100%; box-sizing: border-box; background: var(--surface); padding: var(--safe-top) env(safe-area-inset-right, 0px) var(--safe-bottom) env(safe-area-inset-left, 0px); }
   .sidebar { width: 220px; flex: none; background: var(--surface-2); border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; overflow: auto; }
   .brand { font-weight: 700; font-size: 15px; padding: 4px 8px 8px; display: flex; align-items: center; gap: 8px; }
   .grp { font-size: var(--t-xs); font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; margin: 16px 8px 6px; }

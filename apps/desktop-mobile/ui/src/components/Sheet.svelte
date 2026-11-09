@@ -1,3 +1,16 @@
+<script module lang="ts">
+  // Shared by every sheet: the open ones, top last; and the history steps taken by a sheet closing.
+  const stack: { close: () => void }[] = [];
+  let pendingBack = false;
+  let ownBacks = 0;
+  if (typeof window !== 'undefined') {
+    addEventListener('popstate', () => {
+      if (ownBacks > 0) { ownBacks--; return; }
+      stack[stack.length - 1]?.close();
+    });
+  }
+</script>
+
 <script lang="ts">
   import type { Snippet } from 'svelte';
   interface Props { title?: string; open: boolean; onclose: () => void; width?: number; children: Snippet; }
@@ -18,16 +31,30 @@
   });
   // An open sheet takes one history entry, so the system Back (Android) closes the sheet and not
   // the screen under it. Sheets stack: each leaves its own entry and only the top one closes.
-  // Closing any other way gives the entry back.
+  // Closing any other way gives the entry back. When one sheet is swapped for another in the same
+  // moment (a menu choosing a dialog) the new one takes over the old one's entry: stepping back
+  // first would deliver a "Back" to the new sheet and close it as it opened.
   $effect(() => {
     if (!open) return;
     const mine = Math.random();
-    history.pushState({ sheet: mine }, '');
-    const onpop = () => { if (history.state?.sheet !== mine) onclose(); };
-    addEventListener('popstate', onpop);
+    const entry = { close: () => onclose() };
+    if (pendingBack) {
+      pendingBack = false;
+      history.replaceState({ sheet: mine }, '');
+    } else {
+      history.pushState({ sheet: mine }, '');
+    }
+    stack.push(entry);
     return () => {
-      removeEventListener('popstate', onpop);
-      if (history.state?.sheet === mine) history.back();
+      stack.splice(stack.indexOf(entry), 1);
+      if (history.state?.sheet !== mine) return;
+      pendingBack = true;
+      queueMicrotask(() => {
+        if (!pendingBack) return;
+        pendingBack = false;
+        ownBacks++;
+        history.back();
+      });
     };
   });
   function key(e: KeyboardEvent) {

@@ -110,6 +110,9 @@ struct AppFile {
     /// The Google Photos import that has not finished, as chosen: continued from its journal.
     #[serde(default)]
     pending_archive_import: Vec<String>,
+    /// Shared albums (hex ids) whose photos are all kept in this library, now and as they arrive.
+    #[serde(default)]
+    save_all: Vec<String>,
 }
 
 fn parse_role(s: &str) -> Result<Role> {
@@ -272,6 +275,10 @@ pub struct AppCore {
     seen: Mutex<SeenBook>,
     /// The last answer sent to the UI, so only a change is sent again.
     safety_sent: Mutex<Option<crate::types::SafetyStatus>>,
+    /// One pass at a time of keeping shared albums' photos in the library, and whether another
+    /// was asked for while it ran.
+    pub(crate) auto_save: tokio::sync::Mutex<()>,
+    pub(crate) auto_save_again: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Default)]
@@ -305,7 +312,7 @@ impl AppCore {
     pub async fn open(dir: impl Into<PathBuf>, opts: AppOptions) -> Result<Arc<AppCore>> {
         let dir = dir.into();
         // HEIC and AVIF are decoded by the system where it can (I1-02).
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         crate::heic_macos::register();
         std::fs::create_dir_all(&dir)?;
         // Older data is upgraded (after a copy), newer data is refused: see `shoebox_node::format`.
@@ -376,6 +383,8 @@ impl AppCore {
             archive_import: Mutex::new(ArchiveRun::default()),
             seen: Mutex::new(SeenBook::default()),
             safety_sent: Mutex::new(None),
+            auto_save: tokio::sync::Mutex::new(()),
+            auto_save_again: std::sync::atomic::AtomicBool::new(false),
         });
         core.load_seen();
         core.forward_node_events();
@@ -681,13 +690,42 @@ impl AppCore {
         let weak = Arc::downgrade(self);
         let mut notices = shared.subscribe();
         tokio::spawn(async move {
-            while let Ok(shoebox_store::AlbumNotice(id)) = notices.recv().await {
-                let Some(core) = weak.upgrade() else { break };
-                core.emit(AppEvent::SharedChanged {
-                    album: hex::encode(id.0),
-                });
+            // A photo that could not be fetched yet (nobody from the album was online) is tried
+            // again now and then, as well as when the album changes.
+            let mut retry = tokio::time::interval(std::time::Duration::from_secs(120));
+            loop {
+                tokio::select! {
+                    notice = notices.recv() => {
+                        let Ok(shoebox_store::AlbumNotice(id)) = notice else { break };
+                        let Some(core) = weak.upgrade() else { break };
+                        core.emit(AppEvent::SharedChanged {
+                            album: hex::encode(id.0),
+                        });
+                        core.kick_auto_save();
+                    }
+                    _ = retry.tick() => {
+                        let Some(core) = weak.upgrade() else { break };
+                        core.kick_auto_save();
+                    }
+                }
             }
         });
+    }
+
+    /// The shared albums (hex ids) whose photos are all kept in this library.
+    pub(crate) fn save_all_albums(&self) -> Vec<String> {
+        self.file.lock().unwrap().save_all.clone()
+    }
+
+    pub(crate) fn set_save_all(&self, album: &str, on: bool) -> Result<()> {
+        {
+            let mut f = self.file.lock().unwrap();
+            f.save_all.retain(|a| a != album);
+            if on {
+                f.save_all.push(album.to_string());
+            }
+        }
+        self.save()
     }
 
     // ---------- library lifecycle ----------
@@ -2482,6 +2520,7 @@ fn adopt_dev_library(dir: &Path) -> Result<Option<AppFile>> {
         update_checks: None,
         dismissed_update: None,
         pending_archive_import: vec![],
+        save_all: vec![],
     }))
 }
 

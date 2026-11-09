@@ -25,6 +25,10 @@
   let name = $state('');
   let code = $state('');
   let busy = $state(false);
+  // A cover whose picture is not there (yet) shows the album's icon, not a broken image; it is
+  // tried again when something changes (a thumbnail may have arrived).
+  let broken = $state<Record<string, boolean>>({});
+  $effect(() => { app.version; app.sharedVersion; untrack(() => { broken = {}; }); });
   let seenMenu = ui.albumsMenu;
   $effect(() => { if (ui.albumsMenu !== seenMenu) { seenMenu = ui.albumsMenu; menuOpen = true; } });
   $effect(() => { app.version; app.sharedVersion; untrack(() => { refreshAlbums().catch(() => {}); }); });
@@ -49,6 +53,13 @@
       await refreshAlbums();
       go(`album/${a.id}`);
     } catch (e) { fail(e); } finally { busy = false; }
+  }
+  async function pasteCode() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text.trim()) code = text.trim();
+      else toast('The clipboard is empty');
+    } catch { toast('Press and hold in the box below to paste'); }
   }
   async function scan() {
     try {
@@ -85,7 +96,7 @@
       {#each albums as a (a.id)}
         <a class="album" href="#/album/{a.id}">
           <div class="cover">
-            {#if a.cover}<img src={blobUrl(a.cover, 'thumb', a.coverScope)} alt="" loading="lazy" />{:else}<span><Icon name={a.shared ? 'people' : 'albums'} size={34} /></span>{/if}
+            {#if a.cover && !broken[a.id + a.cover]}<img src={blobUrl(a.cover, 'thumb', a.coverScope)} alt="" loading="lazy" onerror={() => (broken[a.id + a.cover] = true)} />{:else}<span><Icon name={a.shared ? 'people' : 'albums'} size={34} /></span>{/if}
             {#if a.unread > 0}<span class="dot" title="{plural(a.unread, 'new photo')}">{a.unread}</span>{/if}
           </div>
           <b>{a.name}{#if a.shared}<span class="pill">Shared</span>{/if}</b>
@@ -118,8 +129,11 @@
 <Sheet open={joinOpen} title="Join a shared album" onclose={() => (joinOpen = false)} width={440}>
   <div class="stack">
     <p class="muted small">Ask the owner to send you the invitation (a message, or a QR code). Both of you need to be online while you join.</p>
-    {#if canScan()}<Button block onclick={scan}>Scan the QR code</Button>{/if}
-    <textarea class="input mono" rows="3" placeholder="Paste the invitation here" bind:value={code}></textarea>
+    <div class="row-flex">
+      {#if canScan()}<Button block onclick={scan}><Icon name="link" size={18} /> Scan the QR code</Button>{/if}
+      <Button block onclick={pasteCode}>Paste the invitation</Button>
+    </div>
+    <textarea class="input mono" rows="3" placeholder="Or paste it here" bind:value={code}></textarea>
     <Button kind="primary" block disabled={busy || !code.trim()} onclick={join}>{busy ? 'Joining…' : 'Join'}</Button>
   </div>
 </Sheet>

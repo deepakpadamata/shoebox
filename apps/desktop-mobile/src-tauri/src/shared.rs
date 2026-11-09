@@ -63,8 +63,10 @@ fn short(id: &EndpointId) -> String {
     hex::encode(&id.0[..4])
 }
 
-fn info(s: SharedSummary) -> SharedAlbumInfo {
+fn info(s: SharedSummary, save_all: &[String]) -> SharedAlbumInfo {
+    let id = hex::encode(s.id.0);
     SharedAlbumInfo {
+        save_all: save_all.contains(&id),
         id: hex::encode(s.id.0),
         name: s.name,
         role: role_name(s.role).into(),
@@ -133,13 +135,14 @@ impl AppCore {
     }
 
     pub async fn shared_albums(&self) -> Result<Vec<SharedAlbumInfo>> {
+        let save_all = self.save_all_albums();
         Ok(self
             .sa()
             .await?
             .list()
             .await?
             .into_iter()
-            .map(info)
+            .map(|s| info(s, &save_all))
             .collect())
     }
 
@@ -150,7 +153,7 @@ impl AppCore {
             .await?
             .into_iter()
             .find(|s| s.id == *id)
-            .map(info)
+            .map(|s| info(s, &self.save_all_albums()))
             .ok_or_else(|| anyhow!("no such shared album"))
     }
 
@@ -481,53 +484,122 @@ impl AppCore {
         let aid = album_id(album)?;
         let store = sa.album(&aid)?;
         let ln = self.ln().await?;
-        let me = shoebox_node::from_iroh_id(&self.node().id());
-        let hlc = shoebox_core::Hlc {
-            physical_ms: now_ms(),
-            counter: 0,
-            device: me,
-        };
         let mut saved = 0;
         for i in ids {
             let item = store
                 .item(&photo_id(i)?)
                 .await
                 .ok_or_else(|| anyhow!("that photo is no longer in the album"))?;
-            let original = item_blob(&item, BlobKind::Original);
-            for (h, _) in [
-                (item.thumb.hash, BlobKind::Thumb),
-                (item.preview.hash, BlobKind::Preview),
-                (original, BlobKind::Original),
-            ] {
-                sa.fetch_now(&aid, &h).await.map_err(|e| {
-                    anyhow!("could not get this photo yet ({e}); try again when someone from the album is online")
-                })?;
-            }
-            let rec = PhotoRecord {
-                id: item.id,
-                original: item.original.clone(),
-                preview: item.preview.clone(),
-                thumb: item.thumb.clone(),
-                taken_at: item.taken_at,
-                exif: ExifSummary::default(),
-                imported_by: me,
-                favorite: Lww::new(false, hlc),
-                deleted_at: Lww::new(None, hlc),
-            };
-            let mut held = vec![];
-            for (h, k) in [
-                (item.thumb.hash, BlobKind::Thumb),
-                (item.preview.hash, BlobKind::Preview),
-                (original, BlobKind::Original),
-            ] {
-                self.node().blobs().protect(&h, Protection::Library).await?;
-                held.push((h, k));
-            }
-            ln.store().upsert_photo(rec).await?;
-            ln.publish_holdings(held).await?;
+            self.save_item(&sa, &aid, &ln, &item).await?;
             saved += 1;
         }
         Ok(saved)
+    }
+
+    /// Fetch one shared photo and make it a photo of this library. The library's copy holds the
+    /// blobs itself, so it stays when the album, or the photo in it, goes.
+    async fn save_item(
+        &self,
+        sa: &SharedAlbums,
+        aid: &AlbumId,
+        ln: &shoebox_node::LibraryNode<shoebox_store::Library>,
+        item: &SharedItem,
+    ) -> Result<()> {
+        let me = shoebox_node::from_iroh_id(&self.node().id());
+        let hlc = shoebox_core::Hlc {
+            physical_ms: now_ms(),
+            counter: 0,
+            device: me,
+        };
+        let original = item_blob(item, BlobKind::Original);
+        let blobs = [
+            (item.thumb.hash, BlobKind::Thumb),
+            (item.preview.hash, BlobKind::Preview),
+            (original, BlobKind::Original),
+        ];
+        for (h, _) in blobs {
+            sa.fetch_now(aid, &h).await.map_err(|e| {
+                anyhow!("could not get this photo yet ({e}); try again when someone from the album is online")
+            })?;
+        }
+        let rec = PhotoRecord {
+            id: item.id,
+            original: item.original.clone(),
+            preview: item.preview.clone(),
+            thumb: item.thumb.clone(),
+            taken_at: item.taken_at,
+            exif: ExifSummary::default(),
+            imported_by: me,
+            favorite: Lww::new(false, hlc),
+            deleted_at: Lww::new(None, hlc),
+        };
+        for (h, _) in blobs {
+            self.node().blobs().protect(&h, Protection::Library).await?;
+        }
+        ln.store().upsert_photo(rec).await?;
+        ln.publish_holdings(blobs.to_vec()).await?;
+        Ok(())
+    }
+
+    /// Keep every photo of a shared album in this library (or stop doing so). Photos already
+    /// there are left as they are; the rest are fetched now and as they arrive.
+    pub async fn shared_set_save_all(self: &Arc<Self>, album: &str, on: bool) -> Result<()> {
+        let id = hex::encode(album_id(album)?.0);
+        self.sa().await?.album(&album_id(album)?)?;
+        self.set_save_all(&id, on)?;
+        if on {
+            self.kick_auto_save();
+        }
+        Ok(())
+    }
+
+    /// Run a pass of keeping albums' photos in the library in the background, unless one is
+    /// going already (it then goes round once more when it is done).
+    pub(crate) fn kick_auto_save(self: &Arc<Self>) {
+        if self.save_all_albums().is_empty() {
+            return;
+        }
+        self.auto_save_again
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let core = self.clone();
+        tokio::spawn(async move {
+            let Ok(_running) = core.auto_save.try_lock() else {
+                return;
+            };
+            while core
+                .auto_save_again
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                core.auto_save_pass().await;
+            }
+        });
+    }
+
+    /// Bring every photo of the albums set to "keep all" into the library. A photo the library
+    /// already has (the same bytes, so the same id) is skipped, and so is one that was deleted
+    /// from it: deleting a photo is not undone by the album. A photo that cannot be fetched now
+    /// ends the pass for its album; the next pass tries it again.
+    async fn auto_save_pass(&self) {
+        let (Ok(sa), Ok(ln)) = (self.sa().await, self.ln().await) else {
+            return;
+        };
+        use shoebox_core::store::AlbumStore;
+        for hex_id in self.save_all_albums() {
+            let Ok(aid) = album_id(&hex_id) else { continue };
+            let Ok(store) = sa.album(&aid) else { continue };
+            let Ok(items) = store.items(Page::all()).await else {
+                continue;
+            };
+            for item in items {
+                if matches!(ln.store().photo(&item.id).await, Ok(Some(_))) {
+                    continue;
+                }
+                if let Err(e) = self.save_item(&sa, &aid, &ln, &item).await {
+                    tracing::debug!("keeping the album's photos in the library: {e:#}");
+                    break;
+                }
+            }
+        }
     }
 
     pub async fn shared_settings(

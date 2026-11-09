@@ -12,11 +12,12 @@
   import GoogleImportSheet from '../components/GoogleImportSheet.svelte';
   import Icon from '../components/Icon.svelte';
 
+  import { isHandheld } from '../lib/pick';
   type Step = 'welcome' | 'create' | 'kit' | 'bring' | 'join' | 'code' | 'recover';
   let step = $state<Step>('welcome');
   let name = $state('');
   // A phone or tablet is a Companion; a computer is usually the keeper.
-  const handheld = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  const handheld = isHandheld();
   const thisDevice = handheld ? 'this phone' : 'this computer';
   const defaultName = handheld ? 'My phone' : 'This computer';
   let role = $state(handheld ? 'companion' : 'keeper');

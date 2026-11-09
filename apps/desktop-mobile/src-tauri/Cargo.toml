@@ -84,10 +84,12 @@ shoebox-media = { workspace = true, features = ["heic-static"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"], optional = true }
 # The share picker (`share.rs`); the same versions Tauri already builds.
-objc2 = { version = "0.6", optional = true }
 objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "NSResponder", "NSSharingService", "NSView"] }
+
+# Text in photos (S1-14) with Apple Vision: on a Mac, an iPhone and an iPad.
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+objc2 = { version = "0.6", optional = true }
 objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "NSArray", "NSGeometry", "NSURL", "NSData", "NSDictionary", "NSString", "NSError"] }
-# Text in photos (S1-14) with Apple Vision.
 objc2-vision = { version = "0.3", optional = true, default-features = false, features = ["std", "VNRequest", "VNRecognizeTextRequest", "VNRequestHandler", "VNObservation", "VNTypes"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

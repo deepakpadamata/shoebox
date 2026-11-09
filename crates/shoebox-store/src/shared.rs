@@ -191,12 +191,29 @@ pub fn encode_invite(t: &InviteTicket) -> String {
     )
 }
 
+/// The invitation inside what was pasted: the share sheet sends a sentence with the code at the
+/// end, and a message app may wrap the code over lines or add words after it.
 pub fn decode_invite(text: &str) -> Result<InviteTicket> {
-    let text: String = text
-        .split_whitespace()
-        .collect::<String>()
-        .to_ascii_uppercase();
-    let rest = text
+    let upper = text.to_ascii_uppercase();
+    let start = upper
+        .find(INVITE_PREFIX)
+        .ok_or_else(|| anyhow!("this is not an album invitation"))?;
+    let words: Vec<&str> = upper[start..].split_whitespace().collect();
+    let mut first_error = None;
+    for n in (1..=words.len()).rev() {
+        match decode_invite_code(&words[..n].concat()) {
+            Ok(t) => return Ok(t),
+            Err(e) => {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    Err(first_error.unwrap_or_else(|| anyhow!("this is not an album invitation")))
+}
+
+/// `code` is the invitation itself, upper case, without spaces.
+fn decode_invite_code(code: &str) -> Result<InviteTicket> {
+    let rest = code
         .strip_prefix(INVITE_PREFIX)
         .ok_or_else(|| anyhow!("this is not an album invitation"))?;
     let mut bytes = data_encoding::BASE32_NOPAD

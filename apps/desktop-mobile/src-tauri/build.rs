@@ -15,7 +15,10 @@ fn main() {
 
     #[cfg(feature = "tauri-app")]
     {
-        if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        if matches!(
+            std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
+            Ok("macos" | "ios")
+        ) {
             shoebox_photos();
         }
         tauri_build::build();
@@ -39,7 +42,15 @@ fn shoebox_photos() {
         a => a,
     }
     .to_string();
-    let target = format!("{arch}-apple-macos13");
+    // The Mac's Photos library, and the iPhone's and iPad's camera roll (`ios_photos` in
+    // `macos_photos.rs`): the same PhotoKit code for the SDK that is being built for.
+    let ios = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("ios");
+    let simulator = std::env::var("CARGO_CFG_TARGET_ABI").as_deref() == Ok("sim");
+    let (sdk, target) = match (ios, simulator) {
+        (false, _) => ("macosx", format!("{arch}-apple-macos13")),
+        (true, false) => ("iphoneos", format!("{arch}-apple-ios16.0")),
+        (true, true) => ("iphonesimulator", format!("{arch}-apple-ios16.0-simulator")),
+    };
     let release = std::env::var("PROFILE").as_deref() == Ok("release");
     let sources = |dir: &str| -> Vec<PathBuf> {
         let mut v: Vec<PathBuf> = std::fs::read_dir(pkg.join("Sources").join(dir))
@@ -55,7 +66,7 @@ fn shoebox_photos() {
         let mut cmd = Command::new("xcrun");
         cmd.args([
             "--sdk",
-            "macosx",
+            sdk,
             "swiftc",
             "-swift-version",
             "5",
@@ -89,6 +100,14 @@ fn shoebox_photos() {
     ] {
         println!("cargo:rustc-link-lib=framework={f}");
     }
-    // The Swift runtime's library paths (no packages: those are built above).
-    swift_rs::SwiftLinker::new("13").link();
+    if ios {
+        // The picker, and the power and network state (`Picker.swift`). The Xcode project links
+        // the Swift runtime itself.
+        for f in ["UIKit", "PhotosUI", "Network"] {
+            println!("cargo:rustc-link-lib=framework={f}");
+        }
+    } else {
+        // The Swift runtime's library paths (no packages: those are built above).
+        swift_rs::SwiftLinker::new("13").link();
+    }
 }

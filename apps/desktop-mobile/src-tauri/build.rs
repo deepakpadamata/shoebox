@@ -107,7 +107,9 @@ fn shoebox_photos() {
             println!("cargo:rustc-link-lib=framework={f}");
         }
     } else {
-        // The Swift runtime's library paths (no packages: those are built above).
+        // The Swift runtime's library paths (no packages: those are built above). A build
+        // script's cfg is the host's, and swift-rs is a dependency only on a Mac host.
+        #[cfg(target_os = "macos")]
         swift_rs::SwiftLinker::new("13").link();
     }
 }

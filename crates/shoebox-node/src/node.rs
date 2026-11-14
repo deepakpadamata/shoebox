@@ -572,7 +572,7 @@ impl Node {
             let router = Router::builder(endpoint.clone())
                 .accept(
                     BLOBS_ALPN,
-                    BlobsProtocol::new(blobs.raw(), Some(transfers.provider_events())),
+                    BlobsProtocol::new(blobs.raw(), Some(transfers.provider_events(blobs.clone()))),
                 )
                 .accept(GOSSIP_ALPN, gossip.clone())
                 .accept(DOCS_ALPN, docs.clone())
@@ -752,6 +752,17 @@ impl Node {
     /// What this device is downloading and sending right now, and how fast.
     pub fn transfers(&self) -> crate::transfers::TransferSnapshot {
         self.inner.transfers.snapshot()
+    }
+
+    /// Stop sending large blobs (originals) to peers, or send everything again. Thumbnails and
+    /// previews still go while paused (see [`crate::PAUSED_SERVE_MAX`]); a peer asking
+    /// for an original is told to try again later. For a phone on mobile data with "Wi-Fi only".
+    pub fn pause_serving(&self, paused: bool) {
+        self.inner.transfers.set_serving_paused(paused);
+    }
+
+    pub fn serving_paused(&self) -> bool {
+        self.inner.transfers.serving_paused()
     }
 
     pub fn events(&self) -> NodeEvents {

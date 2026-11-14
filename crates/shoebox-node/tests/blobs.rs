@@ -287,6 +287,49 @@ async fn blob_fetched_from_a_peer_is_stored_protected_and_reported() {
     b.shutdown().await.unwrap();
 }
 
+/// A phone on mobile data with "Wi-Fi only" pauses serving: a small blob (a thumbnail, a
+/// preview) still goes, an original is refused until serving resumes, and then it goes.
+#[tokio::test]
+async fn while_serving_is_paused_only_small_blobs_go() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = open(&dir, "a").await;
+    let b = open(&dir, "b").await;
+    b.add_peer_addr(a.addr());
+    let small: Vec<u8> = (0..200_000u32).map(|i| (i % 241) as u8).collect();
+    let large: Vec<u8> = (0..3_000_000u32).map(|i| (i % 239) as u8).collect();
+    let small_hash = a
+        .blobs()
+        .add_bytes(small, Protection::Library)
+        .await
+        .unwrap();
+    let large_hash = a
+        .blobs()
+        .add_bytes(large, Protection::Library)
+        .await
+        .unwrap();
+
+    a.pause_serving(true);
+    assert!(a.serving_paused());
+    timeout(WAIT, b.fetch_blob(a.id(), &small_hash, Protection::Library))
+        .await
+        .unwrap()
+        .expect("a preview-sized blob is still served");
+    let refused = timeout(WAIT, b.fetch_blob(a.id(), &large_hash, Protection::Library))
+        .await
+        .unwrap();
+    assert!(refused.is_err(), "an original waits");
+    assert!(!b.blobs().has(&large_hash).await.unwrap());
+
+    a.pause_serving(false);
+    timeout(WAIT, b.fetch_blob(a.id(), &large_hash, Protection::Library))
+        .await
+        .unwrap()
+        .expect("served once the pause ends");
+    assert!(b.blobs().has(&large_hash).await.unwrap());
+    a.shutdown().await.unwrap();
+    b.shutdown().await.unwrap();
+}
+
 #[tokio::test]
 async fn corrupted_transfer_data_is_rejected() {
     use iroh_blobs::protocol::ChunkRanges;

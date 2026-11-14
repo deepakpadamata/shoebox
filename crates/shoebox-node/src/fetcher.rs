@@ -296,9 +296,20 @@ impl<L: LibraryStore> LibraryNode<L> {
         if self.node().blobs().has(&blob.hash).await? {
             bail!("already present");
         }
-        let holders = self.ranked_holders(&blob.hash).await?;
+        let mut holders = self.ranked_holders(&blob.hash).await?;
         if holders.is_empty() {
             bail!("no known holder of {}", blob.hash);
+        }
+        // A holder that said it is not sending originals (a phone on mobile data) is not asked
+        // for one: it would refuse, and asking costs its data.
+        if blob.size > crate::PAUSED_SERVE_MAX {
+            holders.retain(|d| !self.holds_back_large(d));
+            if holders.is_empty() {
+                bail!(
+                    "the devices holding {} are not sending originals right now (waiting for Wi-Fi)",
+                    blob.hash
+                );
+            }
         }
         let mut by_iroh = HashMap::new();
         for device in &holders {

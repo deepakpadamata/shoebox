@@ -131,8 +131,9 @@
         <span class="grow">Backing up: <b>{scopeLabel(st.policy.scope)}</b></span>
         <Button size="sm" disabled={busy} onclick={openFolders}>Choose folders</Button>
       </div>
-      <label class="row-flex small"><Toggle checked={st.policy.wifi_only} label="Wi-Fi only" onchange={(v) => apply({ wifi_only: v })} /> Only on Wi-Fi</label>
-      <label class="row-flex small"><Toggle checked={st.policy.charging_only} label="Only while charging" onchange={(v) => apply({ charging_only: v })} /> Only while charging</label>
+      <label class="row-flex small"><Toggle checked={st.policy.wifi_only} label="Transfer only on Wi-Fi" onchange={(v) => apply({ wifi_only: v })} /> Transfer only on Wi-Fi</label>
+      <label class="row-flex small"><Toggle checked={st.policy.charging_only} label="Transfer only while charging" onchange={(v) => apply({ charging_only: v })} /> Transfer only while charging</label>
+      <div class="small muted">New photos join your library right away, even offline. These rules are for originals sent between your devices and photos stored only in the cloud.</div>
       {/if}
       {#if st.last_error && !compact}<div class="small err">Last problem: {st.last_error}</div>{/if}
     {:else if st.permission === 'denied'}

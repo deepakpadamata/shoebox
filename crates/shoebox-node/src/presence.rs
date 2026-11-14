@@ -1,6 +1,11 @@
 //! Gossip presence (M1-10): one iroh-gossip topic per library carries `Hello`, `Heartbeat` and
 //! `NewItems` messages, giving a live "who is online" table and a push nudge for new photos.
 //!
+//! `Sending { large }` says whether a device sends large blobs (originals) now: a phone on mobile
+//! data with "Wi-Fi only" refuses them ([`crate::Node::pause_serving`]) and says so with every
+//! heartbeat, so the others do not ask it in vain; a "no" lapses unless repeated. A build from
+//! before this message cannot decode it and drops it, which costs nothing.
+//!
 //! The topic is derived from the library's identity id, so devices of other libraries never
 //! share it. Gossip relays messages through other peers, and the gossip protocol is
 //! open to devices outside the device list (shared albums need it), so every message is signed
@@ -53,6 +58,11 @@ pub(crate) enum PresenceMsg {
     NewItems {
         count: u32,
     },
+    /// Whether this device sends blobs larger than [`crate::PAUSED_SERVE_MAX`] now. Added last:
+    /// postcard numbers variants, so the others keep their encoding.
+    Sending {
+        large: bool,
+    },
 }
 
 /// What the sender signs: who it is, when it sent this (its own clock, ms), and the message.
@@ -83,6 +93,9 @@ pub struct DeviceStatus {
     pub app_version: Option<String>,
     pub online: bool,
     pub last_seen: Option<Instant>,
+    /// False while the device said it is not sending originals (a phone on mobile data with
+    /// "Wi-Fi only"): the others do not ask it for one.
+    pub sending_large: bool,
 }
 
 pub(crate) struct DeviceRecord {
@@ -91,6 +104,8 @@ pub(crate) struct DeviceRecord {
     app_version: Option<String>,
     last_seen: Instant,
     online: bool,
+    /// The device said it does not send large blobs, until then (repeated with each heartbeat).
+    large_paused_until: Option<Instant>,
 }
 
 pub(crate) struct PresenceState {
@@ -231,10 +246,22 @@ impl<L: LibraryStore> LibraryNode<L> {
                 app_version: r.app_version.clone(),
                 online: r.online && r.last_seen.elapsed() < offline_after,
                 last_seen: Some(r.last_seen),
+                sending_large: !r.large_paused_until.is_some_and(|t| t > Instant::now()),
             })
             .collect();
         out.sort_by_key(|d| d.id);
         out
+    }
+
+    /// Whether `device` said it is not sending large blobs (originals) now.
+    pub(crate) fn holds_back_large(&self, device: &EndpointId) -> bool {
+        self.inner
+            .devices
+            .lock()
+            .unwrap()
+            .get(device)
+            .and_then(|r| r.large_paused_until)
+            .is_some_and(|until| until > Instant::now())
     }
 
     /// Tell the other devices that this one has new items, so they sync now instead of waiting.
@@ -349,6 +376,7 @@ fn touch<L: LibraryStore>(inner: &Inner<L>, id: EndpointId, hello: Option<(Strin
             app_version: None,
             last_seen: Instant::now(),
             online: false,
+            large_paused_until: None,
         });
         rec.last_seen = Instant::now();
         if let Some((name, role, version)) = hello {
@@ -393,6 +421,20 @@ async fn receive_loop<L: LibraryStore>(
                         touch(&inner, device, Some(hello));
                     }
                     PresenceMsg::Heartbeat => touch(&inner, device, None),
+                    PresenceMsg::Sending { large } => {
+                        touch(&inner, device, None);
+                        let lapse = inner
+                            .presence
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .map_or(PresenceConfig::default().offline_after, |p| {
+                                p.cfg.offline_after
+                            });
+                        if let Some(rec) = inner.devices.lock().unwrap().get_mut(&device) {
+                            rec.large_paused_until = (!large).then(|| Instant::now() + lapse);
+                        }
+                    }
                     PresenceMsg::NewItems { count } => {
                         touch(&inner, device, None);
                         debug!("{count} new item(s) announced by {device}: syncing");
@@ -421,12 +463,24 @@ async fn heartbeat_loop<L: LibraryStore>(
 ) {
     let mut ticker = tokio::time::interval(cfg.heartbeat);
     let mut beats = 0u32;
+    let mut was_holding_back = false;
     loop {
         ticker.tick().await;
         let Some(inner) = weak.upgrade() else { break };
         if let Some((_, bytes)) = sealed(&inner, PresenceMsg::Heartbeat) {
             let _ = sender.broadcast(bytes).await;
         }
+        // Not sending originals: say so every beat (a "no" lapses), and once when it ends.
+        let holding_back = inner.node.serving_paused();
+        if holding_back || was_holding_back {
+            let msg = PresenceMsg::Sending {
+                large: !holding_back,
+            };
+            if let Some((_, bytes)) = sealed(&inner, msg) {
+                let _ = sender.broadcast(bytes).await;
+            }
+        }
+        was_holding_back = holding_back;
         // A join that failed (the peer was asleep, on another network or restarting) is never
         // retried by gossip itself (see `Node::gossip_dial`): every third beat, reconnect to the
         // peers we do not hear from.

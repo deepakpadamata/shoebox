@@ -2,6 +2,10 @@
 //! `NativeBridge.runBurst` while the app is closed. This opens the app core without any UI, runs the
 //! camera-roll backup and a time-limited `sync_burst`, and returns a JSON report.
 //!
+//! A gallery-only run (`sync` false) needs no network: WorkManager starts it offline too. It adds
+//! new camera photos to the library (a reference to the file, local work) and does nothing else,
+//! with the core opened without relay or LAN discovery.
+//!
 //! The camera roll and the Keystore reach Rust through the Kotlin `PhotoBackend` object that the
 //! worker passes in (JNI calls), because there is no Activity or Tauri plugin in this mode.
 
@@ -18,6 +22,7 @@ use jni::sys::{jboolean, jint, jlong, jstring};
 use jni::{JNIEnv, JavaVM};
 use serde::Deserialize;
 use serde_json::json;
+use shoebox_node::RelaySetting;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -236,6 +241,7 @@ fn run(
     budget_secs: u64,
     backend: Arc<Backend>,
     last_notified_ms: u64,
+    sync: bool,
 ) -> Result<serde_json::Value> {
     let dir = PathBuf::from(&data_dir);
     crate::diagnostics::init_logging();
@@ -266,7 +272,16 @@ fn run(
                 secrets: Some(store),
                 // The short background run does not look for updates; the app does when open.
                 update_feed: shoebox_node::update::PLACEHOLDER_FEED.to_string(),
-                ..AppOptions::default()
+                ..if sync {
+                    AppOptions::default()
+                } else {
+                    // Gallery only: nothing goes over the network.
+                    AppOptions {
+                        relay: RelaySetting::Disabled,
+                        mdns: false,
+                        ..AppOptions::default()
+                    }
+                }
             },
         )
         .await?;
@@ -284,6 +299,10 @@ fn run(
         } else {
             serde_json::Value::Null
         };
+        if !sync {
+            // The sync run reports the backup reminder and security alerts.
+            return anyhow::Ok(json!({ "backup": backup, "gallery_only": true }));
+        }
         let burst = core.sync_burst(Duration::from_secs(budget_secs)).await?;
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -444,6 +463,7 @@ pub extern "system" fn Java_org_shoebox_desktop_NativeBridge_runBurst(
     budget_secs: jint,
     backend: JObject,
     last_notified_ms: jlong,
+    sync: jboolean,
 ) -> jstring {
     let result = (|| -> Result<serde_json::Value> {
         let data_dir: String = env.get_string(&data_dir)?.into();
@@ -457,6 +477,7 @@ pub extern "system" fn Java_org_shoebox_desktop_NativeBridge_runBurst(
                 budget_secs.max(5) as u64,
                 backend,
                 last_notified_ms.max(0) as u64,
+                sync != 0,
             )
         }))
         .map_err(|_| anyhow!("the background run panicked"))?

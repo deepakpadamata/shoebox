@@ -43,5 +43,5 @@ pub mod android_photos;
 #[cfg(all(feature = "tauri-app", target_os = "android"))]
 mod heic_android;
 
-pub use crate::backup::pause_reason;
+pub use crate::backup::{import_pause, pause_reason};
 pub use crate::core::{AppCore, AppOptions};

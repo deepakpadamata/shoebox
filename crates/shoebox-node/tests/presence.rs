@@ -133,6 +133,51 @@ async fn hello_fills_the_device_table_and_shutdown_shows_offline() {
     a.ln.node().shutdown().await.unwrap();
 }
 
+/// A device that stops sending originals says so on presence, and says so again when it starts:
+/// the others then know not to ask it for one.
+#[tokio::test]
+async fn a_device_not_sending_originals_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = MemNetwork::new();
+    let (a, cap) = spawn(&dir, "laptop", Role::Keeper, &net, None).await;
+    let (b, _) = spawn(&dir, "phone", Role::Companion, &net, Some(&cap)).await;
+    connect(&a, &b);
+    a.ln.start_presence(fast_presence()).await.unwrap();
+    b.ln.start_presence(fast_presence()).await.unwrap();
+    let b_id = EndpointId(*b.ln.node().id().as_bytes());
+    let status = |a: &Peer| a.ln.devices().into_iter().find(|d| d.id == b_id);
+    assert!(
+        wait_for(Duration::from_secs(10), || async {
+            status(&a).is_some_and(|d| d.online && d.sending_large)
+        })
+        .await,
+        "b shows up, sending"
+    );
+
+    b.ln.node().pause_serving(true);
+    assert!(
+        wait_for(Duration::from_secs(10), || async {
+            status(&a).is_some_and(|d| !d.sending_large)
+        })
+        .await,
+        "a hears that b holds originals back"
+    );
+    // Repeated with every heartbeat: it does not lapse while the pause lasts.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(status(&a).is_some_and(|d| !d.sending_large));
+
+    b.ln.node().pause_serving(false);
+    assert!(
+        wait_for(Duration::from_secs(10), || async {
+            status(&a).is_some_and(|d| d.sending_large)
+        })
+        .await,
+        "and that it sends them again"
+    );
+    a.ln.node().shutdown().await.unwrap();
+    b.ln.node().shutdown().await.unwrap();
+}
+
 #[tokio::test]
 async fn other_libraries_do_not_appear_in_the_table() {
     let dir = tempfile::tempdir().unwrap();

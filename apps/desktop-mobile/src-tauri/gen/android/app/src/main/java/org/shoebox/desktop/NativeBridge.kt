@@ -10,9 +10,10 @@ object NativeBridge {
      * Back up new camera-roll photos and sync for at most `budgetSecs`, without any UI. Returns a
      * JSON report: `{"skipped": "..."}` if the app itself is running, otherwise the backup and
      * burst outcomes plus an optional `notification`. `lastNotifiedMs` feeds the once-a-day rule.
+     * With `sync` false it only adds new camera photos to the library, with no network at all.
      */
     @JvmStatic
-    external fun runBurst(dataDir: String, budgetSecs: Int, backend: PhotoBackend, lastNotifiedMs: Long): String
+    external fun runBurst(dataDir: String, budgetSecs: Int, backend: PhotoBackend, lastNotifiedMs: Long, sync: Boolean): String
 
     /**
      * Index this phone's photos for search by meaning for at most `budgetSecs` (S1-11). The image

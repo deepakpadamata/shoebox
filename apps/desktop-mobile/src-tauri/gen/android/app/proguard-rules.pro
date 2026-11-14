@@ -19,3 +19,9 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Classes created by reflection lose their no-argument constructors to R8 in release builds, and the
+# app then fails at startup. WorkManager builds its Room database (WorkDatabase_Impl) this way; ML Kit
+# (the barcode scanner) finds its components through Firebase's ComponentRegistrar the same way.
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+-keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); }

@@ -872,8 +872,8 @@ async fn a_backup_json_from_before_library_assets_still_works() {
 
     let core = AppCore::open(&dir, AppOptions::local_only()).await.unwrap();
     let source = Arc::new(FakePhotoSource::new(dir.join("scratch2")));
-    for i in 0..3 {
-        source.put(&format!("a{i}"), &r.files[i], 1);
+    for (i, f) in r.files.iter().take(3).enumerate() {
+        source.put(&format!("a{i}"), f, 1);
     }
     core.set_photo_source(source.clone());
     let st = core.backup_status().await.unwrap();

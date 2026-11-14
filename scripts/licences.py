@@ -178,7 +178,10 @@ DATA = [
 
 # C and C++ libraries built into the apps from vendored source (I1-02). Their notices sit in the
 # vendored trees, not at the top of a crate, so they are named here. Both are LGPL-3.0: the whole
-# source of the app (AGPL-3.0) and these libraries, unmodified, is public, and a build can relink them.
+# source of the app (AGPL-3.0) and these libraries is public, and a build can relink them. libde265 has two
+# changes for clang-cl, each marked "Shoebox:" (libde265/util.h takes the C++11 loop, libde265/x86/CMakeLists.txt
+# passes -msse4.1 to the SSE files), and carries upstream's
+# extra/win32cond.c and .h, which its Windows build needs (their own notice, the DOC licence, is in the files).
 BUNDLED = [
     {
         "name": "libheif 1.23.1 (vendor/libheif-sys/vendor/libheif), HEIC decoding",

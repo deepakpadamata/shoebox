@@ -65,7 +65,8 @@
 #define ALIGNED_4( var )  LIBDE265_DECLARE_ALIGNED( var, 4 )
 
 // C++11 specific features
-#if defined(_MSC_VER) || (!__clang__ && __GNUC__ && GCC_VERSION < 40600)
+// Shoebox: clang-cl defines _MSC_VER but has no `for each`, so it takes the C++11 loop (cross-builds with cargo-xwin).
+#if (defined(_MSC_VER) && !defined(__clang__)) || (!__clang__ && __GNUC__ && GCC_VERSION < 40600)
 #define FOR_LOOP(type, var, list)   for each (type var in list)
 #undef FOR_LOOP_AUTO_SUPPORT
 #else

@@ -132,10 +132,22 @@ impl<L: LibraryStore> LibraryNode<L> {
         sources: &ModelSources,
     ) -> Result<Option<Bytes>> {
         let h = hash(file);
+        let mut stale = false;
         if self.node().blobs().has(&h).await? {
-            return self.stored_model(file).await.map(Some);
+            match self.stored_model(file).await {
+                Ok(bytes) => return Ok(Some(bytes)),
+                // A model referenced in place whose file has moved (an iPhone or iPad app update
+                // changes where the app lives): look for it again.
+                Err(e) => {
+                    warn!("the stored {} cannot be read: {e:#}", file.name);
+                    stale = true;
+                }
+            }
         }
         if let Some((path, bytes)) = local_copy(file, &sources.dirs).await {
+            if stale {
+                let _ = self.node().blobs().remove(&h).await;
+            }
             if let Err(e) = self.share_model(file, &path).await {
                 warn!("could not offer {}: {e:#}", file.name);
             }

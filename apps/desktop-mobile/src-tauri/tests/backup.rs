@@ -3,7 +3,7 @@
 
 use desktop_mobile::photos_source::{Conditions, FakePhotoSource, Permission, Picked};
 use desktop_mobile::types::{BackupPolicy, BackupScope};
-use desktop_mobile::{pause_reason, AppCore, AppOptions};
+use desktop_mobile::{import_pause, pause_reason, AppCore, AppOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -100,6 +100,14 @@ fn the_pause_rules() {
         None,
         "charging beats a low battery"
     );
+
+    // Adding photos is local: no network or charger needed, only enough battery.
+    assert_eq!(import_pause(&p(true, true), &c(false, false, 80)), None);
+    assert_eq!(
+        import_pause(&p(false, false), &c(false, false, 19)),
+        Some("Battery is low")
+    );
+    assert_eq!(import_pause(&p(true, true), &c(false, true, 5)), None);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -165,47 +173,55 @@ async fn only_new_and_changed_photos_are_imported_and_the_gallery_decides_what_s
     r.core.shutdown().await.unwrap();
 }
 
+/// No network, no charger: new photos are still added (a reference to a file on the phone needs
+/// neither). The Wi-Fi and charger rules hold back the fetcher; a low battery holds back both.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sync_conditions_hold_back_the_import_and_the_fetcher_until_they_are_met() {
+async fn photos_are_added_offline_and_the_sync_rules_hold_back_only_transfers() {
     let r = rig().await;
     r.source.put("a", &r.files[0], 1);
     r.source.put("b", &r.files[1], 2);
     r.core.backup_configure(policy(true, true)).await.unwrap();
 
+    // Airplane mode, unplugged.
     r.source.set_conditions(Conditions {
         on_wifi: false,
-        charging: true,
-        battery_pct: 90,
-    });
-    let held = r.core.backup_run(true).await.unwrap();
-    assert_eq!((held.imported, held.pending), (0, 2));
-    let st = r.core.backup_status().await.unwrap();
-    assert_eq!(st.paused.as_deref(), Some("Waiting for Wi-Fi"));
-    assert_eq!(st.pending, 2);
-
-    r.source.set_conditions(Conditions {
-        on_wifi: true,
         charging: false,
-        battery_pct: 90,
-    });
-    assert_eq!(
-        r.core.backup_run(true).await.unwrap().imported,
-        0,
-        "charging is required too"
-    );
-    assert_eq!(
-        r.core.backup_status().await.unwrap().paused.as_deref(),
-        Some("Waiting for the charger")
-    );
-
-    r.source.set_conditions(Conditions {
-        on_wifi: true,
-        charging: true,
         battery_pct: 90,
     });
     let ok = r.core.backup_run(true).await.unwrap();
     assert_eq!((ok.imported, ok.pending), (2, 0));
+    assert_eq!(photos(&r.core).await, 2);
     assert_eq!(r.core.backup_status().await.unwrap().paused, None);
+    assert_eq!(
+        r.core.transfers().await.unwrap().paused.as_deref(),
+        Some("Waiting for Wi-Fi"),
+        "the fetcher waits for Wi-Fi"
+    );
+
+    // A low battery holds back adding photos too.
+    r.source.put("c", &r.files[2], 3);
+    r.source.set_conditions(Conditions {
+        on_wifi: false,
+        charging: false,
+        battery_pct: 10,
+    });
+    let held = r.core.backup_run(true).await.unwrap();
+    assert_eq!((held.imported, held.pending), (0, 1));
+    assert_eq!(
+        r.core.backup_status().await.unwrap().paused.as_deref(),
+        Some("Battery is low")
+    );
+
+    // On Wi-Fi and charging: everything goes.
+    r.source.set_conditions(Conditions {
+        on_wifi: true,
+        charging: true,
+        battery_pct: 10,
+    });
+    let ok = r.core.backup_run(true).await.unwrap();
+    assert_eq!((ok.imported, ok.pending), (1, 0));
+    assert_eq!(r.core.backup_status().await.unwrap().paused, None);
+    assert_eq!(r.core.transfers().await.unwrap().paused, None);
 
     // Backup switched off: nothing is reported as paused and a manual look only counts.
     r.core
@@ -215,7 +231,7 @@ async fn sync_conditions_hold_back_the_import_and_the_fetcher_until_they_are_met
         })
         .await
         .unwrap();
-    r.source.put("c", &r.files[2], 3);
+    r.source.put("d", &r.files[3], 4);
     assert_eq!(r.core.backup_run(false).await.unwrap().pending, 1);
     r.core.shutdown().await.unwrap();
 }
@@ -264,13 +280,13 @@ async fn denied_access_is_an_error_with_a_next_step_and_state_survives_a_restart
     r.source.set_conditions(Conditions {
         on_wifi: false,
         charging: false,
-        battery_pct: 90,
+        battery_pct: 10,
     });
     r.core.backup_configure(policy(true, false)).await.unwrap();
     assert_eq!(
         r.core.backup_run(true).await.unwrap().pending,
         1,
-        "held back: not on Wi-Fi"
+        "held back: the battery is low"
     );
     let dir = r.core.data_dir().to_path_buf();
     r.core.shutdown().await.unwrap();
@@ -856,8 +872,8 @@ async fn a_backup_json_from_before_library_assets_still_works() {
 
     let core = AppCore::open(&dir, AppOptions::local_only()).await.unwrap();
     let source = Arc::new(FakePhotoSource::new(dir.join("scratch2")));
-    for i in 0..3 {
-        source.put(&format!("a{i}"), &r.files[i], 1);
+    for (i, f) in r.files.iter().take(3).enumerate() {
+        source.put(&format!("a{i}"), f, 1);
     }
     core.set_photo_source(source.clone());
     let st = core.backup_status().await.unwrap();

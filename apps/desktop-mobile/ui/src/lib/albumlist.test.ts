@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { filterAlbums, findAlbum, mergeAlbums } from './albumlist';
 
 const p = (id: string, name: string, shared_as: string | null = null) => ({ id, name, cover: null, item_count: 3, shared_as });
-const s = (id: string, name: string, unread = 0) => ({ id, name, role: 'owner', item_count: 5, member_count: 2, keep_originals: false, location: 'ask', unread, cover: 'c' });
+const s = (id: string, name: string, unread = 0) => ({ id, name, role: 'owner', item_count: 5, member_count: 2, keep_originals: false, location: 'ask', unread, cover: 'c', save_all: false });
 
 describe('mergeAlbums', () => {
   it('shows a personal album that is shared once, with its unread count', () => {

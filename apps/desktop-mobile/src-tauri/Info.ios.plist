@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged by Tauri into the iPhone and iPad app's Info.plist. -->
+<plist version="1.0">
+<dict>
+	<!-- I2-01: the camera roll as a backup source, asked for when the person turns it on or adds photos from the gallery. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Shoebox copies the photos and videos in your Photos library into your Shoebox library, so they are backed up on your other devices.</string>
+	<!-- Scanning the QR code of a pairing or an album invitation. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Shoebox uses the camera to scan the QR code that adds this device to your library or joins a shared album.</string>
+</dict>
+</plist>

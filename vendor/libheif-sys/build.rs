@@ -363,6 +363,11 @@ fn build_static_decoders() {
         .define("LIBDE265_LIBRARY", de265_dir.join("lib").join(libde265_lib))
         .define("WITH_LIBDE265", "ON")
         .define("WITH_REDUCED_VISIBILITY", "ON");
+    if target_env == "msvc" {
+        // de265.h declares its functions dllimport on Windows unless told the library is static.
+        heif.cflag("-DLIBDE265_STATIC_BUILD")
+            .cxxflag("-DLIBDE265_STATIC_BUILD");
+    }
     for key in [
         "BUILD_SHARED_LIBS",
         "BUILD_TESTING",
@@ -412,7 +417,13 @@ fn build_static_decoders() {
         de265_dir.join("lib").display()
     );
     println!("cargo:rustc-link-lib=static=heif");
-    println!("cargo:rustc-link-lib=static=de265");
+    // libde265's CMake names its MSVC library libde265.lib, not de265.lib.
+    let de265_link_name = if target_env == "msvc" {
+        "libde265"
+    } else {
+        "de265"
+    };
+    println!("cargo:rustc-link-lib=static={de265_link_name}");
     match (target_os.as_str(), target_env.as_str()) {
         (_, "msvc") => {}
         ("macos" | "ios", _) => println!("cargo:rustc-link-lib=c++"),

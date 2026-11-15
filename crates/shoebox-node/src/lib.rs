@@ -78,7 +78,7 @@ pub use search_status::{IndexerInfo, SearchStatus};
 pub use shards::{winning_rows, ShardView, PEOPLE_SNAPSHOT_KEY, SHARD_MIME};
 pub use sync::{SyncConfig, SyncPhase};
 pub use ticket::{LibraryTicket, TicketError};
-pub use transfers::{Transfer, TransferSnapshot};
+pub use transfers::{Transfer, TransferSnapshot, PAUSED_SERVE_MAX};
 pub use web_live::LiveReport;
 pub use web_share::{
     CloudBackupReport, CloudPolicy, CloudRegistration, CloudRestoreReport, RefreshReport, WebShare,

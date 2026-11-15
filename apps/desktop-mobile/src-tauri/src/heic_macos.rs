@@ -1,4 +1,4 @@
-//! HEIC and AVIF on macOS (I1-02): the system's ImageIO decodes them, so no decoder is built
+//! HEIC and AVIF on macOS and iOS (I1-02): the system's ImageIO decodes them, so no decoder is built
 //! into the app. The picture comes back upright (the file's rotation applied) and in sRGB, as
 //! `shoebox-media` expects from a platform decoder.
 //!
@@ -144,7 +144,7 @@ impl PlatformDecoder for ImageIo {
             )?;
             let image = Cf::new(
                 CGImageSourceCreateThumbnailAtIndex(source.0, 0, options.0),
-                "decoding (not a picture this Mac can read)",
+                "decoding (not a picture this device can read)",
             )?;
             let (width, height) = (CGImageGetWidth(image.0), CGImageGetHeight(image.0));
             if width == 0 || height == 0 {

@@ -344,9 +344,20 @@ pub fn run(root: &Path, dir: &Path, check: bool) -> Result<Report, String> {
         .collect();
     if check {
         let current = std::fs::read_to_string(&target).map_err(|e| e.to_string())?;
+        // A Windows checkout may turn the committed LF line endings into CRLF.
+        let current = current.replace("\r\n", "\n");
         if current != src {
+            let first = current
+                .lines()
+                .zip(src.lines())
+                .enumerate()
+                .find(|(_, (a, b))| a != b)
+                .map_or_else(
+                    || "one file is longer than the other".to_string(),
+                    |(n, (a, b))| format!("line {}: committed `{a}`, built `{b}`", n + 1),
+                );
             return Err(format!(
-                "the built models do not match {}: run `cargo xtask models` and commit, or fix the build",
+                "the built models do not match {} ({first}): run `cargo xtask models` and commit, or fix the build",
                 target.display()
             ));
         }

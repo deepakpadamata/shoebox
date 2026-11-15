@@ -1,6 +1,8 @@
 // Native file and folder pickers (desktop shell). In a browser there is no picker: callers fall back
 // to a typed path.
-export const isHandheld = () => /Android|iPhone|iPad/i.test(navigator.userAgent);
+/** A phone or tablet. An iPad's web view says it is a Mac, so a touch screen on a "Mac" counts. */
+export const isHandheld = () =>
+  /Android|iPhone|iPad/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 export const canPick = () => '__TAURI_INTERNALS__' in window && !isHandheld();
 
 const MEDIA = ['jpg', 'jpeg', 'png', 'heic', 'heif', 'dng', 'cr2', 'cr3', 'nef', 'arw', 'raf', 'orf', 'rw2', 'tif', 'tiff', 'gif', 'webp', 'mov', 'mp4', 'm4v'];

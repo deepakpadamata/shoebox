@@ -19,4 +19,8 @@ unread: number,
 /**
  * Item id of the cover (the newest photo).
  */
-cover: string | null, };
+cover: string | null, 
+/**
+ * Every photo of the album is kept in this library, now and as new ones arrive.
+ */
+save_all: boolean, };

@@ -259,7 +259,7 @@ export const api = {
   sharedAddCheck: (album: string, ids: string[]) => call<AddCheck>('shared_add_check', { album, ids }),
   sharedAdd: (album: string, ids: string[], location: string | null = null, remember = false) => call<AddResult>('shared_add', { album, ids, location, remember }),
   sharedSave: (album: string, ids: string[]) => call<number>('shared_save', { album, ids }),
-  sharedSettings: (album: string, keep_originals: boolean | null = null, location: string | null = null) => call<{}>('shared_settings', { album, keep_originals, location }),
+  sharedSettings: (album: string, keep_originals: boolean | null = null, location: string | null = null, save_all: boolean | null = null) => call<{}>('shared_settings', { album, keep_originals, location, save_all }),
   sharedSeen: (album: string) => call<{}>('shared_seen', { album }),
   sharedFetch: (album: string, id: string, kind: BlobKind) => call<{}>('shared_fetch', { album, id, kind }),
   sharedRemoveMember: (album: string, member: string) => call<{}>('shared_remove_member', { album, member }),

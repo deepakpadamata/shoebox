@@ -94,6 +94,13 @@
   async function setKeep(v: boolean) {
     try { await api.sharedSettings(album, v, null); await load(); } catch (e) { fail(e); }
   }
+  async function setSaveAll(v: boolean) {
+    try {
+      await api.sharedSettings(album, null, null, v);
+      toast(v ? 'Saving every photo of this album to your library' : 'No longer saving new photos to your library');
+      await load();
+    } catch (e) { fail(e); }
+  }
   async function setLocation(v: string) {
     try { await api.sharedSettings(album, null, v); await load(); } catch (e) { fail(e); }
   }
@@ -171,6 +178,7 @@
 <Sheet open={settingsOpen} title="Album settings" onclose={() => (settingsOpen = false)} width={440}>
   {#if info}
     <div class="stack">
+      <div class="row-flex"><div class="grow"><b>Add all photos to my library</b><div class="muted small">Every photo here becomes part of your library, and new ones follow as they are added. Ones your library already has are not copied twice. They stay in your library if you leave the album or a photo is removed from it.</div></div><Toggle checked={info.save_all} label="Add all photos to my library" onchange={setSaveAll} /></div>
       <div class="row-flex"><div class="grow"><b>Keep every original here</b><div class="muted small">Otherwise this device keeps previews and fetches an original when you open it.</div></div><Toggle checked={info.keep_originals} label="Keep originals" onchange={setKeep} /></div>
       {#if canAdd}
         <div>

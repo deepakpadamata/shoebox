@@ -8,6 +8,12 @@ use shoebox_node::RelaySetting;
 use std::io::Write;
 use std::path::PathBuf;
 
+// Diagnostic build only: jemalloc with heap profiling, configured at run time through
+// `_RJEM_MALLOC_CONF` (e.g. `prof:true,lg_prof_interval:30,prof_prefix:/path/jeprof`).
+#[cfg(feature = "jemalloc-prof")]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 #[derive(Parser)]
 #[command(
     name = "shoebox-keeper",

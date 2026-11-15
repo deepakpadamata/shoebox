@@ -160,6 +160,11 @@ pub struct VideoSource {
 pub trait PhotoSource: Send + Sync {
     fn permission(&self) -> BoxFuture<'_, Result<Permission>>;
     fn request_permission(&self) -> BoxFuture<'_, Result<Permission>>;
+    /// With only some photos shared, let the person share more: Android asks again, iOS shows its
+    /// own picker of the shared selection. Where there is nothing else, asking again.
+    fn manage_access(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move { self.request_permission().await.map(|_| ()) })
+    }
     /// Everything (`token: None`) or only what changed since `token`.
     fn scan(&self, token: Option<String>) -> BoxFuture<'_, Result<Scan>>;
     fn conditions(&self) -> BoxFuture<'_, Result<Conditions>>;

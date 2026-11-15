@@ -410,3 +410,95 @@ async fn shared_albums_follow_the_person_to_all_their_devices() {
         page.items
     );
 }
+
+/// "Add all photos to my library": what the album has is fetched without a second copy of what
+/// the library already holds, new photos follow, and the library's copies outlive the album.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_album_can_be_kept_whole_in_the_library_and_the_copies_stay() {
+    let (da, db) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let a = open(da.path()).await;
+    a.create_library("Ana", "keeper").await.unwrap();
+    let b = open(db.path()).await;
+    b.create_library("Ben", "keeper").await.unwrap();
+    // Ben already has two of the photos (the same bytes): one he favorited, one he deleted.
+    b.import_paths(&[sample("screenshot.png")]).await.unwrap();
+    let liked = b.library_page(None, 50).await.unwrap().items[0].id.clone();
+    b.set_favorite(std::slice::from_ref(&liked), true)
+        .await
+        .unwrap();
+    b.import_paths(&[sample("IMG_0001.jpg")]).await.unwrap();
+    let binned = b
+        .library_page(None, 50)
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|p| p.id != liked)
+        .unwrap()
+        .id;
+    b.delete(std::slice::from_ref(&binned)).await.unwrap();
+
+    a.import_paths(&[sample("screenshot.png"), sample("IMG_0001.jpg")])
+        .await
+        .unwrap();
+    let ids: Vec<String> = a
+        .library_page(None, 50)
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    let album = a.shared_create("Trip").await.unwrap();
+    a.shared_add(&album.id, &ids, Some("keep".into()), false)
+        .await
+        .unwrap();
+    let invite = a.shared_invite(&album.id, "contributor", 7).await.unwrap();
+    b.shared_join(&invite.text).await.unwrap();
+    assert!(!b.shared_albums().await.unwrap()[0].save_all);
+
+    b.shared_set_save_all(&album.id, true).await.unwrap();
+    assert!(b.shared_albums().await.unwrap()[0].save_all);
+    let library_has = |core: Arc<AppCore>, n: usize| async move {
+        wait(60, || {
+            let core = core.clone();
+            async move {
+                core.library_page(None, 50)
+                    .await
+                    .map(|p| p.items.len() == n && p.items.iter().all(|i| i.has_original))
+                    .unwrap_or(false)
+            }
+        })
+        .await
+    };
+    // His favorite is left as it is, and the photo he deleted stays deleted: one photo, the
+    // favorite, is all his library shows.
+    assert!(library_has(b.clone(), 1).await);
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    let page = b.library_page(None, 50).await.unwrap();
+    assert_eq!(page.items.len(), 1, "{:?}", page.items);
+    assert!(page.items[0].favorite && page.items[0].id == liked);
+
+    // A photo added later follows by itself.
+    a.import_paths(&[sample("photo-gps.jpg")]).await.unwrap();
+    let all: Vec<String> = a
+        .library_page(None, 50)
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|p| p.id)
+        .filter(|id| !ids.contains(id))
+        .collect();
+    a.shared_add(&album.id, &all, Some("keep".into()), false)
+        .await
+        .unwrap();
+    assert!(library_has(b.clone(), 2).await, "the new photo follows");
+
+    // Leaving the album does not take them away.
+    b.shared_leave(&album.id).await.unwrap();
+    assert!(b.shared_albums().await.unwrap().is_empty());
+    assert!(library_has(b.clone(), 2).await, "the copies stay");
+    a.shutdown().await.unwrap();
+    b.shutdown().await.unwrap();
+}

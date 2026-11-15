@@ -12,7 +12,8 @@ add_library(x86_sse OBJECT ${x86_sse_sources})
 
 set(sse_flags "")
 
-if(NOT MSVC)
+# Shoebox: clang-cl (MSVC but Clang) needs the flag too, unlike cl.exe (cross-builds with cargo-xwin).
+if(NOT MSVC OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(sse_flags "${sse_flags} -msse4.1")
   else(CMAKE_SIZEOF_VOID_P EQUAL 8)

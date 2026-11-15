@@ -26,6 +26,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -43,9 +44,15 @@ import java.util.concurrent.TimeUnit
  * the battery is not low; the worker runs a bounded `sync_burst` in the Rust core and, when photos
  * are still at risk and the budget ran out, posts the "finish backing up" notification (at most
  * once a day, decided by the Rust rules in `notify.rs`).
+ *
+ * New camera photos are added to the library without a network too: a second periodic run, with
+ * no network constraint, only adds them (a reference to the file, local work) and syncs nothing.
  */
 object BackgroundSync {
     const val UNIQUE = "shoebox-background-sync"
+    const val GALLERY_UNIQUE = "shoebox-gallery"
+    /** Input of [BurstWorker]: false for the gallery-only run. */
+    const val SYNC = "sync"
     const val CHANNEL = "backup"
     const val SECURITY_CHANNEL = "security"
     private const val BUDGET_SECS = 120
@@ -57,6 +64,12 @@ object BackgroundSync {
             .build()
         val request = PeriodicWorkRequestBuilder<BurstWorker>(15, TimeUnit.MINUTES).setConstraints(constraints).build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(UNIQUE, ExistingPeriodicWorkPolicy.KEEP, request)
+        // New camera photos into the library: no network needed, so none required.
+        val gallery = PeriodicWorkRequestBuilder<BurstWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(Constraints.Builder().setRequiresBatteryNotLow(true).build())
+            .setInputData(workDataOf(SYNC to false))
+            .build()
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(GALLERY_UNIQUE, ExistingPeriodicWorkPolicy.KEEP, gallery)
         // Search indexing (S1-11): only while charging, with the battery not low.
         val charging = Constraints.Builder()
             .setRequiresCharging(true)
@@ -93,18 +106,19 @@ class BurstWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
             Log.i("ShoeboxBurst", "skipped: the app is in the foreground")
             return Result.success()
         }
+        val sync = inputData.getBoolean(BackgroundSync.SYNC, true)
         val prefs = ctx.getSharedPreferences("burst", Context.MODE_PRIVATE)
         val last = prefs.getLong("last_notified_ms", 0L)
         val report = try {
             ModelAssets.install(ctx)
             NativeBridge.registerImageDecoder(HeifDecoder)
-            NativeBridge.runBurst(ctx.dataDir.absolutePath, BackgroundSync.budgetSecs(), PhotoBackend(ctx), last)
+            NativeBridge.runBurst(ctx.dataDir.absolutePath, BackgroundSync.budgetSecs(), PhotoBackend(ctx), last, sync)
         } catch (e: Throwable) {
-            Log.e("ShoeboxBurst", "burst failed", e)
+            Log.e("ShoeboxBurst", "burst failed (sync=$sync)", e)
             return Result.retry()
         }
         Log.i("ShoeboxBurst", report)
-        prefs.edit().putString("last_report", report).apply()
+        prefs.edit().putString(if (sync) "last_report" else "last_gallery_report", report).apply()
         val json = JSONObject(report)
         val n = json.optJSONObject("notification")
         if (n != null) {

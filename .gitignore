@@ -12,3 +12,9 @@ dist/
 /planning/
 /models/
 /apps/desktop-mobile/src-tauri/gen/android/app/src/main/assets/models/
+
+# Signing keys: never committed.
+*.key
+*.jks
+keystore.properties
+/apps/desktop-mobile/src-tauri/gen/apple/assets/

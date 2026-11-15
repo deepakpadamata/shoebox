@@ -33,6 +33,11 @@ tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 futures.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
+tikv-jemallocator = { version = "0.6", optional = true, features = ["profiling"] }
+
+[features]
+# Diagnostic build: jemalloc with heap profiling (finding where a long-running keeper's memory goes).
+jemalloc-prof = ["dep:tikv-jemallocator"]
 
 [dev-dependencies]
 tempfile.workspace = true

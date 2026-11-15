@@ -3,21 +3,32 @@
 //! seconds.
 //!
 //! Downloads are reported by [`crate::Node::download_blob_from`] as they go. Uploads come from
-//! iroh-blobs' provider events (connections, get requests and their transfer progress, notify-only:
-//! nothing waits on them, and progress updates are dropped rather than slow a transfer down).
+//! iroh-blobs' provider events (connections, get requests and their transfer progress; progress
+//! updates are dropped rather than slow a transfer down).
+//!
+//! Get requests are intercepted for one rule: while serving is paused (a phone on mobile data with
+//! "Wi-Fi only" set, [`crate::Node::pause_serving`]), a blob larger than [`PAUSED_SERVE_MAX`] is
+//! refused as rate limited, which a peer treats as "try again later". Peers ask by hash and the
+//! blob layer does not know an original from a preview, so the size decides: thumbnails and
+//! previews still go, originals wait.
 
 use iroh::EndpointId as IrohId;
 use iroh_blobs::provider::events::{
-    ConnectMode, EventMask, EventSender, ObserveMode, ProviderMessage, RequestMode, RequestUpdate,
-    ThrottleMode,
+    AbortReason, ConnectMode, EventMask, EventSender, ObserveMode, ProviderMessage, RequestMode,
+    RequestUpdate, ThrottleMode,
 };
 use shoebox_core::ids::{Blake3Hash, EndpointId};
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Speeds are averaged over this long.
 const WINDOW: Duration = Duration::from_secs(5);
+
+/// While serving is paused, blobs up to this size are still sent: thumbnails and previews (a
+/// 2048 px preview is a few hundred KB), not originals.
+pub const PAUSED_SERVE_MAX: u64 = 1024 * 1024;
 
 /// One blob on its way in or out.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,7 +102,7 @@ struct State {
 
 /// Shared by the node and its blob protocol. Cheap to clone.
 #[derive(Clone, Default)]
-pub(crate) struct Transfers(Arc<Mutex<State>>);
+pub(crate) struct Transfers(Arc<Mutex<State>>, Arc<AtomicBool>);
 
 /// Ends a download's entry when the download returns, however it returns.
 pub(crate) struct DownloadGuard {
@@ -112,6 +123,24 @@ impl Drop for DownloadGuard {
 }
 
 impl Transfers {
+    /// Refuse large blobs to peers (true) or serve everything again (false).
+    pub(crate) fn set_serving_paused(&self, paused: bool) {
+        self.1.store(paused, Ordering::SeqCst);
+    }
+
+    pub(crate) fn serving_paused(&self) -> bool {
+        self.1.load(Ordering::SeqCst)
+    }
+
+    /// Whether a get request for `hash` is served now: always, unless serving is paused and the
+    /// blob is larger than [`PAUSED_SERVE_MAX`]. A blob not stored here is left to the provider.
+    async fn may_serve(&self, blobs: &crate::blobs::BlobStore, hash: &Blake3Hash) -> bool {
+        if !self.serving_paused() {
+            return true;
+        }
+        !matches!(blobs.size(hash).await, Ok(Some(size)) if size > PAUSED_SERVE_MAX)
+    }
+
     pub(crate) fn snapshot(&self) -> TransferSnapshot {
         let mut s = self.0.lock().unwrap();
         let mut downloads: Vec<Transfer> =
@@ -176,11 +205,12 @@ impl Transfers {
         down.add(new);
     }
 
-    /// The provider's event sender: notifications only (nothing is intercepted, push stays off).
-    pub(crate) fn provider_events(&self) -> EventSender {
+    /// The provider's event sender: connections are notifications, get requests are intercepted
+    /// (see [`Transfers::may_serve`]) and followed, push stays off.
+    pub(crate) fn provider_events(&self, blobs: crate::blobs::BlobStore) -> EventSender {
         let mask = EventMask {
             connected: ConnectMode::Notify,
-            get: RequestMode::NotifyLog,
+            get: RequestMode::InterceptLog,
             get_many: RequestMode::None,
             push: RequestMode::Disabled,
             observe: ObserveMode::None,
@@ -207,11 +237,19 @@ impl Transfers {
                         s.peers.remove(&id);
                         s.uploads.retain(|(c, _), _| *c != id);
                     }
-                    ProviderMessage::GetRequestReceivedNotify(m) => {
+                    ProviderMessage::GetRequestReceived(m) => {
                         let key = (m.inner.connection_id, m.inner.request_id);
-                        let mut updates = m.rx;
-                        let t = transfers.clone();
+                        let hash = Blake3Hash(*m.inner.request.hash.as_bytes());
+                        let (reply, mut updates) = (m.tx, m.rx);
+                        let (t, blobs) = (transfers.clone(), blobs.clone());
+                        // Its own task: a size lookup must not hold up other requests' events.
                         tokio::spawn(async move {
+                            if !t.may_serve(&blobs, &hash).await {
+                                tracing::debug!("not serving {hash} while serving is paused");
+                                reply.send(Err(AbortReason::RateLimited)).await.ok();
+                                return;
+                            }
+                            reply.send(Ok(())).await.ok();
                             while let Ok(Some(update)) = updates.recv().await {
                                 t.upload_update(key, update);
                             }

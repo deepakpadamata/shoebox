@@ -10,6 +10,7 @@
   import { longPressDrag, pinch, pullRefresh, stepDensity } from '../lib/gestures';
   import { refreshEverything } from '../lib/refresh';
   import { viewport as media } from '../lib/viewport.svelte';
+  import { isHandheld } from '../lib/pick';
   import { app, fail, refreshAlbums, toast } from '../lib/store.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
   import { go } from '../lib/route.svelte';
@@ -302,6 +303,14 @@
 
   // ----- selection actions (U1-17) -----
   let moreOpen = $state(false);
+  // A tablet gets the bottom bar of a phone: the toolbar over the grid is too easy to miss by touch.
+  const bottomBar = media.mobile || isHandheld();
+  const canKeep = $derived(app.state?.role !== 'keeper');
+  // What "More" would hold besides Keep: with nothing else, Keep is a button of the bar itself.
+  const extras = $derived((selected.length === 1 ? 1 : 0) + (source === 'album' && album ? (selected.length === 1 ? 2 : 1) : 0));
+  async function keepSelected() {
+    await act(() => Promise.all(selected.map((id) => api.pinOriginal(id, true))), `Kept on ${media.mobile ? 'this phone' : 'this device'}`);
+  }
   let confirmOpen = $state(false);
   let ctx = $state<{ x: number; y: number } | null>(null);
   const deviceWords = $derived((app.backup_status?.devices ?? 0) > 1 ? `all ${app.backup_status!.devices} devices` : 'this device');
@@ -438,14 +447,18 @@
   {#if selecting}
     <!-- Labelled actions, Delete last and red (U1-17). On a phone the bar takes the place of the
          tab bar; on a computer it is a toolbar over the grid. -->
-    <div class="selbar" class:phone={media.mobile} role="toolbar" aria-label="{selected.length} selected">
-      <button class="clear" title="Clear selection (Esc)" aria-label="Clear selection" onclick={() => (selected = [])}><Icon name="close" size={20} /></button>
+    <div class="selbar" class:phone={bottomBar} role="toolbar" aria-label="{selected.length} selected">
+      <button class="clear" title="Clear selection (Esc)" aria-label="Clear selection" onclick={() => (selected = [])}><Icon name="close" size={20} />{#if bottomBar}<span>Clear</span>{/if}</button>
       <b class="count">{selected.length.toLocaleString('en')} selected</b>
       <span class="grow"></span>
       <button class="act" bind:this={shareButton} title="Share (S)" onclick={() => (shareSheet = true)}><Icon name="share" size={22} /><span>Share</span></button>
       <button class="act" title="Add to album" onclick={openAlbumSheet}><Icon name="addalbum" size={22} /><span>Add to album</span></button>
       <button class="act" class:on={allFavorite} title={allFavorite ? 'Unfavorite' : 'Favorite'} onclick={() => act(() => api.setFavorite(selected, !allFavorite))}><Icon name="heart" size={22} fill={allFavorite} /><span>{allFavorite ? 'Unfavorite' : 'Favorite'}</span></button>
-      <button class="act" title="More" onclick={() => (moreOpen = true)}><Icon name="more" size={22} /><span>More</span></button>
+      {#if canKeep && extras === 0}
+        <button class="act" title="Keep the originals on {media.mobile ? 'this phone' : 'this device'}" onclick={keepSelected}><Icon name="keep" size={22} /><span>Keep</span></button>
+      {:else if extras > 0}
+        <button class="act" title="More" onclick={() => (moreOpen = true)}><Icon name="more" size={22} /><span>More</span></button>
+      {/if}
       <button class="act danger" title="Delete from all devices (Delete)" onclick={askDelete}><Icon name="trash" size={22} /><span>Delete</span></button>
     </div>
   {/if}
@@ -513,9 +526,11 @@
     padding: 4px 8px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
   .selbar.phone { position: fixed; left: 0; right: 0; top: auto; bottom: 0; border-radius: 0; border-width: 1px 0 0; box-shadow: none; padding: 6px 4px calc(6px + var(--safe-bottom)); z-index: 25; }
   .selbar .count { padding: 0 8px; font-size: var(--t-sm); white-space: nowrap; }
-  .selbar.phone .count { display: none; }
-  .selbar.phone .clear { display: none; }
-  .selbar.phone .grow { display: none; }
+  .selbar.phone { flex-wrap: wrap; }
+  /* The bottom bar's first row: how many, and a way to let go of them. */
+  .selbar.phone .clear { order: -2; width: auto; padding: 0 10px; gap: 6px; grid-auto-flow: column; font: inherit; font-size: var(--t-sm); }
+  .selbar.phone .count { order: -2; flex: 1; padding: 0 4px; }
+  .selbar.phone .grow { order: -1; flex-basis: 100%; height: 0; }
   .selbar.phone .act { flex: 1; }
   .grow { flex: 1; }
   .clear { width: 36px; height: 36px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); display: grid; place-items: center; cursor: pointer; }

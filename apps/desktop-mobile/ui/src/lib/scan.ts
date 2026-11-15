@@ -1,5 +1,6 @@
+import { isHandheld } from './pick';
 // QR scanning for joining a library from a phone (M4-07). Only the mobile shell has a scanner.
-export const canScan = () => '__TAURI_INTERNALS__' in window && /Android|iPhone|iPad/i.test(navigator.userAgent);
+export const canScan = () => '__TAURI_INTERNALS__' in window && isHandheld();
 
 /** Opens the camera and resolves with the first QR code's text, or null if cancelled. */
 export async function scanQr(): Promise<string | null> {

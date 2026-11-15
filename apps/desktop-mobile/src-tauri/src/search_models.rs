@@ -159,10 +159,10 @@ impl AppCore {
         if cfg!(target_os = "android") || !SearchSettings::load(self.data_dir()).index {
             return;
         }
-        #[cfg(all(feature = "tauri-app", target_os = "macos"))]
+        #[cfg(all(feature = "tauri-app", any(target_os = "macos", target_os = "ios")))]
         ln.set_ocr(Arc::new(crate::ocr_macos::VisionOcr));
         // Everywhere else, PP-OCRv5 (S2-03), when its files are here.
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
         {
             let d = dirs.clone();
             match tokio::task::spawn_blocking(move || PpOcr::locate(&d)).await {
@@ -240,8 +240,13 @@ impl AppCore {
             _ => None,
         };
         // Text reading is a bonus too (S2-03): all three files, or none.
+        // (Apple's own text recognition does it on a Mac, iPhone and iPad: no files to get.)
+        let apple = cfg!(all(
+            feature = "tauri-app",
+            any(target_os = "macos", target_os = "ios")
+        ));
         let text = match image {
-            Ok(Some(_)) => {
+            Ok(Some(_)) if !apple => {
                 let det = ln.model_bytes_from(&OCR_DET, &sources).await;
                 let rec = ln.model_bytes_from(&OCR_REC, &sources).await;
                 let dict = ln.model_bytes_from(&OCR_DICT, &sources).await;
@@ -265,6 +270,7 @@ impl AppCore {
                 }));
             }
             Err(e) => {
+                tracing::warn!("could not get the image model: {e:#}");
                 return Ok(serde_json::json!({
                     "skipped": format!("could not get the image model: {e:#}")
                 }));
@@ -286,6 +292,8 @@ impl AppCore {
                 });
             }
         }
+        #[cfg(all(feature = "tauri-app", any(target_os = "macos", target_os = "ios")))]
+        ln.set_ocr(Arc::new(crate::ocr_macos::VisionOcr));
         if let Some((det, rec, dict)) = text {
             let loaded = tokio::task::spawn_blocking(move || {
                 PpOcr::from_bytes(&det, &rec, &String::from_utf8(dict.to_vec())?)

@@ -56,7 +56,10 @@ public enum PhotoLibrary {
     public static func scan(token: String?) throws -> ScanReply {
         try requireAccess()
         let lib = PHPhotoLibrary.shared()
-        if let data = Token.decode(token),
+        // With only some photos shared the set is small, and what the person adds to it is not a
+        // change PhotoKit reports: look at all of it every time.
+        let limited = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited
+        if !limited, let data = Token.decode(token),
            let since = try? NSKeyedUnarchiver.unarchivedObject(ofClass: PHPersistentChangeToken.self, from: data),
            let reply = try? changes(lib, since: since)
         {

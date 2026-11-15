@@ -718,6 +718,8 @@ ts_type! {
         pub unread: u32,
         /// Item id of the cover (the newest photo).
         pub cover: Option<String>,
+        /// Every photo of the album is kept in this library, now and as new ones arrive.
+        pub save_all: bool,
     }
 }
 

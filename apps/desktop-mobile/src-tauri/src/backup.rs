@@ -1,6 +1,11 @@
 //! Camera-roll backup (M4-05): incremental import from a [`PhotoSource`] with the sync
 //! conditions of mockup 5e (Wi-Fi only, charging only, pause on low battery).
 //!
+//! Adding a camera photo is local work (a reference to a file already on this device), so it
+//! needs no network: only a low battery holds it back ([`import_pause`]). The Wi-Fi and charger
+//! rules are for what goes over the network ([`pause_reason`]): the fetcher, originals sent to
+//! other devices, and originals that are in the cloud only.
+//!
 //! State lives in `backup.json`: the policy, the platform change token, the assets still to
 //! import (`pending`) and the ones in the library (`tracked`: id → photo, file and modified time,
 //! so an edited photo is imported again). A scan merges what changed into `pending` and saves it
@@ -125,7 +130,15 @@ impl BackupState {
     }
 }
 
-/// Why backup is waiting, if it is. Pure, so the rules are tested without a phone.
+/// Why adding new gallery photos to the library is waiting, if it is: only a low battery. No
+/// network is needed to reference a file on this device, so the Wi-Fi and charger rules do not
+/// apply. Pure, so the rules are tested without a phone.
+pub fn import_pause(policy: &BackupPolicy, c: &Conditions) -> Option<&'static str> {
+    (!c.charging && c.battery_pct < policy.min_battery).then_some("Battery is low")
+}
+
+/// Why network transfers (the fetcher, originals in the cloud only) are waiting, if they are.
+/// Pure, so the rules are tested without a phone.
 pub fn pause_reason(policy: &BackupPolicy, c: &Conditions) -> Option<&'static str> {
     if policy.wifi_only && !c.on_wifi {
         Some("Waiting for Wi-Fi")
@@ -180,7 +193,7 @@ impl AppCore {
         let st = self.backup.lock().await;
         let paused = self
             .viewer_pause()
-            .or_else(|| conditions.and_then(|c| pause_reason(&st.policy, &c)))
+            .or_else(|| conditions.and_then(|c| import_pause(&st.policy, &c)))
             .map(String::from);
         Ok(self.status_of(&st, permission, paused))
     }
@@ -291,20 +304,23 @@ impl AppCore {
             Permission::Granted | Permission::Limited => {}
         }
         let policy = self.backup.lock().await.policy.clone();
-        let paused = source
-            .conditions()
-            .await
-            .ok()
-            .and_then(|c| pause_reason(&policy, &c));
-        // The fetcher follows the same rules: no big downloads on mobile data or a low battery.
-        if paused.is_some() {
+        let conditions = source.conditions().await.ok();
+        // Adding photos is local: only a low battery holds it back, never a missing network.
+        let paused = conditions.and_then(|c| import_pause(&policy, &c));
+        // Network transfers follow the sync rules: no big downloads on mobile data or a low battery.
+        let transfers_paused = conditions.and_then(|c| pause_reason(&policy, &c));
+        if transfers_paused.is_some() {
             ln.pause_fetcher();
         } else if ln.fetcher_paused() {
             ln.resume_fetcher();
         }
+        // Sending too: other devices get thumbnails and previews of new photos, originals wait.
+        ln.node().pause_serving(transfers_paused.is_some());
         self.emit(AppEvent::BackupPaused {
             reason: paused.map(String::from),
         });
+        // Originals in the cloud only are downloaded on mains power (D3), under the same rules.
+        let download_cloud = conditions.is_some_and(|c| c.charging) && transfers_paused.is_none();
 
         // 1. Enumerate and remember what is new, before the token moves.
         self.merge_scan(&*source).await?;
@@ -329,7 +345,7 @@ impl AppCore {
 
         // 3. Import what is waiting, in place.
         let todo: Vec<Asset> = self.backup.lock().await.pending.values().cloned().collect();
-        self.import_in_place(&*source, &ln, todo, &mut report, true)
+        self.import_in_place(&*source, &ln, todo, &mut report, true, download_cloud)
             .await?;
         self.make_posters(&*source, &ln).await;
         report.pending = self.backup.lock().await.pending.len() as u32;
@@ -339,7 +355,17 @@ impl AppCore {
     /// What changed since the token, saved before the token moves: new and edited assets wait in
     /// `pending`, tracked library assets reported removed wait for the gallery check.
     async fn merge_scan(&self, source: &dyn PhotoSource) -> Result<()> {
-        let token = self.backup.lock().await.token.clone();
+        let permission = source.permission().await?;
+        let token = {
+            let mut st = self.backup.lock().await;
+            // Photos that came into view when access widened are older than the token and are not
+            // changes the platform reports: look at everything again.
+            if st.last_permission == Some(Permission::Limited) && permission == Permission::Granted
+            {
+                st.token = None;
+            }
+            st.token.clone()
+        };
         let scan = source.scan(token).await?;
         let mut st = self.backup.lock().await;
         for a in scan.assets {
@@ -407,11 +433,10 @@ impl AppCore {
         assets: Vec<Asset>,
         report: &mut BackupReport,
         progress: bool,
+        download_cloud: bool,
     ) -> Result<()> {
         let total = assets.len() as u32;
         let mut done = 0u32;
-        // Originals in the cloud only are downloaded on mains power (D3); until then they wait.
-        let on_power = source.conditions().await.is_ok_and(|c| c.charging);
         for chunk in assets.chunks(BATCH) {
             let mut files: Vec<(Asset, PathBuf)> = vec![];
             let mut read: Vec<(Asset, PathBuf)> = vec![];
@@ -421,7 +446,7 @@ impl AppCore {
                     Original::Library { local } => {
                         let got = if *local {
                             source.read_original(&a.id).await
-                        } else if on_power {
+                        } else if download_cloud {
                             source.download_original(&a.id).await
                         } else {
                             continue; // stays pending
@@ -815,10 +840,18 @@ impl AppCore {
             skipped: 0,
             failed: vec![],
         };
-        if !files && source.permission().await? != Permission::Granted {
+        let before = source.permission().await?;
+        if !files && before != Permission::Granted {
             // Deletions so far count as deletions; what vanishes across the prompt was unshared.
             let _ = self.check_gallery(&*source, &ln, false).await;
-            let answer = source.request_permission().await?;
+            let answer = if before == Permission::Limited {
+                // Asked already: the system prompt does not come again. Share more through the
+                // platform's own picker, then look at what is shared now.
+                source.manage_access().await?;
+                source.permission().await?
+            } else {
+                source.request_permission().await?
+            };
             {
                 let _running = self.backup_running.lock().await;
                 self.release_unshared(&*source, &ln).await?;
@@ -838,7 +871,9 @@ impl AppCore {
                     .collect()
             };
             let mut report = BackupReport::default();
-            self.import_in_place(&*source, &ln, todo, &mut report, false)
+            // Photos the person picked: originals in the cloud only come on mains power (D3).
+            let on_power = source.conditions().await.is_ok_and(|c| c.charging);
+            self.import_in_place(&*source, &ln, todo, &mut report, false, on_power)
                 .await?;
             summary.imported = report.imported;
             summary.duplicates = report.duplicates;
@@ -861,7 +896,8 @@ impl AppCore {
         if !in_place.is_empty() {
             let _running = self.backup_running.lock().await;
             let mut report = BackupReport::default();
-            self.import_in_place(&*source, &ln, in_place, &mut report, false)
+            let on_power = source.conditions().await.is_ok_and(|c| c.charging);
+            self.import_in_place(&*source, &ln, in_place, &mut report, false, on_power)
                 .await?;
             summary.imported += report.imported;
             summary.duplicates += report.duplicates;

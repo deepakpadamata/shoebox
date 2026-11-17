@@ -307,7 +307,14 @@ async fn a_referenced_motion_photo_plays_from_the_file_where_it_is() {
     );
     assert_eq!(&r.ln.clip_bytes(&id).await.unwrap().unwrap()[..], &clip[..]);
     // The file going away: the clip cannot be read (an error for the caller to sort out, as for
-    // the original itself), and nothing was kept elsewhere.
+    // the original itself), and nothing was kept elsewhere. Emptied first: the store may still
+    // have the file open from the read above, and an open file stays readable once deleted.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_len(0)
+        .unwrap();
     std::fs::remove_file(&path).unwrap();
     assert!(r.ln.read_clip(&id, 0..10).await.is_err());
     let _ = file;

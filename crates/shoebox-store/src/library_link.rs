@@ -88,6 +88,7 @@ pub async fn reconcile<L: LibraryStore + 'static>(
 ) -> Result<()> {
     let store = ln.store();
     let now = SystemClock.now_ms();
+    let held = shared.lock_list().await;
     let mut list = read_list(store.as_ref()).await?;
     let mut changed = false;
     // What this device is in: make sure the library knows (newer capabilities win).
@@ -120,6 +121,7 @@ pub async fn reconcile<L: LibraryStore + 'static>(
     if changed {
         write_list(store.as_ref(), &list).await?;
     }
+    drop(held);
     // What the person is in but this device is not (yet): take part.
     let me = ln.device();
     let peers: Vec<PeerAddr> = store
@@ -148,6 +150,7 @@ pub async fn leave_everywhere<L: LibraryStore + 'static>(
     album: &AlbumId,
 ) -> Result<()> {
     let store = ln.store();
+    let held = shared.lock_list().await;
     let mut list = read_list(store.as_ref()).await?;
     let now = SystemClock.now_ms();
     match list.iter_mut().find(|r| r.album == *album) {
@@ -163,6 +166,7 @@ pub async fn leave_everywhere<L: LibraryStore + 'static>(
         }
     }
     write_list(store.as_ref(), &list).await?;
+    drop(held);
     shared.leave(album).await
 }
 
@@ -176,6 +180,7 @@ pub async fn link<L: LibraryStore + 'static>(
     location: Option<String>,
 ) -> Result<()> {
     let store = ln.store();
+    let _held = shared.lock_list().await;
     let mut list = read_list(store.as_ref()).await?;
     if !list.iter().any(|r| r.album == *shared_album) {
         if let Some(local) = shared

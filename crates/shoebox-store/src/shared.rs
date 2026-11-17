@@ -150,6 +150,9 @@ struct Inner {
     guests: Mutex<HashMap<iroh::EndpointId, Instant>>,
     /// Which person (library) this device belongs to, told to every album.
     person: Mutex<Option<shoebox_core::store::LibraryId>>,
+    /// Held while the library's list of the person's shared albums is read, changed and written
+    /// back (`library_link`), so two changes on this device do not undo each other.
+    list: tokio::sync::Mutex<()>,
 }
 
 /// The shared albums of one device.
@@ -265,6 +268,11 @@ fn read_registry(path: &Path) -> Result<RegFile> {
 }
 
 impl SharedAlbums {
+    /// Hold while reading, changing and writing back the library's list of shared albums.
+    pub(crate) async fn lock_list(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.inner.list.lock().await
+    }
+
     /// Reopen the albums remembered in `dir` and start syncing them. `background = false` skips
     /// the sync and download loop (tests drive them by hand).
     pub async fn open(node: Node, dir: &Path, background: bool) -> Result<Self> {
@@ -283,6 +291,7 @@ impl SharedAlbums {
                 invites: Mutex::new(vec![]),
                 guests: Mutex::new(HashMap::new()),
                 person: Mutex::new(None),
+                list: tokio::sync::Mutex::new(()),
             }),
         };
         let file = read_registry(&this.inner.path)?;

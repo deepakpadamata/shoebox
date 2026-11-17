@@ -39,6 +39,10 @@ pub struct NodeConfig {
     /// Originals (photo ids, hex) the user pinned on this device; never replicated.
     #[serde(default)]
     pub pinned_originals: Vec<String>,
+    /// Originals (photo ids, hex) the user freed from this device by hand: the keep rules (recent,
+    /// favourites) no longer bring them back. The opposite of a pin; never replicated.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offloaded_originals: Vec<String>,
     /// A Companion keeps the original of every photo taken in the last this many days, from any
     /// device. 0 turns the window off. Device-local: each device chooses for itself.
     #[serde(default = "default_keep_recent_days")]
@@ -83,6 +87,7 @@ impl NodeConfig {
             gc_quiet_ms: default_gc_quiet_ms(),
             watched_folders: vec![],
             pinned_originals: vec![],
+            offloaded_originals: vec![],
             keep_recent_days: default_keep_recent_days(),
             keep_favorites: true,
             drop_previews: false,

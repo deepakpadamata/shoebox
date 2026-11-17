@@ -609,6 +609,12 @@ ts_type! {
     pub struct FreeUpReport {
         pub photos: u32,
         pub bytes: f64,
+        /// Of `photos`, those whose file is in this phone's gallery: freeing deletes the file from
+        /// the gallery (Android asks first). In a real run, those it deleted.
+        pub gallery: u32,
+        /// Chosen photos (Free up on this device) left as they were: no other device is confirmed
+        /// to hold them, a shared album needs them here, or this device does not hold them.
+        pub kept: u32,
     }
 }
 

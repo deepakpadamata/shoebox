@@ -2,7 +2,7 @@
   // Backup details (U1-12): the copies chart, what is on this device, and Free up space. The
   // sentence above all this comes from `app.backup_status`; this page only shows how it is made up.
   import { onMount, untrack } from 'svelte';
-  import { api, type Health } from '../../lib/api';
+  import { api, type FreeUpReport, type Health } from '../../lib/api';
   import { bytes, plural } from '../../lib/format';
   import { app, fail, toast } from '../../lib/store.svelte';
   import Button from '../../components/Button.svelte';
@@ -34,11 +34,22 @@
     return out;
   });
 
+  // What a run would do, asked when the sheet opens: the gallery files among them.
+  let plan = $state<FreeUpReport | null>(null);
+  $effect(() => {
+    if (!confirm) return;
+    plan = null;
+    api.freeUpSpace(true).then((r) => { if (confirm) plan = r; }).catch(() => {});
+  });
+
   async function free() {
     busy = true;
     try {
+      const asked = plan?.gallery ?? 0;
       const r = await api.freeUpSpace(false);
-      toast(`Freed ${bytes(r.bytes)} from ${plural(r.photos, 'photo')}`);
+      let msg = `Freed ${bytes(r.bytes)} from ${plural(r.photos, 'photo')}`;
+      if (asked > r.gallery) msg += `; ${plural(asked - r.gallery, 'photo')} stayed in the gallery`;
+      toast(msg);
       confirm = false;
       await load();
     } catch (e) {
@@ -83,7 +94,10 @@
 <Sheet open={confirm} title="Free up space?" onclose={() => (confirm = false)} width={420}>
   {#if health}
     <div class="stack">
-      <p class="small">The originals of {plural(health.can_free_photos, 'photo')} ({bytes(health.can_free_bytes)}) leave this device. You can still open them: the app fetches them from another device on demand.</p>
+      <p class="small">The originals of {plural(plan?.photos ?? health.can_free_photos, 'photo')} ({bytes(plan?.bytes ?? health.can_free_bytes)}) leave this device. You can still open them: the app fetches them from another device on demand.</p>
+      {#if plan && plan.gallery > 0}
+        <p class="small"><b>{plural(plan.gallery, 'photo')} {plan.gallery === 1 ? 'is' : 'are'} also deleted from this phone's gallery</b> (they stay in your library). Android asks you to allow it next.</p>
+      {/if}
       <Button kind="primary" block disabled={busy} onclick={free}>{busy ? 'Freeing…' : 'Free up space'}</Button>
       <Button block onclick={() => (confirm = false)}>Cancel</Button>
     </div>

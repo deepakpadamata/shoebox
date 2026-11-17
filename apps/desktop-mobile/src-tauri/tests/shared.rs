@@ -84,6 +84,9 @@ async fn albums_are_shared_without_location_saved_and_followed() {
         (listed[0].item_count, listed[0].location.as_str()),
         (2, "remove")
     );
+    // U1-03: the cover is the newest item, by the id the album's thumbnails are looked up by.
+    let newest = a.shared_items(&album.id, None, 1).await.unwrap().items;
+    assert_eq!(listed[0].cover.as_deref(), Some(newest[0].id.as_str()));
 
     // Ben joins with the invitation.
     let invite = a.shared_invite(&album.id, "contributor", 7).await.unwrap();

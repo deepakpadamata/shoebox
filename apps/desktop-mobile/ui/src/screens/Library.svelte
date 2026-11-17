@@ -7,7 +7,7 @@
   import { tzOffset } from '../lib/search';
   import { dayLabel, monthLabel, plural } from '../lib/format';
   import { buildLayout, packedLabel, visibleRows } from '../lib/timeline';
-  import { longPressDrag, pinch, pullRefresh, stepDensity } from '../lib/gestures';
+  import { longPressDrag, pinch, pullRefresh, stepDensity, trackpadPinch } from '../lib/gestures';
   import { refreshEverything } from '../lib/refresh';
   import { viewport as media } from '../lib/viewport.svelte';
   import { isHandheld } from '../lib/pick';
@@ -19,6 +19,7 @@
   import Button from '../components/Button.svelte';
   import Sheet from '../components/Sheet.svelte';
   import ShareSheet from '../components/ShareSheet.svelte';
+  import FreeUpSheet from '../components/FreeUpSheet.svelte';
   import Viewer from './Viewer.svelte';
 
   interface Props {
@@ -63,6 +64,7 @@
   let albums = $state<{ id: string; name: string }[]>([]);
   let albumSheet = $state(false);
   let shareSheet = $state(false);
+  let freeSheet = $state(false);
   let shareButton = $state<HTMLButtonElement>();
   let newAlbum = $state('');
   const selecting = $derived(selected.length > 0);
@@ -295,6 +297,10 @@
     if (e.key === 'Escape') selected = [];
     if ((e.key === 'Delete' || e.key === 'Backspace') && selecting && !(e.target instanceof HTMLInputElement)) askDelete();
     if (e.key === 's' && selecting && !(e.target instanceof HTMLInputElement) && !(e.metaKey || e.ctrlKey)) shareSheet = true;
+    // ⌘+ / ⌘− step the grid like a pinch: a Mac has no two-finger touch, so without these month
+    // view (U1-18) and the densities could not be reached there.
+    if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); setDensity(1.5); }
+    if ((e.metaKey || e.ctrlKey) && e.key === '-') { e.preventDefault(); setDensity(0.66); }
     if ((e.metaKey || e.ctrlKey) && e.key === 'a' && !(e.target instanceof HTMLInputElement)) {
       e.preventDefault();
       selectAll();
@@ -376,6 +382,7 @@
   <div class="scroller" id="timeline" class:railed={showRail} bind:this={scroller} bind:clientWidth={width} bind:clientHeight={viewport}
     onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}
     use:pinch={{ onEnd: setDensity }}
+    use:trackpadPinch={setDensity}
     use:pullRefresh={{ onRefresh: refreshEverything }}
     use:longPressDrag={{ onStart: dragStart, onOver: dragOver, onEnd: () => (dragFrom = dragTo = -1) }}>
     {#if !loaded || (items.length === 0 && !complete)}
@@ -472,12 +479,14 @@
   <Viewer {items} index={viewing} onclose={() => (viewing = null)} onmove={jump} onsimilar={showSimilar} />
 {/if}
 
+<FreeUpSheet open={freeSheet} ids={selected} onclose={() => (freeSheet = false)} ondone={() => (selected = [])} />
 <ShareSheet open={shareSheet} ids={selected} anchor={() => shareButton?.getBoundingClientRect()} onclose={() => (shareSheet = false)}
   ondone={() => { shareSheet = false; selected = []; }} />
 
 <Sheet open={moreOpen} title="{plural(selected.length, 'photo')} selected" onclose={() => (moreOpen = false)} width={340}>
   <div class="menu">
-    {#if app.state?.role !== 'keeper'}<button onclick={() => { moreOpen = false; act(() => Promise.all(selected.map((id) => api.pinOriginal(id, true))), `Kept on ${media.mobile ? 'this phone' : 'this device'}`); }}><Icon name="keep" size={20} /> Keep on {media.mobile ? 'this phone' : 'this device'}</button>{/if}
+    {#if app.state?.role !== 'keeper'}<button onclick={() => { moreOpen = false; act(() => Promise.all(selected.map((id) => api.pinOriginal(id, true))), `Kept on ${media.mobile ? 'this phone' : 'this device'}`); }}><Icon name="keep" size={20} /> Keep on {media.mobile ? 'this phone' : 'this device'}</button>
+      <button onclick={() => { moreOpen = false; freeSheet = true; }}><Icon name="cloud" size={20} /> Free up on {media.mobile ? 'this phone' : 'this device'}</button>{/if}
     {#if source === 'album' && album}
       <button onclick={() => { moreOpen = false; act(() => api.albumRemove(album, selected), 'Removed from the album').then(() => (selected = [])); }}><Icon name="unalbum" size={20} /> Remove from album</button>
       {#if selected.length === 1}<button onclick={() => { moreOpen = false; act(() => api.setAlbumCover(album, selected[0]), 'Cover changed').then(() => { selected = []; refreshAlbums(); }); }}><Icon name="photos" size={20} /> Make cover</button>{/if}
@@ -500,7 +509,8 @@
     <button role="menuitem" onclick={() => { ctx = null; shareSheet = true; }}>Share…</button>
     <button role="menuitem" onclick={() => { ctx = null; openAlbumSheet(); }}>Add to album…</button>
     <button role="menuitem" onclick={() => { ctx = null; act(() => api.setFavorite(selected, !allFavorite)); }}>{allFavorite ? 'Unfavorite' : 'Favorite'}</button>
-    {#if app.state?.role !== 'keeper'}<button role="menuitem" onclick={() => { ctx = null; act(() => Promise.all(selected.map((id) => api.pinOriginal(id, true))), 'Kept on this device'); }}>Keep on this device</button>{/if}
+    {#if app.state?.role !== 'keeper'}<button role="menuitem" onclick={() => { ctx = null; act(() => Promise.all(selected.map((id) => api.pinOriginal(id, true))), 'Kept on this device'); }}>Keep on this device</button>
+    <button role="menuitem" onclick={() => { ctx = null; freeSheet = true; }}>Free up on this device…</button>{/if}
     {#if source === 'album' && album}<button role="menuitem" onclick={() => { ctx = null; act(() => api.albumRemove(album, selected), 'Removed from the album').then(() => (selected = [])); }}>Remove from album</button>{/if}
     {#if selected.length === 1}<button role="menuitem" onclick={() => { const id = selected[0]; ctx = null; showSimilar(id); }}>Find similar</button>{/if}
     <hr />

@@ -99,6 +99,36 @@ class PhotoLibraryPlugin(private val activity: Activity) : Plugin(activity) {
         }.start()
     }
 
+    /**
+     * Delete gallery photos that other devices hold (Free up on this device). Android 11+ asks the
+     * person in its own dialog; the reply comes once they answered, and Rust looks at which files
+     * are gone. Each id is a MediaStore `_ID` from a scan, looked up as an image or a video.
+     */
+    @Command
+    fun deleteFromGallery(invoke: Invoke) {
+        if (Build.VERSION.SDK_INT < 30) {
+            invoke.reject("this Android version cannot delete gallery photos for an app")
+            return
+        }
+        try {
+            val ids = invoke.getArgs().getJSONArray("ids")
+            val uris = (0 until ids.length()).mapNotNull { backend.mediaUri(ids.getString(it).toLong()) }
+            if (uris.isEmpty()) {
+                invoke.resolve(JSObject().put("deleted", false))
+                return
+            }
+            val pending = android.provider.MediaStore.createDeleteRequest(activity.contentResolver, uris)
+            startIntentSenderForResult(invoke, androidx.activity.result.IntentSenderRequest.Builder(pending.intentSender).build(), "deleted")
+        } catch (e: Exception) {
+            invoke.reject("cannot delete from the gallery: ${e.message}")
+        }
+    }
+
+    @ActivityCallback
+    fun deleted(invoke: Invoke, result: ActivityResult) {
+        invoke.resolve(JSObject().put("deleted", result.resultCode == Activity.RESULT_OK))
+    }
+
     @Command
     fun readPicked(invoke: Invoke) = guarded(invoke, "cannot read the chosen file") {
         JSObject().put("path", backend.readPicked(invoke.getArgs().getString("uri") ?: throw IllegalArgumentException("missing uri")))

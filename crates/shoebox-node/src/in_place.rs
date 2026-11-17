@@ -2,7 +2,8 @@
 //! and gone from the library when the person deletes them there.
 //!
 //! Importing with [`ImportMode::Reference`] tags the original `place/<hash>` (see `blobs.rs`).
-//! Free-up skips those blobs: the file is the gallery's, so releasing it reclaims nothing.
+//! Releasing one reclaims nothing, since the file is the gallery's: free-up reports those photos
+//! ([`FreeReport::gallery`](crate::FreeReport)) and the app asks the gallery to delete the files.
 
 use crate::blobs::{ImportMode, Protection};
 use crate::library_node::LibraryNode;

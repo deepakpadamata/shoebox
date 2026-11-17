@@ -73,8 +73,9 @@ enum Cmd {
         /// The recovery phrase; read from the terminal when omitted (keeps it out of shell history).
         #[arg(long)]
         phrase: Option<String>,
-        #[arg(long, default_value = "keeper")]
-        name: String,
+        /// The name other devices show for this keeper (kept from then on; default: the one it runs with).
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Print this keeper's link, which a recovering device can use to reach it.
     Address,

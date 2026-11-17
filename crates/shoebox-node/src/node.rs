@@ -457,6 +457,49 @@ struct Inner {
     rtts: Mutex<HashMap<EndpointId, Duration>>,
     /// Blobs on their way in and out right now.
     transfers: crate::transfers::Transfers,
+    /// Blobs read in pieces from other devices (a video played before it is here).
+    streams: Mutex<Streams>,
+}
+
+/// How long the pieces of a streamed blob stay after the last read: long enough to seek back
+/// in a video, and then the store's collection takes them (nothing else keeps them).
+const STREAM_KEEP: Duration = Duration::from_secs(10 * 60);
+/// The least one trip to the holder fetches for a read that is not here yet.
+const STREAM_MIN: u64 = 1024 * 1024;
+/// How far ahead of the reader the pieces of a streamed blob are kept coming.
+const STREAM_WINDOW: u64 = 32 * 1024 * 1024;
+/// One request of the rolling fetch: small enough that a seek is noticed soon, large enough
+/// that the gap between requests (one trip) is small next to the transfer.
+const STREAM_STEP: u64 = 4 * 1024 * 1024;
+/// How long a rolling fetch with the window full waits for the reader to move before it ends.
+const STREAM_IDLE: Duration = Duration::from_secs(120);
+
+/// Open connections to the devices pieces are read from, and the blobs being read (a temp tag
+/// keeps the pieces from the store's collection while they are watched).
+#[derive(Default)]
+struct Streams {
+    conns: HashMap<EndpointId, iroh::endpoint::Connection>,
+    held: HashMap<Blake3Hash, (iroh_blobs::api::TempTag, Instant)>,
+    /// The rolling fetch of each blob being read.
+    flows: HashMap<Blake3Hash, Flow>,
+}
+
+/// A rolling fetch: keeps the pieces from the reader's position to [`STREAM_WINDOW`] ahead of it
+/// coming, one [`STREAM_STEP`] request after another, and waits while the window is full.
+struct Flow {
+    /// Where the reader's latest read in this flow ended.
+    reader: Arc<std::sync::atomic::AtomicU64>,
+    /// Told when `reader` moves.
+    moved: Arc<tokio::sync::Notify>,
+    /// Where the flow started; a read before it is a seek.
+    from: u64,
+    task: tokio::task::AbortHandle,
+}
+
+impl Drop for Flow {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 /// A running Shoebox node. Cheap to clone; all clones share one runtime.
@@ -488,6 +531,9 @@ impl Node {
             }
             if config.pinned_originals.is_empty() {
                 config.pinned_originals = saved.pinned_originals;
+            }
+            if config.offloaded_originals.is_empty() {
+                config.offloaded_originals = saved.offloaded_originals;
             }
             config.keep_recent_days = saved.keep_recent_days;
             config.keep_favorites = saved.keep_favorites;
@@ -618,6 +664,7 @@ impl Node {
                     webview_slot,
                     rtts: Mutex::new(HashMap::new()),
                     transfers,
+                    streams: Mutex::new(Streams::default()),
                 }),
             })
         }
@@ -955,6 +1002,276 @@ impl Node {
                 .send(NodeEvent::BlobFetched { hash: *hash, from });
         }
         Ok(report)
+    }
+
+    /// Bytes `range` of a blob of `size` bytes that is not here, read from the first of `holders`
+    /// (best first) that sends them: only the pieces around that range are fetched, verified
+    /// against the hash, and kept for a while ([`STREAM_KEEP`]) without making the blob this
+    /// device's. For playing a video before it is here; [`Self::download_blob_from`] later fetches
+    /// only what is still missing.
+    ///
+    /// A player reads a frame or a few bytes at a time, each read waiting for the last, so one
+    /// trip to the holder per read made a video stutter (about 70 ms a trip on a LAN). So a read
+    /// that is not here fetches at least [`STREAM_MIN`] from `range.start`, the last piece comes
+    /// along with the first (the size is proven and the index at the end of a file is there), and
+    /// a rolling fetch ([`Flow`]) keeps the next [`STREAM_WINDOW`] coming without a gap, so the
+    /// player's reads find their bytes here. A read that has to fetch and lies outside the flow's
+    /// window is a seek: the flow starts again from there.
+    pub async fn read_remote_range(
+        &self,
+        holders: &[EndpointId],
+        hash: &Blake3Hash,
+        size: u64,
+        range: std::ops::Range<u64>,
+    ) -> Result<bytes::Bytes> {
+        use iroh_blobs::protocol::{ChunkRanges, ChunkRangesExt};
+        let end = range.end.min(size);
+        if range.start >= end {
+            return Ok(bytes::Bytes::new());
+        }
+        self.note_activity();
+        let root = iroh_hash(hash);
+        let held = {
+            let mut st = self.inner.streams.lock().unwrap();
+            st.held.retain(|_, (_, at)| at.elapsed() < STREAM_KEEP);
+            match st.held.get_mut(hash) {
+                Some((_, at)) => {
+                    *at = Instant::now();
+                    true
+                }
+                None => false,
+            }
+        };
+        if !held {
+            let tag = self
+                .inner
+                .blobs
+                .raw()
+                .tags()
+                .temp_tag(iroh_blobs::HashAndFormat::raw(root))
+                .await
+                .map_err(|e| anyhow!("protecting streamed pieces: {e}"))?;
+            self.inner
+                .streams
+                .lock()
+                .unwrap()
+                .held
+                .insert(*hash, (tag, Instant::now()));
+        }
+        let chunks =
+            move |from: u64, to: u64| ChunkRanges::chunks(from / 1024..to.min(size).div_ceil(1024));
+        let last = size.saturating_sub(1) / 1024;
+        let needed = chunks(range.start, end);
+        let fetched = !self.local_has(root, needed.clone()).await?;
+        if fetched {
+            anyhow::ensure!(
+                !holders.is_empty(),
+                "no device that holds {hash} is sending it right now"
+            );
+            let mut wanted = chunks(range.start, end.max(range.start + STREAM_MIN));
+            wanted |= ChunkRanges::chunks(last..last + 1);
+            let failure = self.fetch_pieces(holders, root, wanted).await;
+            if !self.local_has(root, needed).await? {
+                return Err(anyhow!(
+                    "could not read {hash} from another device{}",
+                    failure.map(|f| format!(" ({f})")).unwrap_or_default()
+                ));
+            }
+        }
+        self.follow(holders, hash, size, range.start, end, fetched);
+        let bytes = self
+            .inner
+            .blobs
+            .raw()
+            .blobs()
+            .export_ranges(root, range.start..end)
+            .concatenate()
+            .await
+            .map_err(|e| anyhow!("reading the pieces of {hash}: {e}"))?;
+        Ok(bytes::Bytes::from(bytes))
+    }
+
+    /// Move the rolling fetch of `hash` along with a read of `start..end`, or start one: when
+    /// there is none, or the read had to fetch and lies outside the flow (a seek). A read that
+    /// was already here leaves an unrelated flow alone (the player checking the index at the
+    /// end, say).
+    fn follow(
+        &self,
+        holders: &[EndpointId],
+        hash: &Blake3Hash,
+        size: u64,
+        start: u64,
+        end: u64,
+        fetched: bool,
+    ) {
+        let mut st = self.inner.streams.lock().unwrap();
+        if let Some(flow) = st.flows.get(hash).filter(|f| !f.task.is_finished()) {
+            let at = flow.reader.load(Ordering::Relaxed);
+            if start >= flow.from && start <= at + STREAM_WINDOW {
+                if end > at {
+                    flow.reader.store(end, Ordering::Relaxed);
+                    flow.moved.notify_one();
+                }
+                return;
+            }
+            if !fetched {
+                return;
+            }
+        }
+        if end >= size {
+            st.flows.remove(hash);
+            return;
+        }
+        let reader = Arc::new(std::sync::atomic::AtomicU64::new(end));
+        let moved = Arc::new(tokio::sync::Notify::new());
+        let task = tokio::spawn(self.clone().flow(
+            holders.to_vec(),
+            *hash,
+            size,
+            reader.clone(),
+            moved.clone(),
+        ))
+        .abort_handle();
+        st.flows.insert(
+            *hash,
+            Flow {
+                reader,
+                moved,
+                from: start,
+                task,
+            },
+        );
+    }
+
+    /// The rolling fetch: the first piece missing from the reader to [`STREAM_WINDOW`] ahead of
+    /// it, a [`STREAM_STEP`] at a time, until the blob is here to its end, no holder answers, or
+    /// the reader has not moved for [`STREAM_IDLE`] with the window full.
+    async fn flow(
+        self,
+        holders: Vec<EndpointId>,
+        hash: Blake3Hash,
+        size: u64,
+        reader: Arc<std::sync::atomic::AtomicU64>,
+        moved: Arc<tokio::sync::Notify>,
+    ) {
+        use iroh_blobs::protocol::{ChunkRanges, ChunkRangesExt};
+        let root = iroh_hash(&hash);
+        let chunks =
+            move |from: u64, to: u64| ChunkRanges::chunks(from / 1024..to.min(size).div_ceil(1024));
+        loop {
+            let at = reader.load(Ordering::Relaxed);
+            let until = (at + STREAM_WINDOW).min(size);
+            let mut next = None;
+            let mut from = at;
+            while from < until {
+                let to = (from + STREAM_STEP).min(until);
+                match self.local_has(root, chunks(from, to)).await {
+                    Ok(true) => from = to,
+                    Ok(false) => {
+                        next = Some(chunks(from, to));
+                        break;
+                    }
+                    Err(_) => return,
+                }
+            }
+            match next {
+                Some(piece) => {
+                    if let Some(why) = self.fetch_pieces(&holders, root, piece).await {
+                        tracing::debug!("streaming {hash} stopped: {why}");
+                        return;
+                    }
+                }
+                None if until >= size => return,
+                None => {
+                    if tokio::time::timeout(STREAM_IDLE, moved.notified())
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Whether every piece of `ranges` of `root` is here.
+    async fn local_has(
+        &self,
+        root: iroh_blobs::Hash,
+        ranges: iroh_blobs::protocol::ChunkRanges,
+    ) -> Result<bool> {
+        let request = iroh_blobs::protocol::GetRequest::builder()
+            .root(ranges)
+            .build(root);
+        self.inner
+            .blobs
+            .raw()
+            .remote()
+            .local_for_request(request)
+            .await
+            .map(|l| l.is_complete())
+            .map_err(|e| anyhow!("checking what is here of {root}: {e}"))
+    }
+
+    /// Fetch what is missing of `ranges` of `root` from the first of `holders` that sends it,
+    /// over a connection kept for the next read. Returns why the last holder tried failed, if one
+    /// did.
+    async fn fetch_pieces(
+        &self,
+        holders: &[EndpointId],
+        root: iroh_blobs::Hash,
+        ranges: iroh_blobs::protocol::ChunkRanges,
+    ) -> Option<String> {
+        let request = iroh_blobs::protocol::GetRequest::builder()
+            .root(ranges)
+            .build(root);
+        let remote = self.inner.blobs.raw().remote().clone();
+        let mut failure = None;
+        for &peer in holders.iter().take(MAX_SOURCES) {
+            let missing = match remote.local_for_request(request.clone()).await {
+                Ok(local) if local.is_complete() => return None,
+                Ok(local) => local.missing(),
+                Err(e) => return Some(format!("checking what is here: {e}")),
+            };
+            let cached = self
+                .inner
+                .streams
+                .lock()
+                .unwrap()
+                .conns
+                .get(&peer)
+                .filter(|c| c.close_reason().is_none())
+                .cloned();
+            let conn = match cached {
+                Some(c) => c,
+                None => match tokio::time::timeout(
+                    SOURCE_CONNECT,
+                    self.inner.endpoint.connect(peer, BLOBS_ALPN),
+                )
+                .await
+                {
+                    Ok(Ok(c)) => {
+                        let mut st = self.inner.streams.lock().unwrap();
+                        st.conns.retain(|_, c| c.close_reason().is_none());
+                        st.conns.insert(peer, c.clone());
+                        c
+                    }
+                    Ok(Err(e)) => {
+                        failure = Some(format!("connecting to {}: {e}", peer.fmt_short()));
+                        continue;
+                    }
+                    Err(_) => {
+                        failure = Some(format!("{} did not answer", peer.fmt_short()));
+                        continue;
+                    }
+                },
+            };
+            if let Err(e) = remote.execute_get(conn, missing).complete().await {
+                self.inner.streams.lock().unwrap().conns.remove(&peer);
+                failure = Some(format!("{}: {e}", peer.fmt_short()));
+            }
+        }
+        failure
     }
 
     /// The pieces of a split fetch, each holder taking the next one. Returns the payload bytes

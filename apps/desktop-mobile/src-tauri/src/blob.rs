@@ -118,6 +118,12 @@ pub async fn serve(
         // Thumbnails and previews are small: get them for the retry.
         core.fetch_in_background(photo, bk);
     }
+    if bk == BlobKind::Original
+        && blob.mime.starts_with("video/")
+        && core.blobs().size(&blob.hash).await?.is_none()
+    {
+        return stream_video(core, blob, range).await;
+    }
     match read_blob(core, &blob.hash, &blob.mime, range).await {
         Err(e) if bk == BlobKind::Original => {
             // A gallery file this phone references may be gone: sort that out, and report the
@@ -128,6 +134,42 @@ pub async fn serve(
         }
         other => other,
     }
+}
+
+/// A video that is not here plays from the device that has it: each range the media element
+/// asks for is read from there (only those pieces travel) and the original is not fetched. Not
+/// here and not readable elsewhere is "not here", as for any original.
+async fn stream_video(
+    core: &Arc<AppCore>,
+    blob: &shoebox_core::model::BlobRef,
+    range: Option<(u64, Option<u64>)>,
+) -> Result<Option<BlobBytes>> {
+    let total = blob.size;
+    // Always a piece: an unranged request would otherwise wait for up to 32 MiB to arrive.
+    let (start, end, _) = span(Some(range.unwrap_or((0, None))), total);
+    let bytes = if end > start {
+        match core
+            .ln()
+            .await?
+            .read_range_elsewhere(blob, start..end)
+            .await
+        {
+            Ok(b) => b.to_vec(),
+            Err(e) => {
+                tracing::warn!("streaming {}: {e:#}", blob.hash);
+                return Ok(None);
+            }
+        }
+    } else {
+        vec![]
+    };
+    Ok(Some(BlobBytes {
+        bytes,
+        content_type: blob.mime.clone(),
+        total,
+        range: Some((start, end.saturating_sub(1))),
+        etag: blob.hash.to_string(),
+    }))
 }
 
 /// Side of a face crop in pixels: sharp at 120 px on a 2× screen.

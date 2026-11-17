@@ -45,7 +45,7 @@ pub(crate) async fn devices(shared: &Shared) -> Result<Value> {
             let online = d.device == me || presence.iter().any(|p| p.id == d.device && p.online);
             json!({
                 "id": hex::encode(d.device.0),
-                "name": if d.device == me { shared.opts.name.clone() } else { shown_name(&presence, d) },
+                "name": if d.device == me { shared.node.config().name } else { shown_name(&presence, d) },
                 "role": role_name(d.role),
                 "online": online,
                 "revoked": d.revoked,
@@ -61,7 +61,8 @@ pub(crate) async fn report(shared: &Shared) -> Result<Value> {
     let mut out = json!({
         "schema": SCHEMA_VERSION,
         "version": env!("CARGO_PKG_VERSION"),
-        "name": shared.opts.name,
+        // The saved name (`pair --name`, `recover --name`), not the one the daemon started with.
+        "name": shared.node.config().name,
         "device_id": hex::encode(shared.node.id().as_bytes()),
         "uptime_secs": shared.started.elapsed().as_secs(),
         "paired": false,
@@ -240,7 +241,7 @@ pub(crate) async fn album(shared: &Shared, req: &Value) -> Result<Value> {
                 .flatten(),
             None => None,
         }
-        .unwrap_or_else(|| shared.opts.name.clone());
+        .unwrap_or_else(|| shared.node.config().name);
         let id = albums.join(text, &my_name).await?;
         let name = albums
             .list()

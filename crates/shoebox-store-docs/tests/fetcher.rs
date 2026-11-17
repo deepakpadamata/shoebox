@@ -404,3 +404,96 @@ async fn phones_fetch_originals_only_for_pinned_photos() {
     assert!(!nodes[1].is_pinned(&a));
     c.shutdown().await;
 }
+
+/// A video played before it is here: a range is read from a device that holds the blob, the
+/// pieces from there to a window ahead keep coming (not the whole blob), a seek moves the window,
+/// and the blob does not become this device's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_range_is_read_from_another_device_without_fetching_the_rest() {
+    const MIB: u64 = 1024 * 1024;
+    let c = Cluster::with_roles(&[Role::Keeper, Role::Companion])
+        .await
+        .unwrap();
+    let _nodes = library_nodes(&c).await;
+    let size: usize = 96 * 1024 * 1024 + 123;
+    let data: Vec<u8> = (0..size).map(|i| (i * 31 % 251) as u8).collect();
+    let hash = c
+        .node(0)
+        .blobs()
+        .add_bytes(data.clone(), Protection::Library)
+        .await
+        .unwrap();
+    let from = [c.node(0).id()];
+    let mac = c.node(1);
+    let here = || async {
+        mac.blobs()
+            .raw()
+            .remote()
+            .local(iroh_blobs::Hash::from_bytes(hash.0))
+            .await
+            .unwrap()
+            .local_bytes()
+    };
+
+    let got = mac
+        .read_remote_range(&from, &hash, size as u64, 1_000_000..1_100_000)
+        .await
+        .unwrap();
+    assert_eq!(&got[..], &data[1_000_000..1_100_000]);
+    // The end, and a range past it (clamped).
+    let tail = mac
+        .read_remote_range(
+            &from,
+            &hash,
+            size as u64,
+            size as u64 - 10..size as u64 + 50,
+        )
+        .await
+        .unwrap();
+    assert_eq!(&tail[..], &data[size - 10..]);
+
+    // The window ahead of the reader fills, and stops there.
+    wait_until(Duration::from_secs(90), || async {
+        here().await >= 32 * MIB
+    })
+    .await
+    .expect("the window ahead arrives");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let filled = here().await;
+    assert!(
+        filled < 40 * MIB,
+        "{filled} bytes came over: the read, the window ahead of it and the end, not all of it"
+    );
+    assert!(
+        !mac.blobs().has(&hash).await.unwrap(),
+        "only pieces are here"
+    );
+
+    // A seek: the window moves to where the reader went.
+    let seek = mac
+        .read_remote_range(&from, &hash, size as u64, 60_000_000..60_100_000)
+        .await
+        .unwrap();
+    assert_eq!(&seek[..], &data[60_000_000..60_100_000]);
+    wait_until(Duration::from_secs(90), || async {
+        here().await >= filled + 31 * MIB
+    })
+    .await
+    .expect("the window after the seek arrives");
+
+    // What the player reads next is already here, even with the holder gone.
+    c.take_offline(0);
+    for r in [
+        1_000_000..1_100_000,
+        30_000_000..30_300_000,
+        85_000_000..85_100_000,
+        size - 10..size,
+    ] {
+        let again = mac
+            .read_remote_range(&from, &hash, size as u64, r.start as u64..r.end as u64)
+            .await
+            .unwrap();
+        assert_eq!(&again[..], &data[r]);
+    }
+    c.shutdown().await;
+}

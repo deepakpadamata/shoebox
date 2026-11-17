@@ -203,3 +203,42 @@ async fn keepers_never_free_space() {
     assert!(nodes[1].free_up_space(true).await.is_err());
     c.shutdown().await;
 }
+
+/// "Free up on this device" for one photo: freed whatever the keep rules say, and they do not fetch
+/// it back; keeping it on the device again (a pin) does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_photo_freed_by_hand_stays_freed_until_pinned() {
+    let (c, nodes, ids, _) = rig(1).await;
+    let phone = &nodes[0];
+    phone.set_redundancy_target(1).await.unwrap();
+    phone.set_keep_rules(36_500, false).unwrap(); // every sample is "recent"
+    assert!(
+        phone.free_up_space(true).await.unwrap().photos.is_empty(),
+        "kept by the rule"
+    );
+
+    let done = phone.free_photos(&[ids[0]], false).await.unwrap();
+    assert_eq!(done.photos, vec![ids[0]]);
+    assert!(done.gallery.is_empty());
+    wait_until(Duration::from_secs(20), || async {
+        !phone.node().blobs().has(&ids[0]).await.unwrap()
+    })
+    .await
+    .expect("the freed original is collected");
+
+    phone.start_fetcher(fast());
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(
+        !phone.node().blobs().has(&ids[0]).await.unwrap(),
+        "not fetched back"
+    );
+    assert!(phone.node().blobs().has(&ids[1]).await.unwrap());
+
+    phone.pin_original(&ids[0]).await.unwrap();
+    wait_until(Duration::from_secs(20), || async {
+        phone.node().blobs().has(&ids[0]).await.unwrap()
+    })
+    .await
+    .expect("a pin brings it back");
+    c.shutdown().await;
+}

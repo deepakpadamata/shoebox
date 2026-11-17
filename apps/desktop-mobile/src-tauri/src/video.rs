@@ -5,12 +5,19 @@
 //! a video in this phone's gallery is played from its file, where it already is, and one held in
 //! the blob store is read through [`read_blob`] (a Media3 data source over JNI), range by range,
 //! with no copy, no port and nothing listening. Desktops keep `<video>` over `shoebox://`.
+//!
+//! A video that is not on this phone streams the same way: its source is a [`STREAM`] handle,
+//! and each read is answered from the pieces already here or fetched from a device that holds
+//! it (`Fetcher::read_range_elsewhere`), with a rolling fetch keeping the next pieces coming.
 
 use crate::core::{parse_hash, AppCore};
 use crate::photos_source::VideoSource;
 use crate::types::AppEvent;
 use anyhow::{anyhow, Result};
 use std::sync::Arc;
+
+/// The prefix of a player handle for a video that is not here: `stream:<hash>:<size>`.
+pub const STREAM: &str = "stream:";
 
 impl AppCore {
     /// Where the video of photo `id` is on this device: `kind` is `original` or `motion` (the
@@ -95,8 +102,8 @@ impl AppCore {
             .is_some_and(|s| s.plays_video())
     }
 
-    /// Play a video that is on this device in the platform's player. The viewer fetches it first
-    /// (`fetch_now`), as it does any original.
+    /// Play a video in the platform's player: from this device when it is here, else (an original
+    /// of this library) streamed from a device that holds it.
     pub async fn play_video(
         self: &Arc<Self>,
         id: &str,
@@ -110,10 +117,22 @@ impl AppCore {
             .clone()
             .filter(|s| s.plays_video())
             .ok_or_else(|| anyhow!("this device plays videos in the app"))?;
-        let video = self
-            .video_source(id, kind, album)
-            .await?
-            .ok_or_else(|| anyhow!("this video is not on this device yet"))?;
+        let video = match self.video_source(id, kind, album).await? {
+            Some(v) => v,
+            None if kind == "original" && album.is_none() => {
+                let rec = self
+                    .record(&parse_hash(id)?)
+                    .await?
+                    .ok_or_else(|| anyhow!("no such photo"))?;
+                VideoSource {
+                    path: None,
+                    blob: format!("{STREAM}{}:{}", rec.original.hash, rec.original.size),
+                    mime: rec.original.mime,
+                    size: rec.original.size,
+                }
+            }
+            None => return Err(anyhow!("this video is not on this device yet")),
+        };
         source.play_video(&video).await
     }
 
@@ -152,10 +171,28 @@ pub fn install(core: Arc<AppCore>) {
 }
 
 /// Bytes `offset..offset + len` of blob `hash` (fewer at its end), checked against the hash as
-/// they are read.
+/// they are read; for a [`STREAM`] handle, from another device where they are not here.
 #[cfg(all(feature = "tauri-app", target_os = "android"))]
 fn read_blob(handle: &str, offset: u64, len: u64) -> Result<Vec<u8>> {
     let core = CORE.get().ok_or_else(|| anyhow!("the app is not open"))?;
+    if let Some(rest) = handle.strip_prefix(STREAM) {
+        let (hash, size) = rest
+            .split_once(':')
+            .ok_or_else(|| anyhow!("not a stream handle: {handle}"))?;
+        let blob = shoebox_core::model::BlobRef {
+            hash: parse_hash(hash)?,
+            size: size.parse()?,
+            mime: String::new(),
+        };
+        let end = (offset + len).min(blob.size);
+        return tauri::async_runtime::block_on(async {
+            core.ln()
+                .await?
+                .read_range_elsewhere(&blob, offset..end)
+                .await
+        })
+        .map(|b| b.to_vec());
+    }
     let handle: shoebox_node::BlobHandle = handle.parse()?;
     tauri::async_runtime::block_on(core.blobs().read_handle(&handle, offset..offset + len))
         .map(|b| b.to_vec())

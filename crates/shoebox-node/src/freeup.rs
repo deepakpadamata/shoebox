@@ -42,6 +42,10 @@ pub struct FreeReport {
     /// Of `photos`, those whose only other copy is the encrypted one in Shoebox Cloud (W1-09). The confirmation
     /// says so in its own words: a copy that is one account and one service away, restorable with the recovery kit.
     pub cloud_only: Vec<PhotoId>,
+    /// Of `photos`, those this device holds as files in its gallery (a phone's camera roll). The
+    /// node leaves them alone: freeing one means deleting the gallery file, which only the app
+    /// can ask for, and then [`LibraryNode::release_in_place`]. Their sizes are in `bytes`.
+    pub gallery: Vec<PhotoId>,
 }
 
 // ---------- the probe protocol ----------
@@ -337,9 +341,14 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(released)
     }
 
-    /// The originals this device could drop right now. Probes the other holders first (failures
-    /// are ignored: an unreachable holder simply stops being confirmed).
-    async fn freeable(&self) -> Result<Vec<(PhotoId, u64, bool)>> {
+    /// The originals this device could drop right now: (photo, size, cloud only, gallery file).
+    /// Probes the other holders first (failures are ignored: an unreachable holder simply stops
+    /// being confirmed). With `chosen`, only those photos, and the person's choice overrides pins
+    /// and the keep rules; the safety rule and shared albums still hold.
+    async fn freeable(
+        &self,
+        chosen: Option<&HashSet<PhotoId>>,
+    ) -> Result<Vec<(PhotoId, u64, bool, bool)>> {
         let role = self.node().config().role;
         if role == Role::Keeper {
             bail!("a keeper never frees space: it is the backstop");
@@ -355,17 +364,20 @@ impl<L: LibraryStore> LibraryNode<L> {
         let keepers = self.keepers().await?;
         let in_cloud = self.cloud_held(self.now_ms());
 
-        // (photo, size, other holders, enough of them for the target)
-        let mut candidates: Vec<(PhotoId, u64, Vec<EndpointId>, bool)> = vec![];
+        // (photo, size, other holders, enough of them for the target, gallery file)
+        let mut candidates: Vec<(PhotoId, u64, Vec<EndpointId>, bool, bool)> = vec![];
         for rec in &photos {
+            if chosen.is_some_and(|c| !c.contains(&rec.id)) {
+                continue;
+            }
             let hash = rec.original.hash;
             let Some(size) = self.node().blobs().size(&hash).await? else {
                 continue;
             };
-            if self.is_pinned(&rec.id) {
+            if chosen.is_none() && self.is_pinned(&rec.id) {
                 continue;
             }
-            if self.kept_by_policy(rec, &config) {
+            if chosen.is_none() && self.kept_by_policy(rec, &config) {
                 continue; // recent, or a favourite this device keeps
             }
             let protections = self.node().blobs().protections(&hash).await?;
@@ -375,9 +387,8 @@ impl<L: LibraryStore> LibraryNode<L> {
             {
                 continue; // a shared album still needs this blob here
             }
-            if protections.contains(&Protection::InPlace) {
-                continue; // a gallery file: freeing would only drop the reference, not the file
-            }
+            // A gallery file: freed by deleting it from the gallery, which the app asks for.
+            let gallery = protections.contains(&Protection::InPlace);
             let others: Vec<EndpointId> = self
                 .store()
                 .holders(&hash)
@@ -388,13 +399,13 @@ impl<L: LibraryStore> LibraryNode<L> {
                 .collect();
             let enough = others.len() >= target.max(1);
             if enough || others.iter().any(|d| keepers.contains(d)) || in_cloud.contains(&hash) {
-                candidates.push((rec.id, size, others, enough));
+                candidates.push((rec.id, size, others, enough, gallery));
             }
         }
 
         // Confirm with each holder that it really has what it claims.
         let mut by_holder: HashMap<EndpointId, Vec<Blake3Hash>> = HashMap::new();
-        for (id, _, others, _) in &candidates {
+        for (id, _, others, _, _) in &candidates {
             for d in others {
                 by_holder.entry(*d).or_default().push(*id);
             }
@@ -407,7 +418,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         let confirmations = self.inner.confirmations.lock().unwrap();
         Ok(candidates
             .into_iter()
-            .filter_map(|(id, size, others, enough)| {
+            .filter_map(|(id, size, others, enough, gallery)| {
                 let confirmed = |d: &&EndpointId| confirmations.fresh(d, &id, now);
                 let by_devices = (enough && others.iter().any(|d| confirmed(&d)))
                     || others
@@ -415,9 +426,9 @@ impl<L: LibraryStore> LibraryNode<L> {
                         .filter(|d| keepers.contains(d))
                         .any(|d| confirmed(&d));
                 if by_devices {
-                    Some((id, size, false))
+                    Some((id, size, false, gallery))
                 } else {
-                    in_cloud.contains(&id).then_some((id, size, true))
+                    in_cloud.contains(&id).then_some((id, size, true, gallery))
                 }
             })
             .collect())
@@ -427,12 +438,12 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// here (not a gallery file, which freeing would not remove) and held by a keeper.
     async fn freeable_videos(
         &self,
-        photos: &[(PhotoId, u64, bool)],
+        photos: &[(PhotoId, u64, bool, bool)],
     ) -> Result<Vec<(Blake3Hash, u64)>> {
         let me = self.device();
         let keepers = self.keepers().await?;
         let mut out = vec![];
-        for (id, _, _) in photos {
+        for (id, _, _, _) in photos {
             let Some(motion) = self.store().motion(id).await? else {
                 continue;
             };
@@ -463,50 +474,92 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// what a real run would free. A real run first fetches the preview of each photo whose
     /// preview this device let go (it shows the photo from now on; a photo whose preview cannot
     /// be fetched keeps its original), then releases this device's protection (the blob store
-    /// collects the bytes shortly after) and retracts the holdings.
+    /// collects the bytes shortly after) and retracts the holdings. Gallery files are reported in
+    /// [`FreeReport::gallery`] and left for the app (see there).
     pub async fn free_up_space(&self, dry_run: bool) -> Result<FreeReport> {
-        let mut freeable = self.freeable().await?;
+        self.free(None, dry_run).await
+    }
+
+    /// "Free up on this device" for chosen photos: as [`free_up_space`](Self::free_up_space),
+    /// but only these, whatever the pins and keep rules say, and they are marked offloaded so the
+    /// keep rules do not fetch them again. A photo not safe to drop (no confirmed copy elsewhere,
+    /// or a shared album needs it here) is left out of the report.
+    pub async fn free_photos(&self, ids: &[PhotoId], dry_run: bool) -> Result<FreeReport> {
+        let chosen: HashSet<PhotoId> = ids.iter().copied().collect();
+        let report = self.free(Some(&chosen), dry_run).await?;
+        if !dry_run && !report.photos.is_empty() {
+            let hexes: Vec<String> = report.photos.iter().map(|h| h.to_string()).collect();
+            self.node().update_config(|c| {
+                for h in &hexes {
+                    if !c.offloaded_originals.contains(h) {
+                        c.offloaded_originals.push(h.clone());
+                    }
+                }
+            })?;
+        }
+        Ok(report)
+    }
+
+    async fn free(&self, chosen: Option<&HashSet<PhotoId>>, dry_run: bool) -> Result<FreeReport> {
+        let mut freeable = self.freeable(chosen).await?;
         if !dry_run {
             let mut kept = Vec::with_capacity(freeable.len());
-            for (id, size, cloud) in freeable {
+            for (id, size, cloud, gallery) in freeable {
                 let Some(rec) = self.store().photo(&id).await? else {
                     continue;
                 };
                 let preview = rec.preview.hash;
                 let needed =
                     preview != rec.original.hash && !self.node().blobs().kept(&preview).await?;
-                if needed && self.fetch_now(&id, BlobKind::Preview).await.is_err() {
+                // Fetched, which also keeps one released here but not yet collected; else made
+                // from the original while it is still here (a photo added while this device was
+                // alone has no preview anywhere).
+                if needed
+                    && self.fetch_now(&id, BlobKind::Preview).await.is_err()
+                    && !(!self.node().blobs().has(&preview).await?
+                        && self.ensure_preview(&rec).await.unwrap_or(false))
+                {
                     continue;
                 }
-                kept.push((id, size, cloud));
+                kept.push((id, size, cloud, gallery));
             }
             freeable = kept;
         }
         // A Live Photo's video goes with its original.
         let videos = self.freeable_videos(&freeable).await?;
         let report = FreeReport {
-            bytes: freeable.iter().map(|(_, s, _)| s).sum::<u64>()
+            bytes: freeable.iter().map(|(_, s, _, _)| s).sum::<u64>()
                 + videos.iter().map(|(_, s)| s).sum::<u64>(),
-            photos: freeable.iter().map(|(id, _, _)| *id).collect(),
+            photos: freeable.iter().map(|(id, _, _, _)| *id).collect(),
             cloud_only: freeable
                 .iter()
-                .filter(|(_, _, c)| *c)
-                .map(|(id, _, _)| *id)
+                .filter(|(_, _, c, _)| *c)
+                .map(|(id, _, _, _)| *id)
+                .collect(),
+            gallery: freeable
+                .iter()
+                .filter(|(_, _, _, g)| *g)
+                .map(|(id, _, _, _)| *id)
                 .collect(),
         };
-        if !dry_run && !report.photos.is_empty() {
+        let stored: Vec<PhotoId> = freeable
+            .iter()
+            .filter(|(_, _, _, g)| !*g)
+            .map(|(id, _, _, _)| *id)
+            .collect();
+        if !dry_run && (!stored.is_empty() || !videos.is_empty()) {
             let _exclusive = self.inner.ingest.write().await;
-            for id in &report.photos {
+            for id in &stored {
                 self.node().blobs().remove(id).await?;
             }
             for (hash, _) in &videos {
                 self.node().blobs().remove(hash).await?;
             }
-            let hexes: HashSet<String> = report.photos.iter().map(|h| h.to_string()).collect();
+            let hexes: HashSet<String> = stored.iter().map(|h| h.to_string()).collect();
             self.node()
                 .update_config(|c| c.pinned_originals.retain(|p| !hexes.contains(p)))?;
             drop(_exclusive);
-            let mut released = report.photos.clone();
+            let mut released = stored;
             released.extend(videos.iter().map(|(hash, _)| *hash));
             self.retract_holdings(released).await?;
         }

@@ -74,6 +74,7 @@
   const roleHelp = ROLE_HELP;
   let busy = $state(false);
   const me = $derived(devices.find((d) => d.is_this_device));
+  const admins = $derived(devices.filter((d) => d.admin && !d.revoked && !d.is_this_device).map((d) => d.name).join(' or '));
   // Admins remove ordinary devices on their own; an admin device, or a removal from a device
   // that is no admin, needs the recovery phrase.
   const needsPhrase = $derived(!!revoking && (revoking.admin || !me?.admin));
@@ -154,7 +155,12 @@
   {#if mode === 'devices'}
   <div class="row-flex head">
     <div class="grow muted small">Devices that hold this library. Everything stays between them.</div>
-    <Button kind="primary" size="sm" onclick={() => { addOpen = true; }}><Icon name="add" size={16} /> Add a device</Button>
+    {#if !me || me.admin}
+      <Button kind="primary" size="sm" onclick={() => { addOpen = true; }}><Icon name="add" size={16} /> Add a device</Button>
+    {:else}
+      <!-- Only an admin device can pair (U1-04: no button that can only fail; found on the S25). -->
+      <span class="muted small">{admins ? `Add devices from ${admins}.` : 'Only an admin device can add devices.'}</span>
+    {/if}
   </div>
   {/if}
 

@@ -215,6 +215,15 @@ pub trait PhotoSource: Send + Sync {
     fn video_frame_of(&self, _video: &VideoSource) -> BoxFuture<'_, Result<Option<Vec<u8>>>> {
         Box::pin(async { Ok(None) })
     }
+    /// The gallery deletes these files (`(asset id, path)`) after asking the person, as the
+    /// platform requires (Android shows its own confirmation). Returns once they answered; the
+    /// caller looks at which files are gone. Used only for photos other devices hold.
+    fn can_delete(&self) -> bool {
+        false
+    }
+    fn delete_from_gallery(&self, _items: Vec<(String, String)>) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async { Err(anyhow!("this device cannot delete from its gallery")) })
+    }
 }
 
 /// The JPEG in a base64 reply from the platform side; empty means none.
@@ -253,6 +262,10 @@ struct FakeState {
     /// The file behind each [`Original::Library`] asset, which only [`PhotoSource::read_original`]
     /// reads.
     library_files: BTreeMap<String, PathBuf>,
+    /// The person's answer to the next gallery deletion request.
+    decline_delete: bool,
+    /// Gallery deletion requests so far (asset ids of each).
+    delete_requests: Vec<Vec<String>>,
     /// A Live Photo's video, by asset id.
     library_videos: BTreeMap<String, PathBuf>,
     reads: u64,
@@ -281,6 +294,8 @@ impl FakePhotoSource {
                 unshare_on_request: vec![],
                 hide_on_request: vec![],
                 library_files: BTreeMap::new(),
+                decline_delete: false,
+                delete_requests: vec![],
                 library_videos: BTreeMap::new(),
                 reads: 0,
                 downloads: vec![],
@@ -425,6 +440,16 @@ impl FakePhotoSource {
         }
     }
 
+    /// The person says no to the next gallery deletion request.
+    pub fn decline_delete(&self) {
+        self.state.lock().unwrap().decline_delete = true;
+    }
+
+    /// The gallery deletion requests so far (asset ids of each).
+    pub fn delete_requests(&self) -> Vec<Vec<String>> {
+        self.state.lock().unwrap().delete_requests.clone()
+    }
+
     /// What the person "chooses" next time the app asks.
     pub fn set_picks(&self, picks: Vec<Picked>) {
         self.state.lock().unwrap().picks = picks;
@@ -529,6 +554,27 @@ impl PhotoSource for FakePhotoSource {
     }
     fn kind(&self) -> &'static str {
         self.state.lock().unwrap().kind
+    }
+    fn can_delete(&self) -> bool {
+        true
+    }
+    fn delete_from_gallery(&self, items: Vec<(String, String)>) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move {
+            let mut s = self.state.lock().unwrap();
+            s.delete_requests
+                .push(items.iter().map(|(id, _)| id.clone()).collect());
+            if std::mem::take(&mut s.decline_delete) {
+                return Ok(());
+            }
+            s.generation += 1;
+            let g = s.generation;
+            for (id, path) in items {
+                let _ = std::fs::remove_file(&path);
+                s.assets.retain(|(a, _)| a.id != id);
+                s.removed.push((id, g));
+            }
+            Ok(())
+        })
     }
     fn read_picked(&self, handle: &str) -> BoxFuture<'_, Result<PathBuf>> {
         let src = PathBuf::from(handle);

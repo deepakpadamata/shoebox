@@ -4,6 +4,7 @@
   // here or once fetched on demand; the info panel says where every copy is stored.
   import { onMount, untrack } from 'svelte';
   import Sheet from '../components/Sheet.svelte';
+  import FreeUpSheet from '../components/FreeUpSheet.svelte';
   import { api, blobUrl, motionSrc, playsNatively, videoUrl, type FaceOut, type PhotoDetail, type PhotoSummary, type SharedItemInfo } from '../lib/api';
   import FaceCrop from '../components/FaceCrop.svelte';
   import { bytes, dateTime, plural } from '../lib/format';
@@ -77,6 +78,8 @@
   let starting = $state(false);
   // The original is here but the media element could not play it (a codec this device lacks).
   let unplayable = $state(false);
+  // Streaming a video from another device did not work: offer to get the original instead.
+  let streamFailed = $state(false);
 
   $effect(() => {
     const id = photo.id;
@@ -89,6 +92,7 @@
       liveFetching = false;
       starting = false;
       unplayable = false;
+      streamFailed = false;
       fetching = false;
       zoom = 1;
       pullY = 0;
@@ -188,7 +192,8 @@
     try {
       await api.playVideo(photo.id, album);
     } catch (e) {
-      fail(e);
+      if (originalReady) fail(e);
+      else streamFailed = true; // offer Get original instead
     } finally {
       starting = false;
     }
@@ -237,6 +242,11 @@
 
   async function toggleFavorite() {
     await api.setFavorite([photo.id], !photo.favorite).catch(fail);
+  }
+
+  let freeSheet = $state(false);
+  async function freed() {
+    detail = await api.photoDetail(photo.id).catch(() => detail);
   }
 
   async function togglePin() {
@@ -291,6 +301,11 @@
     else if (e.key === 'i') info = !info;
   }
 
+  // A video that is not here plays from a device that has it (only what is watched travels).
+  const streaming = $derived(
+    !album && photo.is_video && !originalReady && !streamFailed && !!detail &&
+      detail.stored_on.some((s) => !s.is_this_device && s.online && s.kinds.includes('original')),
+  );
   const unavailable = $derived(detail && !detail.has_original && detail.stored_on.every((s) => s.is_this_device || !s.online) && detail.stored_on.some((s) => s.kinds.includes('original')));
 </script>
 
@@ -320,19 +335,19 @@
     </div>
     <button class="nav left" aria-label="Previous" disabled={index === 0} onclick={() => onmove(-1)}>‹</button>
     <div class="media" onclick={(e) => { if (!(e.target as HTMLElement).closest('button, video')) chrome = !chrome; }} role="presentation">
-      {#if photo.is_video && originalReady && playsNatively()}
+      {#if photo.is_video && (originalReady || streaming) && playsNatively()}
         {#if poster}<img src={poster} alt={`Video from ${dateTime(photo.taken_at)}`} />{/if}
         <button class="play" aria-label="Play the video" disabled={starting} onclick={playNative}><Icon name="play" size={34} fill /></button>
-      {:else if photo.is_video && originalReady}
+      {:else if photo.is_video && (originalReady || streaming)}
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video src={videoUrl(photo.id)} poster={poster ?? undefined} controls autoplay onerror={originalFailed}></video>
+        <video src={videoUrl(photo.id)} poster={poster ?? undefined} controls autoplay onerror={() => (originalReady ? originalFailed() : (streamFailed = true))}></video>
       {:else if playingLive}
         <!-- svelte-ignore a11y_media_has_caption -->
         <video src={liveSrc} autoplay playsinline onended={stopLive} onerror={liveFailed} onclick={stopLive}></video>
       {:else}
         {#key photo.id}{#if src}<img {src} alt={`${photo.is_video ? 'Video' : 'Photo'} from ${dateTime(photo.taken_at)}`} style="transform: translateY({pullY}px) scale({zoom}); opacity: {1 - Math.min(0.5, pullY / 400)}" ondblclick={() => (zoom = zoom > 1 ? 1 : 2.5)} onerror={imageFailed} />{/if}{/key}
       {/if}
-      {#if detail && !originalReady}
+      {#if detail && !originalReady && !streaming}
         <div class="overlay">
           {#if unplayable}
             <b>{photo.is_video ? 'This video cannot be played here' : 'This photo cannot be shown here'}</b><span>The original is on this device, but this device cannot open its format. The preview is what is shown.</span>
@@ -418,7 +433,8 @@
               </Row>
             {/each}
           </List>
-          {#if app.state?.role !== 'keeper'}<Button block onclick={togglePin}>{detail.pinned ? 'Stop keeping on this device' : 'Keep original on this device'}</Button>{/if}
+          {#if app.state?.role !== 'keeper'}<Button block onclick={togglePin}>{detail.pinned ? 'Stop keeping on this device' : 'Keep original on this device'}</Button>
+            {#if detail.has_original}<Button block onclick={() => (freeSheet = true)}>Free up on this device…</Button>{/if}{/if}
         </div>
       {:else}
         <span class="muted">Loading…</span>
@@ -431,9 +447,12 @@
   <div class="menu">
     <button onclick={() => { menu = false; albumPick = true; }}><Icon name="addalbum" size={20} /> Add to album</button>
     {#if onsimilar}<button onclick={() => { menu = false; onsimilar(photo.id); }}><Icon name="search" size={20} /> Find similar</button>{/if}
-    {#if detail && app.state?.role !== 'keeper'}<button onclick={() => { menu = false; togglePin(); }}><Icon name="pin" size={20} /> {detail.pinned ? 'Stop keeping on this phone' : 'Keep on this phone'}</button>{/if}
+    {#if detail && app.state?.role !== 'keeper'}<button onclick={() => { menu = false; togglePin(); }}><Icon name="pin" size={20} /> {detail.pinned ? 'Stop keeping on this phone' : 'Keep on this phone'}</button>
+      {#if detail.has_original}<button onclick={() => { menu = false; freeSheet = true; }}><Icon name="cloud" size={20} /> Free up on this phone</button>{/if}{/if}
   </div>
 </Sheet>
+
+<FreeUpSheet open={freeSheet} ids={[photo.id]} onclose={() => (freeSheet = false)} ondone={freed} />
 
 <Sheet open={albumPick} title="Add to album" onclose={() => (albumPick = false)} width={340}>
   <div class="menu">

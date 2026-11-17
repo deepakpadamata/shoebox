@@ -202,6 +202,18 @@ impl PhotoSource for AndroidPhotoSource {
             crate::photos_source::decode_frame(&r.jpeg)
         })
     }
+    fn can_delete(&self) -> bool {
+        true
+    }
+    fn delete_from_gallery(&self, items: Vec<(String, String)>) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move {
+            let ids: Vec<String> = items.into_iter().map(|(id, _)| id).collect();
+            let _: serde_json::Value = self
+                .call("deleteFromGallery", json!({ "ids": ids }))
+                .await?;
+            Ok(())
+        })
+    }
     fn conditions(&self) -> BoxFuture<'_, Result<Conditions>> {
         Box::pin(async move {
             let r: ConditionsReply = self.call("conditions", json!({})).await?;

@@ -119,6 +119,7 @@ impl<L: LibraryStore> LibraryNode<L> {
             if !c.pinned_originals.contains(&hex) {
                 c.pinned_originals.push(hex.clone());
             }
+            c.offloaded_originals.retain(|h| h != &hex);
         })?;
         if self.node().blobs().has(photo).await? {
             self.node().blobs().protect(photo, Protection::Pin).await?;
@@ -148,7 +149,8 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// Why a Companion keeps this original on its own account, if it does: the policy that free-up
     /// leaves alone (pins are checked by the caller).
     pub(crate) fn kept_by_policy(&self, rec: &PhotoRecord, config: &NodeConfig) -> bool {
-        self.is_recent(rec, config) || (config.keep_favorites && rec.favorite.value)
+        !is_offloaded(rec, config)
+            && (self.is_recent(rec, config) || (config.keep_favorites && rec.favorite.value))
     }
 
     /// This device's keep rules: the recent window in days (0 = off) and whether favourites are
@@ -212,11 +214,13 @@ impl<L: LibraryStore> LibraryNode<L> {
                     .filter(|h| h.kind == BlobKind::Original)
                     .count()
                     < target;
+            // Freed by hand: the keep rules no longer want it here (a pin would have cleared this).
+            let offloaded = is_offloaded(&rec, &config);
             let ctx = PlanContext {
                 pinned: pinned.contains(&rec.id.to_string()),
                 own_capture_below_target: own_below,
-                recent: self.is_recent(&rec, &config),
-                kept_favorite: config.keep_favorites && rec.favorite.value,
+                recent: !offloaded && self.is_recent(&rec, &config),
+                kept_favorite: !offloaded && config.keep_favorites && rec.favorite.value,
                 holds_original: self.node().blobs().kept(&rec.original.hash).await?,
             };
             // An embedded clip is part of the original: wanted with it, never fetched on its own.
@@ -329,6 +333,29 @@ impl<L: LibraryStore> LibraryNode<L> {
             .and_then(|id| by_iroh.get(&id).copied())
             .unwrap_or(holders[0]);
         Ok(FetchSource { device })
+    }
+
+    /// Bytes `range` of `blob`, which is not here, read from the devices that hold it (best
+    /// first) without fetching the rest: a video plays while it streams (see
+    /// [`Node::read_remote_range`](crate::Node::read_remote_range)). A device holding back large
+    /// blobs (a phone on mobile data) is not asked. Pieces already here are read with no device
+    /// online.
+    pub async fn read_range_elsewhere(
+        &self,
+        blob: &BlobRef,
+        range: std::ops::Range<u64>,
+    ) -> Result<bytes::Bytes> {
+        let mut holders = self.ranked_holders(&blob.hash).await?;
+        if blob.size > crate::PAUSED_SERVE_MAX {
+            holders.retain(|d| !self.holds_back_large(d));
+        }
+        let ids: Vec<_> = holders
+            .iter()
+            .filter_map(|d| crate::addr::to_iroh_id(d).ok())
+            .collect();
+        self.node()
+            .read_remote_range(&ids, &blob.hash, blob.size, range)
+            .await
     }
 
     /// Fetch one blob of `photo` right now (the user opened it), bypassing the queue and a paused
@@ -502,4 +529,10 @@ async fn fetch_loop<L: LibraryStore>(
             }
         }
     }
+}
+
+/// The person freed this original from this device by hand (see `offloaded_originals`).
+pub(crate) fn is_offloaded(rec: &PhotoRecord, config: &NodeConfig) -> bool {
+    !config.offloaded_originals.is_empty()
+        && config.offloaded_originals.contains(&rec.id.to_string())
 }

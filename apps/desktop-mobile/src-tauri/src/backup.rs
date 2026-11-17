@@ -15,7 +15,9 @@
 //! The gallery stays the owner of its photos (A-092): originals are referenced where they are,
 //! never copied, and when a gallery file goes the photo is deleted from the library too (Recently
 //! Deleted, on every device). Copies an earlier build made are turned back into references
-//! (`moving`).
+//! (`moving`). The exception is a file freed from this device (Free up, A-145): the app asked the
+//! gallery to delete it (`freeing`), so the photo stays in the library and only this device's
+//! copy goes.
 //!
 //! A photo-library asset (PhotoKit, [`Original::Library`]) has no file: it is tracked by its id,
 //! read through the source, and its deletion is what the scan reports removed (P1-02). Until
@@ -94,6 +96,11 @@ pub(crate) struct BackupState {
     /// Gallery deletions waiting for the person to confirm (asset ids), see [`MASS_DELETION`].
     #[serde(default)]
     pub held_deletions: Vec<String>,
+    /// Gallery files this app asked the gallery to delete to free space (asset ids): their
+    /// photos stay in the library when the files go. Saved before asking, so a check that runs
+    /// while the system dialog is open, or after the app died, does not delete the photos.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub freeing: Vec<String>,
     /// Tracked library assets the scan reported removed, for the gallery check to act on. Kept
     /// here because the token has already moved past them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -195,7 +202,26 @@ impl AppCore {
             .viewer_pause()
             .or_else(|| conditions.and_then(|c| import_pause(&st.policy, &c)))
             .map(String::from);
-        Ok(self.status_of(&st, permission, paused))
+        let mut status = self.status_of(&st, permission, paused);
+        // Photos, not gallery items, and only those still in the library: copies of one file in
+        // several folders are one photo, and a photo deleted from the library stays tracked (so
+        // it is not imported again) but is no longer backed up. The S25 said 6,007 of 5,358.
+        let hashes: std::collections::BTreeSet<String> =
+            st.tracked.values().map(|t| t.hash.clone()).collect();
+        drop(st);
+        if let Ok(ln) = self.ln().await {
+            let mut n = 0u32;
+            for h in &hashes {
+                let Ok(id) = crate::core::parse_hash(h) else {
+                    continue;
+                };
+                if let Some(rec) = ln.store().photo(&id).await? {
+                    n += u32::from(rec.deleted_at.value.is_none());
+                }
+            }
+            status.imported = n;
+        }
+        Ok(status)
     }
 
     /// A viewer may not add photos to the library (its role can change later, A-086).
@@ -225,6 +251,7 @@ impl AppCore {
                 .count() as u32,
             policy: st.policy.clone(),
             permission,
+            // Gallery items imported; `backup_status` turns this into photos in the library.
             imported: st.tracked.len() as u32,
             pending: st.pending.len() as u32,
             gallery_deletions_held: st.held_deletions.len() as u32,
@@ -683,6 +710,14 @@ impl AppCore {
                 .collect();
             (gone, st.tracked.len())
         };
+        // Deleted to free space: the photos stay in the library.
+        let (freed, gone): (Vec<String>, Vec<String>) = {
+            let st = self.backup.lock().await;
+            gone.into_iter().partition(|id| st.freeing.contains(id))
+        };
+        if !freed.is_empty() {
+            self.apply_gallery_deletions(ln, &freed, false).await?;
+        }
         if gone.len() > MASS_DELETION && gone.len() * 4 > total {
             let mut st = self.backup.lock().await;
             if st.held_deletions != gone {
@@ -797,6 +832,7 @@ impl AppCore {
                 .collect();
             st.held_deletions.retain(|id| !ids.contains(id));
             st.removed_from_library.retain(|id| !ids.contains(id));
+            st.freeing.retain(|id| !ids.contains(id));
             // The same photo can be in the gallery twice: it stays while one copy remains.
             gone.retain(|h| !st.tracked.values().any(|t| &t.hash == h));
             gone.sort();
@@ -824,6 +860,75 @@ impl AppCore {
         } else {
             ln.release_in_place(&hashes(&gone)).await
         }
+    }
+
+    /// Free gallery photos that other devices hold: ask the gallery to delete their files (the
+    /// platform asks the person first), then stop referencing the ones that went. The photos stay
+    /// in the library. Returns the photos freed; a photo kept in several gallery files is freed
+    /// only when all of them went. Photos with no gallery file this app follows are left alone.
+    pub(crate) async fn free_gallery(&self, photos: &[Blake3Hash]) -> Result<Vec<Blake3Hash>> {
+        if photos.is_empty() {
+            return Ok(vec![]);
+        }
+        let source = self.source()?;
+        if !source.can_delete() {
+            return Ok(vec![]);
+        }
+        let ln = self.ln().await?;
+        let wanted: HashSet<String> = photos.iter().map(|h| h.to_string()).collect();
+        let items: Vec<(String, String)> = {
+            let mut st = self.backup.lock().await;
+            let items: Vec<(String, String)> = st
+                .tracked
+                .iter()
+                .filter(|(_, t)| wanted.contains(&t.hash))
+                .filter_map(|(id, t)| t.path.clone().map(|p| (id.clone(), p)))
+                .collect();
+            for (id, _) in &items {
+                if !st.freeing.contains(id) {
+                    st.freeing.push(id.clone());
+                }
+            }
+            st.save(self.data_dir())?;
+            items
+        };
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+        let asked = source.delete_from_gallery(items.clone()).await;
+        let (mut went, mut stayed) = (vec![], vec![]);
+        for (id, p) in items {
+            if gone_from_gallery(Path::new(&p)) {
+                went.push(id);
+            } else {
+                stayed.push(id);
+            }
+        }
+        {
+            let mut st = self.backup.lock().await;
+            st.freeing.retain(|id| !stayed.contains(id));
+            st.save(self.data_dir())?;
+        }
+        let before: HashSet<String> = {
+            let st = self.backup.lock().await;
+            st.tracked.values().map(|t| t.hash.clone()).collect()
+        };
+        self.apply_gallery_deletions(&ln, &went, false).await?;
+        let after: HashSet<String> = {
+            let st = self.backup.lock().await;
+            st.tracked.values().map(|t| t.hash.clone()).collect()
+        };
+        if went.is_empty() {
+            asked?; // the request failed (a declined dialog is not an error)
+        }
+        Ok(photos
+            .iter()
+            .filter(|h| {
+                let h = h.to_string();
+                before.contains(&h) && !after.contains(&h)
+            })
+            .copied()
+            .collect())
     }
 
     /// "Add photos" on a phone. Gallery photos are added where they are, like the camera roll;

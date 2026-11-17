@@ -170,6 +170,7 @@ pub struct SharedSummary {
     pub location: String,
     /// Photos other members added since this device last looked.
     pub unread: usize,
+    /// The newest item's id (a `PhotoId` in the album, not a blob hash).
     pub cover: Option<Blake3Hash>,
 }
 
@@ -593,7 +594,8 @@ impl SharedAlbums {
                 keep_originals: reg.keep_originals,
                 location: reg.location,
                 unread,
-                cover: first.first().map(|i| i.thumb.hash),
+                // The item id: the app looks the cover up as `album:<id>:thumb` by it.
+                cover: first.first().map(|i| i.id),
             });
         }
         out.sort_by_key(|a| a.name.to_lowercase());

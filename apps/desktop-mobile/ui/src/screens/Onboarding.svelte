@@ -18,6 +18,7 @@
   let name = $state('');
   // A phone or tablet is a Companion; a computer is usually the keeper.
   const handheld = isHandheld();
+  const cameraRoll = $derived(handheld && !!app.backup && app.backup.permission !== 'unavailable');
   const thisDevice = handheld ? 'this phone' : 'this computer';
   const defaultName = handheld ? 'My phone' : 'This computer';
   let role = $state(handheld ? 'companion' : 'keeper');
@@ -145,9 +146,10 @@
       <RecoveryKit phrase={created.phrase} kitText={created.kit_text} onsaved={() => { created = null; startBring(); }} />
     {:else if step === 'bring'}
       <h2>Bring your photos in</h2>
-      <p class="muted small">Your library is ready. Three ways to fill it; you can do any of them later.</p>
+      <!-- A computer, or a phone without a camera roll, has two ways, not three (U1-22, found on the Mac). -->
+      <p class="muted small">Your library is ready. {cameraRoll ? 'Three' : 'Two'} ways to fill it; you can do any of them later.</p>
       <div class="stack">
-        {#if handheld && app.backup && app.backup.permission !== 'unavailable'}
+        {#if cameraRoll}
           <BackupCard compact />
         {/if}
         <Button block onclick={() => (addOpen = true)}><Icon name="devices" size={18} /> Add {handheld ? 'a computer' : 'another device'}</Button>

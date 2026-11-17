@@ -1,5 +1,8 @@
 package org.shoebox.desktop
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -7,6 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import java.io.File
 
 class MainActivity : TauriActivity() {
   @Volatile private var top = 0
@@ -22,6 +26,40 @@ class MainActivity : TauriActivity() {
     NativeBridge.registerImageDecoder(HeifDecoder)
     BackgroundSync.schedule(applicationContext)
     Thread { ModelAssets.install(applicationContext) }.start()
+  }
+
+  override fun onResume() {
+    super.onResume()
+    askForNotificationsOnce()
+  }
+
+  // Android 13+ denies notifications until the app asks, so without this the background worker's
+  // security alerts and backup notices were dropped (found on the S25, 2026-11-17). Asked once,
+  // after this device belongs to a library (`app.json`), not over the first-run screens. Only an
+  // answer counts: a dialog closed without one (the task brought back by a launch) asks again.
+  private var asking = false
+
+  private fun askForNotificationsOnce() {
+    if (Build.VERSION.SDK_INT < 33 || asking) return
+    if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+    if (!File(applicationInfo.dataDir, "app.json").exists()) return
+    if (getSharedPreferences("permissions", MODE_PRIVATE).getBoolean(NOTIFICATIONS_ANSWERED, false)) return
+    asking = true
+    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATIONS_REQUEST)
+  }
+
+  override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    if (requestCode != NOTIFICATIONS_REQUEST) return
+    asking = false
+    if (grantResults.isNotEmpty()) {
+      getSharedPreferences("permissions", MODE_PRIVATE).edit().putBoolean(NOTIFICATIONS_ANSWERED, true).apply()
+    }
+  }
+
+  private companion object {
+    const val NOTIFICATIONS_REQUEST = 4701
+    const val NOTIFICATIONS_ANSWERED = "notifications_answered"
   }
 
   // The WebView draws edge to edge but does not report the system bars to CSS: hand the insets

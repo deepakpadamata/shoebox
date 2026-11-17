@@ -2141,12 +2141,82 @@ impl AppCore {
         })
     }
 
+    /// Free up space: the originals other devices hold leave this device. Gallery files go too:
+    /// the gallery is asked to delete them (Android shows its own confirmation) and their photos
+    /// stay in the library.
     pub async fn free_up_space(&self, dry_run: bool) -> Result<FreeUpReport> {
         let ln = self.ln().await?;
         let r = ln.free_up_space(dry_run).await?;
+        self.finish_free(r, 0, dry_run).await
+    }
+
+    /// "Free up on this device" for chosen photos (the opposite of Keep on this device): as Free
+    /// up space, whatever the keep rules say, and the keep rules stop bringing them back.
+    pub async fn free_photos(&self, ids: &[String], dry_run: bool) -> Result<FreeUpReport> {
+        let ln = self.ln().await?;
+        let ids: Vec<Blake3Hash> = ids.iter().map(|s| parse_hash(s)).collect::<Result<_>>()?;
+        let r = ln.free_photos(&ids, dry_run).await?;
+        let kept = ids.len().saturating_sub(r.photos.len()) as u32;
+        self.finish_free(r, kept, dry_run).await
+    }
+
+    async fn finish_free(
+        &self,
+        r: shoebox_node::FreeReport,
+        kept: u32,
+        dry_run: bool,
+    ) -> Result<FreeUpReport> {
+        let gallery_bytes = |ids: &[Blake3Hash]| {
+            let ids = ids.to_vec();
+            async move {
+                let ln = self.ln().await?;
+                let mut n = 0u64;
+                for id in &ids {
+                    n += ln.node().blobs().size(id).await?.unwrap_or(0);
+                }
+                anyhow::Ok(n)
+            }
+        };
+        let can_delete = self
+            .photo_source
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|s| s.can_delete());
+        let all_gallery = r.gallery.len() as u32;
+        let all_bytes = r.bytes;
+        let all_photos = r.photos.len() as u32;
+        if !can_delete {
+            // Nothing can delete those files here: they are not freed.
+            let b = gallery_bytes(&r.gallery).await?;
+            return Ok(FreeUpReport {
+                photos: all_photos - all_gallery,
+                bytes: all_bytes.saturating_sub(b) as f64,
+                gallery: 0,
+                kept: kept + all_gallery,
+            });
+        }
+        if dry_run || r.gallery.is_empty() {
+            return Ok(FreeUpReport {
+                photos: all_photos,
+                bytes: all_bytes as f64,
+                gallery: all_gallery,
+                kept,
+            });
+        }
+        let freed = self.free_gallery(&r.gallery).await?;
+        let not_freed: Vec<Blake3Hash> = r
+            .gallery
+            .iter()
+            .filter(|h| !freed.contains(h))
+            .copied()
+            .collect();
+        let b = gallery_bytes(&not_freed).await?;
         Ok(FreeUpReport {
-            photos: r.photos.len() as u32,
-            bytes: r.bytes as f64,
+            photos: all_photos - not_freed.len() as u32,
+            bytes: all_bytes.saturating_sub(b) as f64,
+            gallery: freed.len() as u32,
+            kept: kept + not_freed.len() as u32,
         })
     }
 

@@ -92,6 +92,7 @@ pub const COMMANDS: &[&str] = &[
     "health",
     "safety_status",
     "free_up_space",
+    "free_photos",
     "settings",
     "set_redundancy_target",
     "set_keep_rules",
@@ -373,6 +374,9 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
         "health" => out(core.health().await?),
         "safety_status" => out(core.safety_status().await?),
         "free_up_space" => out(core.free_up_space(arg(&args, "dry_run")?).await?),
+        "free_photos" => out(core
+            .free_photos(&arg::<Vec<String>>(&args, "ids")?, arg(&args, "dry_run")?)
+            .await?),
         "settings" => out(core.settings().await?),
         "set_keep_rules" => {
             core.set_keep_rules(arg(&args, "recent_days")?, arg(&args, "favorites")?)

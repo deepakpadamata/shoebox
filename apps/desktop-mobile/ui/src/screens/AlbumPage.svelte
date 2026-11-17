@@ -35,6 +35,8 @@
   let renameTo = $state('');
   let coverOpen = $state(false);
   let coverChoices = $state<PhotoSummary[]>([]);
+  // A cover that failed to load (not on this device yet) shows the album icon, as on Albums.
+  let brokenCover = $state('');
 
   async function rename() {
     try {
@@ -62,7 +64,7 @@
 {#if entry}
   <div class="album">
     <header class="ahead">
-      <div class="cover">{#if entry.cover}<img src={blobUrl(entry.cover, 'thumb', entry.coverScope)} alt="" />{:else}<Icon name={entry.shared ? 'people' : 'albums'} size={30} />{/if}</div>
+      <div class="cover">{#if entry.cover && brokenCover !== entry.cover}<img src={blobUrl(entry.cover, 'thumb', entry.coverScope)} alt="" onerror={() => (brokenCover = entry.cover ?? '')} />{:else}<Icon name={entry.shared ? 'people' : 'albums'} size={30} />{/if}</div>
       <div class="who">
         <h2>{entry.name}</h2>
         <span class="muted small">{sub}</span>
@@ -124,7 +126,8 @@
   .ahead { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 18px; flex-wrap: wrap; }
   .cover { width: 56px; height: 56px; border-radius: 12px; overflow: hidden; background: var(--surface-2); display: grid; place-items: center; color: var(--ink-3); flex: none; }
   .cover img { width: 100%; height: 100%; object-fit: cover; }
-  .who { min-width: 0; flex: 1; display: grid; }
+  /* Basis auto: the buttons wrap to their own line before the name is cut ("The bo…" on the S25). */
+  .who { min-width: 0; flex: 1 1 auto; display: grid; }
   h2 { margin: 0; font-size: var(--t-xl); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .acts { display: flex; align-items: center; gap: 8px; }
   .more { width: 40px; height: 40px; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--ink); display: grid; place-items: center; cursor: pointer; }

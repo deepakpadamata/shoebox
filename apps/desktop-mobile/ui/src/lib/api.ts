@@ -230,6 +230,7 @@ export const api = {
   health: () => call<Health>('health'),
   safetyStatus: () => call<SafetyStatus>('safety_status'),
   freeUpSpace: (dry_run: boolean) => call<FreeUpReport>('free_up_space', { dry_run }),
+  freePhotos: (ids: string[], dry_run: boolean) => call<FreeUpReport>('free_photos', { ids, dry_run }),
   settings: () => call<Settings>('settings'),
   setKeepRules: (recent_days: number, favorites: boolean) => call<{}>('set_keep_rules', { recent_days, favorites }),
   setRedundancyTarget: (copies: number) => call<{}>('set_redundancy_target', { copies }),

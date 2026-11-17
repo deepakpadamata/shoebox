@@ -2,7 +2,7 @@
 //! failures, restarts.
 
 use desktop_mobile::photos_source::{Conditions, FakePhotoSource, Permission, Picked};
-use desktop_mobile::types::{BackupPolicy, BackupScope};
+use desktop_mobile::types::{AppEvent, BackupPolicy, BackupScope};
 use desktop_mobile::{import_pause, pause_reason, AppCore, AppOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -162,6 +162,12 @@ async fn only_new_and_changed_photos_are_imported_and_the_gallery_decides_what_s
     r.source.put("copy", &copy, 500);
     let dup = r.core.backup_run(true).await.unwrap();
     assert_eq!((dup.imported, dup.duplicates), (0, 1));
+    // Two gallery files, one photo: "backed up from this device" counts photos, so it never
+    // says more than the library holds (the S25 said 6,007 of 5,358).
+    assert_eq!(
+        r.core.backup_status().await.unwrap().imported as usize,
+        photos(&r.core).await
+    );
     r.source.remove("a2");
     std::fs::remove_file(&r.files[2]).unwrap();
     r.core.backup_run(true).await.unwrap();
@@ -170,6 +176,14 @@ async fn only_new_and_changed_photos_are_imported_and_the_gallery_decides_what_s
         6,
         "the other gallery copy is still there"
     );
+    // Deleted in the library but still in the gallery: tracked, so not imported again, and no
+    // longer counted as backed up.
+    let first = r.core.library_page(None, 1).await.unwrap().items[0]
+        .id
+        .clone();
+    r.core.delete(&[first]).await.unwrap();
+    assert_eq!(photos(&r.core).await, 5);
+    assert_eq!(r.core.backup_status().await.unwrap().imported, 5);
     r.core.shutdown().await.unwrap();
 }
 
@@ -977,5 +991,115 @@ async fn the_photos_library_turned_off_keeps_its_photos_and_is_not_followed() {
     r.core.backup_configure(policy(false, false)).await.unwrap();
     r.core.backup_run(true).await.unwrap();
     assert_eq!(photos(&r.core).await, 2);
+    r.core.shutdown().await.unwrap();
+}
+
+async fn pair(a: &Arc<AppCore>, b: &Arc<AppCore>, role: &str, name: &str) {
+    let start = a.pair_start(role).await.unwrap();
+    for core in [a, b] {
+        let mut ev = core.events();
+        let core = core.clone();
+        tokio::spawn(async move {
+            while let Ok(e) = ev.recv().await {
+                if matches!(e, AppEvent::PairingCode { .. }) {
+                    let _ = core.confirm_pairing(true);
+                    return;
+                }
+            }
+        });
+    }
+    b.join(&start.ticket, name).await.unwrap();
+}
+
+/// "Free up on this phone" for a photo the phone took: once the keeper confirms it holds the
+/// photo, the gallery is asked to delete the file, and the photo stays in the library (it is not
+/// a gallery deletion). Declining the system's dialog leaves everything as it was.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn freeing_a_gallery_photo_deletes_its_file_and_keeps_the_photo() {
+    let r = rig().await;
+    for (i, f) in r.files.iter().take(3).enumerate() {
+        r.source.put(&format!("a{i}"), f, 1);
+    }
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+    assert_eq!(r.core.backup_run(true).await.unwrap().imported, 3);
+    let core = r.core.clone();
+    let id = move |n: usize| {
+        let core = core.clone();
+        async move {
+            core.library_page(None, 10).await.unwrap().items[n]
+                .id
+                .clone()
+        }
+    };
+
+    // Nothing else holds it yet: it stays.
+    let alone = r.core.free_photos(&[id(0).await], true).await.unwrap();
+    assert_eq!((alone.photos, alone.kept), (0, 1), "{alone:?}");
+
+    let kd = tempfile::tempdir().unwrap();
+    let keeper = AppCore::open(kd.path(), AppOptions::local_only())
+        .await
+        .unwrap();
+    pair(&r.core, &keeper, "keeper", "Pi").await;
+    let first = id(0).await;
+    let mut held = false;
+    for _ in 0..120 {
+        if r.core
+            .photo_detail(&first)
+            .await
+            .map(|d| d.copies >= 2)
+            .unwrap_or(false)
+        {
+            held = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    assert!(held, "the keeper took the original");
+
+    let plan = r
+        .core
+        .free_photos(std::slice::from_ref(&first), true)
+        .await
+        .unwrap();
+    assert_eq!(
+        (plan.photos, plan.gallery, plan.kept),
+        (1, 1, 0),
+        "{plan:?}"
+    );
+    assert!(
+        r.source.delete_requests().is_empty(),
+        "a dry run asks nothing"
+    );
+
+    // The person says no in the system's dialog: nothing changes.
+    r.source.decline_delete();
+    let no = r
+        .core
+        .free_photos(std::slice::from_ref(&first), false)
+        .await
+        .unwrap();
+    assert_eq!((no.photos, no.gallery, no.kept), (0, 0, 1), "{no:?}");
+    let path = |n: usize| r.files[n].clone();
+    let gallery_file = (0..3).map(path).find(|p| p.exists()).unwrap();
+    assert!((0..3).all(|n| path(n).exists()), "{gallery_file:?}");
+    assert!(r.core.photo_detail(&first).await.unwrap().has_original);
+
+    // The person allows it: the file goes, the photo stays (not in Recently Deleted).
+    let yes = r
+        .core
+        .free_photos(std::slice::from_ref(&first), false)
+        .await
+        .unwrap();
+    assert_eq!((yes.photos, yes.gallery, yes.kept), (1, 1, 0), "{yes:?}");
+    assert_eq!(r.source.delete_requests().len(), 2);
+    assert_eq!((0..3).filter(|&n| path(n).exists()).count(), 2);
+    r.core.gallery_check().await.unwrap();
+    r.core.backup_run(true).await.unwrap();
+    assert_eq!(photos(&r.core).await, 3);
+    assert!(r.core.recently_deleted().await.unwrap().is_empty());
+    assert!(!r.core.photo_detail(&first).await.unwrap().has_original);
+    assert_eq!(r.core.backup_status().await.unwrap().imported, 2);
+    keeper.shutdown().await.unwrap();
     r.core.shutdown().await.unwrap();
 }

@@ -8,11 +8,16 @@
   import Segmented from '../../components/Segmented.svelte';
   import Toggle from '../../components/Toggle.svelte';
   import { cfg, loadSettings, save } from './store.svelte';
+  import { app } from '../../lib/store.svelte';
   onMount(() => { loadSettings(); });
   const s = $derived(cfg.s);
 </script>
 
 <BackupCard />
+{#if !app.backup || app.backup.permission === 'unavailable'}
+  <!-- Without this the Mac's first Settings pane was blank on a computer with no photo source. -->
+  <div class="card pad"><p class="small muted" style="margin:0">This device has no camera roll or Photos library to back up. To add photos from a folder, use Watched folders under Advanced.</p></div>
+{/if}
 
 {#if s}
 {#if s.role === 'companion'}

@@ -340,7 +340,7 @@ async fn an_unpaired_keeper_recovers_with_the_phrase_through_a_surviving_device(
     assert!(format!("{err:#}").contains("24-word"), "{err:#}");
     let done = c
         .call_raw(
-            serde_json::json!({"cmd":"recover","from":link,"phrase":kit.phrase(),"name":"pi"}),
+            serde_json::json!({"cmd":"recover","from":link,"phrase":kit.phrase(),"name":"garage"}),
         )
         .await
         .unwrap();
@@ -360,6 +360,23 @@ async fn an_unpaired_keeper_recovers_with_the_phrase_through_a_surviving_device(
         .await,
         "the recovered keeper syncs the library and fetches the original"
     );
+    // The name given to `recover` is the keeper's name from then on, as with `pair` (found on
+    // nest, R1-10: it stayed the name the daemon started with).
+    let mut c = Client::connect(d.control_path()).await.unwrap();
+    assert_eq!(c.status().await.unwrap()["name"], "garage");
+    let devices = c
+        .call_raw(serde_json::json!({"cmd":"devices"}))
+        .await
+        .unwrap();
+    let me = devices["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["self"] == true)
+        .unwrap();
+    assert_eq!(me["name"], "garage");
+    let saved = std::fs::read_to_string(dir.path().join("keeper/keeper.json")).unwrap();
+    assert!(saved.contains("\"garage\""), "{saved}");
     // It can print its own link for the next recovery.
     let a = Client::connect(d.control_path())
         .await

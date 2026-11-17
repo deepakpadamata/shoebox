@@ -101,6 +101,21 @@ class PhotoBackend(private val context: Context) {
     }
 
     /** The gallery asset `mediaId`, or null when MediaStore does not show it to this app. */
+    /** The image or video URI of a MediaStore `_ID` (what a delete request needs), or null. */
+    fun mediaUri(mediaId: Long): Uri? {
+        val projection = arrayOf(MediaStore.Files.FileColumns.MEDIA_TYPE)
+        context.contentResolver.query(filesUri, projection, "${MediaStore.MediaColumns._ID} = ?", arrayOf(mediaId.toString()), null)?.use { c ->
+            if (!c.moveToFirst()) return null
+            val base = when (c.getInt(0)) {
+                MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                else -> return null
+            }
+            return android.content.ContentUris.withAppendedId(base, mediaId)
+        }
+        return null
+    }
+
     private fun assetById(mediaId: Long): JSONObject? {
         val projection = arrayOf(
             MediaStore.MediaColumns._ID, MediaStore.MediaColumns.MIME_TYPE, MediaStore.MediaColumns.SIZE,

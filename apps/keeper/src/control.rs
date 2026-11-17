@@ -211,14 +211,19 @@ async fn dispatch(shared: &Arc<Shared>, cmd: &str, req: &Value) -> Result<Value>
             let phrase = req["phrase"]
                 .as_str()
                 .ok_or_else(|| anyhow!("missing `phrase`"))?;
-            let name = req["name"].as_str().unwrap_or(&shared.opts.name);
+            // As with `pair`, a name given here becomes the keeper's name (presence, `keeper.json`).
+            let given = req["name"].as_str().filter(|n| !n.trim().is_empty());
+            if let Some(given) = given {
+                shared.node.update_config(|c| c.name = given.to_string())?;
+            }
+            let name = shared.node.config().name;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
             let grant = shared
                 .node
-                .recover(&link, phrase, shoebox_core::model::Role::Keeper, name, now)
+                .recover(&link, phrase, shoebox_core::model::Role::Keeper, &name, now)
                 .await?;
             let ticket = LibraryTicket {
                 cap: grant.cap.clone(),

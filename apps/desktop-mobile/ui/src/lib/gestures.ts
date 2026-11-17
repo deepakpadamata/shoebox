@@ -297,3 +297,43 @@ export function pullRefresh(node: HTMLElement, opts: PullRefreshOptions) {
     },
   };
 }
+
+/**
+ * A trackpad pinch on a computer, reported as one total scale when it ends (like `pinch`).
+ * WebKit (the Mac app) sends gesture events with a scale; Chromium (Windows, Linux) sends wheel
+ * events with ctrlKey set, which are summed until they stop for a moment.
+ */
+export function trackpadPinch(node: HTMLElement, onEnd: (scale: number) => void) {
+  const gesture = (e: Event) => e.preventDefault();
+  const gestureEnd = (e: Event) => {
+    e.preventDefault();
+    const scale = (e as Event & { scale?: number }).scale;
+    if (scale && Math.abs(scale - 1) > 0.2) onEnd(scale);
+  };
+  let sum = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const wheel = (e: WheelEvent) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    sum += e.deltaY;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const scale = Math.exp(-sum / 100);
+      sum = 0;
+      if (Math.abs(scale - 1) > 0.2) onEnd(scale);
+    }, 150);
+  };
+  node.addEventListener('gesturestart', gesture);
+  node.addEventListener('gesturechange', gesture);
+  node.addEventListener('gestureend', gestureEnd);
+  node.addEventListener('wheel', wheel, { passive: false });
+  return {
+    destroy() {
+      clearTimeout(timer);
+      node.removeEventListener('gesturestart', gesture);
+      node.removeEventListener('gesturechange', gesture);
+      node.removeEventListener('gestureend', gestureEnd);
+      node.removeEventListener('wheel', wheel);
+    },
+  };
+}

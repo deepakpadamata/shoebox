@@ -1025,3 +1025,80 @@ async fn an_album_cover_is_the_newest_photo_until_one_is_chosen() {
     assert_eq!(a2.name, "Trip", "naming is untouched");
     core.shutdown().await.unwrap();
 }
+
+/// A video that is not on this device plays from one that has it: the player's ranges are read
+/// from there and the original is not fetched.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_video_that_is_elsewhere_streams_in_ranges() {
+    let (da, db) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let a = open(da.path()).await;
+    a.create_library("Pi", "keeper").await.unwrap();
+    assert_eq!(
+        a.import_paths(&[sample("clip.mp4")])
+            .await
+            .unwrap()
+            .imported,
+        1
+    );
+    let b = open(db.path()).await;
+    let start = a.pair_start("viewer").await.unwrap();
+    for core in [&a, &b] {
+        let mut ev = core.events();
+        let core = core.clone();
+        tokio::spawn(async move {
+            while let Ok(e) = ev.recv().await {
+                if matches!(e, AppEvent::PairingCode { .. }) {
+                    let _ = core.confirm_pairing(true);
+                    return;
+                }
+            }
+        });
+    }
+    b.join(&start.ticket, "MacBook").await.unwrap();
+    let file = std::fs::read(samples().join("clip.mp4")).unwrap();
+    assert!(
+        wait(30, || async {
+            let Ok(p) = b.library_page(None, 10).await else {
+                return false;
+            };
+            let Some(item) = p.items.first() else {
+                return false;
+            };
+            b.photo_detail(&item.id)
+                .await
+                .map(|d| {
+                    d.stored_on
+                        .iter()
+                        .any(|s| !s.is_this_device && s.kinds.iter().any(|k| k == "original"))
+                })
+                .unwrap_or(false)
+        })
+        .await,
+        "the viewer knows who holds the video"
+    );
+    let id = b.library_page(None, 10).await.unwrap().items[0].id.clone();
+    assert!(!b.photo_detail(&id).await.unwrap().has_original);
+
+    let piece = b
+        .blob(&id, "original", Some((1000, Some(4999))))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(piece.bytes, file[1000..5000]);
+    assert_eq!(
+        (piece.range, piece.total),
+        (Some((1000, 4999)), file.len() as u64)
+    );
+    assert!(piece.content_type.starts_with("video/"));
+    // What a media element asks first: an open range, answered with a piece of it.
+    let first = b.blob(&id, "original", None).await.unwrap().unwrap();
+    assert_eq!(first.bytes, file, "a small video comes in one piece");
+    assert_eq!(first.range, Some((0, file.len() as u64 - 1)));
+    assert!(
+        !b.photo_detail(&id).await.unwrap().has_original,
+        "not fetched"
+    );
+    for core in [a, b] {
+        core.shutdown().await.unwrap();
+    }
+}

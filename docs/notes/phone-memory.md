@@ -81,6 +81,21 @@ Populating got ten times faster as a side effect: each compaction during a burst
   * That is several hundred MB of transient memory on top of the 200 MB the replica ends up with.
   * The figure above, 546 MB, also counts A's side of the exchange.
 
+## Measured on the S25 (2026-11-17, R1-09)
+
+The app at 6988aa7 (debug APK built on `nest`), Android 17, 11 GB RAM. The gallery has about 5,170 photos and 880 videos, all
+referenced (A-092). `dumpsys meminfo org.shoebox.desktop`, in MB (PSS):
+
+| State | Total PSS | Native heap | Graphics | Java heap |
+|---|---|---|---|---|
+| Idle on the timeline | 425 | 203 | 87 | 44 |
+| Right after flinging through the whole timeline | 592 | 216 | 219 | 30 |
+| 30 s in the background | 338 | 212 | 12 | 7 |
+
+* The WebView's renderer is a separate process: about 190 MB PSS on top, with the timeline open.
+* Graphics (decoded thumbnails, GPU tiles) is what grows while scrolling, and it is given back in the background. Native heap (the
+  Rust core) stays at about 210 MB and does not grow with scrolling.
+
 ## Still to do (issues)
 
 * **M4-11a · Sync in bounded batches.**

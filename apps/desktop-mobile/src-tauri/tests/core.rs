@@ -1090,13 +1090,14 @@ async fn a_video_that_is_elsewhere_streams_in_ranges() {
         (Some((1000, 4999)), file.len() as u64)
     );
     assert!(piece.content_type.starts_with("video/"));
-    // What a media element asks first: an open range, answered with a piece of it.
+    // What a media element asks first: an open range, answered with a piece of it. The rolling
+    // fetch may have brought this small video over whole by now: then it is served from here.
     let first = b.blob(&id, "original", None).await.unwrap().unwrap();
     assert_eq!(first.bytes, file, "a small video comes in one piece");
-    assert_eq!(first.range, Some((0, file.len() as u64 - 1)));
+    assert!(matches!(first.range, None | Some((0, _))));
     assert!(
         !b.photo_detail(&id).await.unwrap().has_original,
-        "not fetched"
+        "streamed pieces do not make the original this device's"
     );
     for core in [a, b] {
         core.shutdown().await.unwrap();

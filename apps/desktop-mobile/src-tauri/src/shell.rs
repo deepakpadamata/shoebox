@@ -194,122 +194,15 @@ pub fn run() {
             });
         })
         .setup(|app| {
-            #[cfg(mobile)]
-            let _ = &app;
-            let data_dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&data_dir)?;
-            // One app per data directory: a second launch exits (the OS shows the first window).
-            let lock = std::fs::OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .write(true)
-                .open(data_dir.join("app.lock"))?;
-            if lock.try_lock().is_err() {
-                // On Android the holder is a background run in this same process: stop it and wait.
-                #[cfg(target_os = "android")]
-                {
-                    use std::sync::atomic::Ordering;
-                    crate::android_bridge::APP_OPENING.store(true, Ordering::SeqCst);
-                    let waited = lock.lock();
-                    crate::android_bridge::APP_OPENING.store(false, Ordering::SeqCst);
-                    waited?;
-                }
-                #[cfg(not(target_os = "android"))]
-                {
-                    eprintln!("Shoebox is already running.");
-                    std::process::exit(0);
-                }
+            if let Err(e) = setup(app) {
+                report_launch_failure(app, &*e);
+                // Returning the error makes Tauri panic, which aborts inside AppKit's launch
+                // callback: the person was already told, so end quietly instead.
+                #[cfg(desktop)]
+                std::process::exit(1);
+                #[cfg(mobile)]
+                return Err(e);
             }
-            app.manage(lock);
-            let opts = AppOptions {
-                secrets: Some(secret_store(app.handle(), &data_dir)),
-                // Release builds bundle the search models as resources (tauri.models.conf.json).
-                model_dirs: app
-                    .path()
-                    .resource_dir()
-                    .map(|d| vec![d.join("models")])
-                    .unwrap_or_default(),
-                ..AppOptions::default()
-            };
-            let core = tauri::async_runtime::block_on(AppCore::open(&data_dir, opts))?;
-            // The system player reads videos held in the blob store through the core (`video.rs`).
-            #[cfg(target_os = "android")]
-            crate::video::install(core.clone());
-            // A background indexing run in this process borrows the core (S2-04).
-            #[cfg(target_os = "android")]
-            crate::android_bridge::set_app_core(
-                &core,
-                tauri::async_runtime::block_on(async { tokio::runtime::Handle::current() }),
-            );
-            // Tray icon (M3-16): the app keeps syncing with its window closed; Quit ends it.
-            #[cfg(desktop)]
-            setup_tray(app)?;
-
-            let mut events = core.events();
-            let handle = app.handle().clone();
-            #[cfg(desktop)]
-            let alerts_core = core.clone();
-            tauri::async_runtime::spawn(async move {
-                let mut syncing = 0i32;
-                while let Ok(ev) = events.recv().await {
-                    if let crate::types::AppEvent::Sync { phase, .. } = &ev {
-                        syncing = if phase == "Started" {
-                            syncing + 1
-                        } else {
-                            (syncing - 1).max(0)
-                        };
-                        #[cfg(desktop)]
-                        if let Some(tray) = handle.tray_by_id("main") {
-                            let _ = tray.set_tooltip(Some(if syncing > 0 {
-                                "Shoebox: syncing…"
-                            } else {
-                                "Shoebox: up to date"
-                            }));
-                        }
-                    }
-                    // With the window hidden (closed to the tray) nobody sees the banner: show a
-                    // system notification for each new security alert instead (R1-06).
-                    #[cfg(desktop)]
-                    if ev == crate::types::AppEvent::SecurityChanged {
-                        let hidden = handle
-                            .get_webview_window("main")
-                            .is_none_or(|w| !w.is_visible().unwrap_or(true));
-                        if hidden {
-                            use tauri_plugin_notification::NotificationExt;
-                            for alert in alerts_core.take_unnotified_alerts() {
-                                let n = crate::notify::security_notification(&alert);
-                                let _ = handle
-                                    .notification()
-                                    .builder()
-                                    .title(n.title)
-                                    .body(n.body)
-                                    .show();
-                            }
-                        }
-                    }
-                    let _ = handle.emit("app-event", ev);
-                }
-            });
-            #[cfg(target_os = "android")]
-            {
-                // `set_photo_source` starts a background task: do it inside the runtime.
-                let source = std::sync::Arc::new(crate::android_photos::AndroidPhotoSource(
-                    app.state::<crate::android_photos::PhotoLibrary>().0.clone(),
-                ));
-                let core = core.clone();
-                tauri::async_runtime::block_on(async move { core.set_photo_source(source) });
-            }
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            {
-                // The Photos library (P1-04) or an iPhone's or iPad's camera roll (I2-01): nothing
-                // is read until the person turns it on, which asks for access.
-                let source = std::sync::Arc::new(crate::macos_photos::PhotoKitSource::new(
-                    core.data_dir().join("tmp").join("photos"),
-                ));
-                let core = core.clone();
-                tauri::async_runtime::block_on(async move { core.set_photo_source(source) });
-            }
-            app.manage(Core(core));
             Ok(())
         })
         .on_window_event(|_window, _event| {
@@ -332,6 +225,166 @@ pub fn run() {
             }
         }
     });
+}
+
+/// Everything the app opens before its window shows.
+fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(mobile)]
+    let _ = &app;
+    let data_dir = app.path().app_data_dir()?;
+    std::fs::create_dir_all(&data_dir)?;
+    // One app per data directory: a second launch exits (the OS shows the first window).
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(data_dir.join("app.lock"))?;
+    if lock.try_lock().is_err() {
+        // On Android the holder is a background run in this same process: stop it and wait.
+        #[cfg(target_os = "android")]
+        {
+            use std::sync::atomic::Ordering;
+            crate::android_bridge::APP_OPENING.store(true, Ordering::SeqCst);
+            let waited = lock.lock();
+            crate::android_bridge::APP_OPENING.store(false, Ordering::SeqCst);
+            waited?;
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            eprintln!("Shoebox is already running.");
+            std::process::exit(0);
+        }
+    }
+    app.manage(lock);
+    let opts = AppOptions {
+        secrets: Some(secret_store(app.handle(), &data_dir)),
+        // Release builds bundle the search models as resources (tauri.models.conf.json).
+        model_dirs: app
+            .path()
+            .resource_dir()
+            .map(|d| vec![d.join("models")])
+            .unwrap_or_default(),
+        ..AppOptions::default()
+    };
+    let core = tauri::async_runtime::block_on(AppCore::open(&data_dir, opts))?;
+    // The system player reads videos held in the blob store through the core (`video.rs`).
+    #[cfg(target_os = "android")]
+    crate::video::install(core.clone());
+    // A background indexing run in this process borrows the core (S2-04).
+    #[cfg(target_os = "android")]
+    crate::android_bridge::set_app_core(
+        &core,
+        tauri::async_runtime::block_on(async { tokio::runtime::Handle::current() }),
+    );
+    // Tray icon (M3-16): the app keeps syncing with its window closed; Quit ends it.
+    #[cfg(desktop)]
+    setup_tray(app)?;
+
+    let mut events = core.events();
+    let handle = app.handle().clone();
+    #[cfg(desktop)]
+    let alerts_core = core.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut syncing = 0i32;
+        while let Ok(ev) = events.recv().await {
+            if let crate::types::AppEvent::Sync { phase, .. } = &ev {
+                syncing = if phase == "Started" {
+                    syncing + 1
+                } else {
+                    (syncing - 1).max(0)
+                };
+                #[cfg(desktop)]
+                if let Some(tray) = handle.tray_by_id("main") {
+                    let _ = tray.set_tooltip(Some(if syncing > 0 {
+                        "Shoebox: syncing…"
+                    } else {
+                        "Shoebox: up to date"
+                    }));
+                }
+            }
+            // With the window hidden (closed to the tray) nobody sees the banner: show a
+            // system notification for each new security alert instead (R1-06).
+            #[cfg(desktop)]
+            if ev == crate::types::AppEvent::SecurityChanged {
+                let hidden = handle
+                    .get_webview_window("main")
+                    .is_none_or(|w| !w.is_visible().unwrap_or(true));
+                if hidden {
+                    use tauri_plugin_notification::NotificationExt;
+                    for alert in alerts_core.take_unnotified_alerts() {
+                        let n = crate::notify::security_notification(&alert);
+                        let _ = handle
+                            .notification()
+                            .builder()
+                            .title(n.title)
+                            .body(n.body)
+                            .show();
+                    }
+                }
+            }
+            let _ = handle.emit("app-event", ev);
+        }
+    });
+    #[cfg(target_os = "android")]
+    {
+        // `set_photo_source` starts a background task: do it inside the runtime.
+        let source = std::sync::Arc::new(crate::android_photos::AndroidPhotoSource(
+            app.state::<crate::android_photos::PhotoLibrary>().0.clone(),
+        ));
+        let core = core.clone();
+        tauri::async_runtime::block_on(async move { core.set_photo_source(source) });
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        // The Photos library (P1-04) or an iPhone's or iPad's camera roll (I2-01): nothing
+        // is read until the person turns it on, which asks for access.
+        let source = std::sync::Arc::new(crate::macos_photos::PhotoKitSource::new(
+            core.data_dir().join("tmp").join("photos"),
+        ));
+        let core = core.clone();
+        tauri::async_runtime::block_on(async move { core.set_photo_source(source) });
+    }
+    app.manage(Core(core));
+    Ok(())
+}
+
+/// A launch that fails ends the process: say why, in a dialog and in `launch-error.log` in the
+/// data folder, rather than leaving only a crash report with no message in it.
+fn report_launch_failure(app: &tauri::App, e: &dyn std::error::Error) {
+    let mut text = e.to_string();
+    let mut source = e.source();
+    while let Some(s) = source {
+        text.push_str(&format!(": {s}"));
+        source = s.source();
+    }
+    tracing::error!("Shoebox could not start: {text}");
+    eprintln!("Shoebox could not start: {text}");
+    let log = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join("launch-error.log"));
+    if let Some(path) = &log {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        let lines = crate::diagnostics::log_tail(50).join("\n");
+        let _ = std::fs::write(path, format!("{stamp}\n{text}\n\nRecent log:\n{lines}\n"));
+    }
+    #[cfg(desktop)]
+    {
+        let mut msg = format!("Shoebox could not start.\n\n{text}");
+        if let Some(path) = &log {
+            msg.push_str(&format!("\n\nDetails were saved to {}.", path.display()));
+        }
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title("Shoebox")
+            .set_description(msg)
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+    }
 }
 
 /// Tray icon (M3-16): the app keeps syncing with its window closed; Quit ends it.

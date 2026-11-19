@@ -1604,6 +1604,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-vision",
  "qrcode",
+ "rfd",
  "serde",
  "serde_json",
  "shoebox-core",

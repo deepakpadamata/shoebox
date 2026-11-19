@@ -27,7 +27,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
-use tracing::{info, info_span, Instrument};
+use tracing::{info, info_span, warn, Instrument};
 
 pub use iroh::EndpointAddr as PeerAddr;
 
@@ -556,28 +556,38 @@ impl Node {
             let (events, _) = broadcast::channel(256);
             let lookup = MemoryLookup::new();
             let tracker = PeerTracker::new(events.clone());
-            let mut builder = match &config.relay {
-                RelaySetting::Disabled => Endpoint::builder(presets::Minimal),
-                RelaySetting::Default => Endpoint::builder(presets::N0),
-                RelaySetting::Custom(url) => {
-                    let url: iroh::RelayUrl = url
-                        .parse()
-                        .with_context(|| format!("invalid relay URL `{url}`"))?;
-                    Endpoint::builder(presets::Minimal)
-                        .relay_mode(iroh::RelayMode::Custom(iroh::RelayMap::from(url)))
+            let builder = |mdns: bool| -> Result<iroh::endpoint::Builder> {
+                let mut builder = match &config.relay {
+                    RelaySetting::Disabled => Endpoint::builder(presets::Minimal),
+                    RelaySetting::Default => Endpoint::builder(presets::N0),
+                    RelaySetting::Custom(url) => {
+                        let url: iroh::RelayUrl = url
+                            .parse()
+                            .with_context(|| format!("invalid relay URL `{url}`"))?;
+                        Endpoint::builder(presets::Minimal)
+                            .relay_mode(iroh::RelayMode::Custom(iroh::RelayMap::from(url)))
+                    }
+                };
+                if mdns {
+                    // Find devices on the same network without any server (works offline).
+                    builder = builder.address_lookup(MdnsAddressLookup::builder());
                 }
+                Ok(builder
+                    .secret_key(secret.clone())
+                    .address_lookup(lookup.clone())
+                    .hooks(tracker.clone()))
             };
-            if config.mdns {
-                // Find devices on the same network without any server (works offline).
-                builder = builder.address_lookup(MdnsAddressLookup::builder());
-            }
-            let endpoint = builder
-                .secret_key(secret)
-                .address_lookup(lookup.clone())
-                .hooks(tracker.clone())
-                .bind()
-                .await
-                .context("binding endpoint")?;
+            let endpoint = match builder(config.mdns)?.bind().await {
+                Ok(endpoint) => endpoint,
+                // LAN discovery can fail to start where the network is in an odd state (a VPN
+                // that is connected without internet, say): open without it rather than not at
+                // all, since nothing else here needs it.
+                Err(e) if config.mdns => {
+                    warn!("could not start with LAN discovery, opening without it: {e:#}");
+                    builder(false)?.bind().await.context("binding endpoint")?
+                }
+                Err(e) => return Err(e).context("binding endpoint"),
+            };
 
             // GC reclaims every untagged blob; docs content hashes are protected through the
             // protect handler so metadata entries are never collected from under the library.

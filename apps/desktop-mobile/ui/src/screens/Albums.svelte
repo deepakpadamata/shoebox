@@ -2,7 +2,7 @@
   // Albums (U1-10, U1-19): one list for the person's own albums and the shared ones (a Shared
   // pill, a badge for new photos), with Favorites and People as rows on top and Recently Deleted at
   // the bottom. ＋ makes an album or joins one with an invitation.
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { api, blobUrl } from '../lib/api';
   import { filterAlbums, type AlbumFilter } from '../lib/albumlist';
   import { plural } from '../lib/format';
@@ -28,10 +28,11 @@
   // A cover whose picture is not there (yet) shows the album's icon, not a broken image; it is
   // tried again when something changes (a thumbnail may have arrived).
   let broken = $state<Record<string, boolean>>({});
-  $effect(() => { app.version; app.sharedVersion; untrack(() => { broken = {}; }); });
+  $effect(() => { app.version; app.albumsVersion; app.holdingsVersion; app.sharedVersion; untrack(() => { broken = {}; }); });
   let seenMenu = ui.albumsMenu;
   $effect(() => { if (ui.albumsMenu !== seenMenu) { seenMenu = ui.albumsMenu; menuOpen = true; } });
-  $effect(() => { app.version; app.sharedVersion; untrack(() => { refreshAlbums().catch(() => {}); }); });
+  // The store keeps the list current as albums change; this only fetches it on opening.
+  onMount(() => { refreshAlbums().catch(() => {}); });
 
   async function create() {
     busy = true;

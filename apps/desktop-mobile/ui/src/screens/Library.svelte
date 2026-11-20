@@ -30,8 +30,11 @@
     /** For `search`: the query, and where to report what it was understood as. */
     query?: string;
     onsearch?: (page: Omit<SearchPage, 'items' | 'next'>) => void;
+    /** Kept mounted but out of sight (the phone's Photos tab under another one): changes are
+     *  reloaded once it shows again, not while hidden. */
+    hidden?: boolean;
   }
-  let { source, album, photo, query = '', onsearch }: Props = $props();
+  let { source, album, photo, query = '', onsearch, hidden = false }: Props = $props();
   // Search results ranked by relevance have no day headers.
   let ranked = $state(false);
 
@@ -226,21 +229,27 @@
     selected = selected.filter((id) => ids.has(id));
   }
 
-  // Reload when the library changes (debounced); start over when the source changes.
+  // Reload when the photos, their holdings or (for an album) the album change, debounced; start
+  // over when the source changes. Out of sight, a change is only noted until it shows again.
   let timer: ReturnType<typeof setTimeout> | undefined;
   let showing = '';
+  let seen = '';
   $effect(() => {
-    app.version;
+    const changes = `${app.version}/${app.holdingsVersion}/${source === 'album' ? app.albumsVersion : 0}`;
     const key = `${source}/${album ?? ''}/${query}`;
+    const away = hidden;
     untrack(() => {
-      clearTimeout(timer);
       if (key !== showing) {
+        clearTimeout(timer);
         showing = key;
+        seen = changes;
         generation++;
         loaded = false;
         complete = false;
         reload();
-      } else {
+      } else if (changes !== seen && !away) {
+        clearTimeout(timer);
+        seen = changes;
         timer = setTimeout(reload, 350);
       }
     });
@@ -290,7 +299,14 @@
     }
   }
 
-  const allFavorite = $derived(selected.length > 0 && selected.every((id) => items.find((p) => p.id === id)?.favorite));
+  // One pass over the photos, not a search of them for every selected one: with all of a large
+  // library selected that was billions of comparisons on each change.
+  const allFavorite = $derived.by(() => {
+    if (selected.length === 0) return false;
+    let favorites = 0;
+    for (const p of items) if (p.favorite && selectedSet.has(p.id)) favorites++;
+    return favorites === selectedSet.size;
+  });
 
   function keydown(e: KeyboardEvent) {
     if (viewing !== null) return;

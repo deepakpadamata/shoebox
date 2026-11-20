@@ -17,6 +17,7 @@
   onMount(() => { load().catch(fail); });
   $effect(() => {
     app.version;
+    app.holdingsVersion;
     untrack(() => { load().catch(() => {}); });
   });
 

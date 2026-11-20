@@ -678,8 +678,12 @@ ts_type! {
 ts_type! {
     /// Everything the UI is told about as it happens.
     pub enum AppEvent {
-        /// The library changed (local write or sync): refetch what is on screen.
+        /// Photos were added, changed or deleted (local write or sync): refetch what is on screen.
         LibraryChanged,
+        /// An album's name, cover or photos changed.
+        AlbumsChanged,
+        /// Which devices keep which photos changed: backed-up marks, counts and totals move.
+        HoldingsChanged,
         DevicesChanged,
         PeerConnected { id: String },
         PeerDisconnected { id: String },

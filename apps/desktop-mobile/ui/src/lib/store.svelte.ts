@@ -17,8 +17,12 @@ export const app = $state({
   counts: null as LibraryCounts | null,
   /** Personal and shared albums in one list (U1-19); the sidebar and the Albums screen read it. */
   albums: [] as AlbumEntry[],
-  /** Bumped whenever the library or the device list changed. */
+  /** Bumped whenever photos or the device list changed. */
   version: 0,
+  /** Bumped when an album changed (name, cover, photos). */
+  albumsVersion: 0,
+  /** Bumped, at most every few seconds, when which devices keep which photos changed. */
+  holdingsVersion: 0,
   devicesVersion: 0,
   /** Bumped when something changed in a shared album. */
   sharedVersion: 0,
@@ -97,24 +101,86 @@ export async function refreshState() {
   }
 }
 
+/** The window is showing. While it is hidden (minimised, in the tray, the phone app in the
+ *  background) nothing is reloaded: what changed is noted and reloaded once when it shows again. */
+export const page = $state({ visible: typeof document === 'undefined' || !document.hidden });
+
+type Versioned = 'version' | 'albumsVersion' | 'holdingsVersion' | 'devicesVersion' | 'sharedVersion';
+const missed = new Set<Versioned | 'counts' | 'albums' | 'state'>();
+
+/** Tell the screens that `what` changed, now or when the window shows again. */
+function bump(what: Versioned) {
+  if (page.visible) app[what]++;
+  else missed.add(what);
+}
+
 let countsTimer: ReturnType<typeof setTimeout> | undefined;
+let albumsTimer: ReturnType<typeof setTimeout> | undefined;
+function refreshCounts() {
+  if (!page.visible) return void missed.add('counts');
+  clearTimeout(countsTimer);
+  countsTimer = setTimeout(() => api.counts().then((c) => { app.counts = c; noteRisk(c.at_risk); }).catch(() => {}), 400);
+}
+function refreshAlbumsSoon() {
+  if (!page.visible) return void missed.add('albums');
+  clearTimeout(albumsTimer);
+  albumsTimer = setTimeout(() => refreshAlbums().catch(() => {}), 400);
+}
+function refreshStateSoon() {
+  if (!page.visible) return void missed.add('state');
+  refreshState().catch(() => {});
+}
+
+// Holdings move with every blob a fetch or a backup brings in: screens hear of it at most this often.
+const HOLDINGS_EVERY_MS = 5000;
+let holdingsAt = 0;
+let holdingsTimer: ReturnType<typeof setTimeout> | undefined;
+function holdingsChanged() {
+  refreshCounts();
+  if (holdingsTimer) return;
+  const wait = Math.max(0, holdingsAt + HOLDINGS_EVERY_MS - Date.now());
+  holdingsTimer = setTimeout(() => {
+    holdingsTimer = undefined;
+    holdingsAt = Date.now();
+    bump('holdingsVersion');
+  }, wait);
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    page.visible = !document.hidden;
+    if (!page.visible || missed.size === 0) return;
+    const was = new Set(missed);
+    missed.clear();
+    if (was.has('state')) refreshState().catch(() => {});
+    else {
+      if (was.has('counts')) refreshCounts();
+      if (was.has('albums')) refreshAlbumsSoon();
+    }
+    for (const w of ['version', 'albumsVersion', 'holdingsVersion', 'devicesVersion', 'sharedVersion'] as const) if (was.has(w)) app[w]++;
+  });
+}
 
 function handle(e: AppEvent) {
   if (e === 'LibraryChanged') {
-    app.version++;
-    clearTimeout(countsTimer);
-    countsTimer = setTimeout(() => { api.counts().then((c) => { app.counts = c; noteRisk(c.at_risk); }).catch(() => {}); refreshAlbums().catch(() => {}); }, 400);
+    bump('version');
+    refreshCounts();
+    // An album's count and cover follow its photos.
+    refreshAlbumsSoon();
+  } else if (e === 'AlbumsChanged') {
+    bump('albumsVersion');
+    refreshAlbumsSoon();
+  } else if (e === 'HoldingsChanged') {
+    holdingsChanged();
   } else if (e === 'DevicesChanged' || e === 'LibraryRotated') {
-    app.devicesVersion++;
-    app.version++;
-    refreshPeers().catch(() => {});
-    // This device's own name or role may be what changed.
-    refreshState().catch(() => {});
+    bump('devicesVersion');
+    bump('version');
+    // This device's own name or role may be what changed (it refreshes the peer count too).
+    refreshStateSoon();
   } else if (e === 'ArchiveImport') {
     api.archiveImportStatus().then((a) => (app.archive = a)).catch(() => {});
-    app.version++;
   } else if (e === 'SecurityChanged') {
-    refreshState().catch(() => {});
+    refreshStateSoon();
   } else if (e === 'RemovedFromLibrary') {
     app.removed = true;
   } else if (e === 'PairingDone') {
@@ -128,19 +194,18 @@ function handle(e: AppEvent) {
       app.pairingError = e.PairingFailed.reason;
     } else if ('ImportProgress' in e) {
       const { done, total } = e.ImportProgress;
+      // The photos it brings in send their own LibraryChanged.
       app.importProgress = done >= total ? null : { done, total };
-      app.version++;
     } else if ('Safety' in e) {
       app.backup_status = e.Safety.status;
     } else if ('SharedChanged' in e) {
-      app.sharedVersion++;
-      refreshAlbums().catch(() => {});
+      bump('sharedVersion');
+      refreshAlbumsSoon();
     } else if ('PeerConnected' in e || 'PeerDisconnected' in e) {
-      app.devicesVersion++;
+      bump('devicesVersion');
     } else if ('BackupProgress' in e) {
       const { done, total } = e.BackupProgress;
       app.backupProgress = done >= total ? null : { done, total };
-      app.version++;
     } else if ('GalleryDeletionsHeld' in e) {
       if (app.backup) app.backup = { ...app.backup, gallery_deletions_held: e.GalleryDeletionsHeld.count };
     } else if ('BackupPaused' in e) {

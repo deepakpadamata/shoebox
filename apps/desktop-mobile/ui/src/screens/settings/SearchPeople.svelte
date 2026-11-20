@@ -4,7 +4,7 @@
   import { api, type SearchStatus } from '../../lib/api';
   import { phoneAloneLine, processingHeadline, processingRows } from '../../lib/search';
   import { viewport } from '../../lib/viewport.svelte';
-  import { fail, toast } from '../../lib/store.svelte';
+  import { fail, page, toast } from '../../lib/store.svelte';
   import Button from '../../components/Button.svelte';
   import Toggle from '../../components/Toggle.svelte';
   import { cfg, loadSettings, save } from './store.svelte';
@@ -14,7 +14,8 @@
   onMount(() => {
     loadSettings();
     api.people().then((p) => (people = p.on)).catch(() => {});
-    const refresh = () => api.searchStatus().then((st) => (search = st)).catch(() => {});
+    // Every 3 s while this page shows; not while the window is hidden.
+    const refresh = () => { if (page.visible) api.searchStatus().then((st) => (search = st)).catch(() => {}); };
     refresh();
     const timer = setInterval(refresh, 3000);
     return () => clearInterval(timer);

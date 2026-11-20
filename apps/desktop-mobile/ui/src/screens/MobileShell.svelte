@@ -139,7 +139,7 @@
   <!-- The Photos and Albums tabs stay mounted once opened, hidden rather than removed, so each
        keeps its scroll position when you come back to it. -->
   <main class="content">
-    <div class="pane" class:off={!(sec === 'library' || sec === '')}><Library source="all" /></div>
+    <div class="pane" class:off={!(sec === 'library' || sec === '')}><Library source="all" hidden={!(sec === 'library' || sec === '')} /></div>
     {#if visitedAlbums}<div class="pane" class:off={sec !== 'albums'}><Albums /></div>{/if}
     {#if sec === 'favorites'}<Library source="favorites" />
     {:else if sec === 'album'}{#key param()}<AlbumPage id={param()!} />{/key}

@@ -3,10 +3,11 @@
   // Devices (mockup 07): one list of who has the library, how each is connected, what it keeps and
   // what it is sending or getting right now, under a card that says what is moving and opens into
   // this device's queue. Adding a device with a QR code and the six-digit code, roles, removing.
-  import { onDestroy, onMount, untrack } from 'svelte';
-  import { api, blobUrl, type DeviceInfo, type DeviceStorageInfo, type SearchStatus, type TransferItem, type Transfers } from '../lib/api';
+  import { onMount, untrack } from 'svelte';
+  import { api, blobUrl, type DeviceInfo, type DeviceStorageInfo, type TransferItem } from '../lib/api';
   import { deviceIndexLine } from '../lib/search';
-  import { GrowthRates, rowActivity, speed, summarize } from '../lib/activity';
+  import { rowActivity, speed, summarize } from '../lib/activity';
+  import { live, loadStorage, watch } from '../lib/devicesPoll.svelte';
   import { bytes, plural } from '../lib/format';
   import { viewport } from '../lib/viewport.svelte';
   import { app, fail, toast } from '../lib/store.svelte';
@@ -24,13 +25,12 @@
   // live on the Backup page, U1-12).
   let { mode = 'devices' }: { mode?: 'devices' | 'activity' } = $props();
   let devices = $state<DeviceInfo[]>([]);
-  let storage = $state<DeviceStorageInfo[]>([]);
-  let transfers = $state<Transfers | null>(null);
-  // What this device knows of search indexing, and who does it (refreshed while the screen is open).
-  let search = $state<SearchStatus | null>(null);
-  let total = $state(0);
-  let rates = $state<Record<string, number>>({});
-  const growth = new GrowthRates();
+  // What moves, who keeps how much, and search indexing: polled once for every panel on screen.
+  const storage = $derived(live.storage);
+  const transfers = $derived(live.transfers);
+  const search = $derived(live.search);
+  const total = $derived(live.total);
+  const rates = $derived(live.rates);
   const used = (s: DeviceStorageInfo) => s.original_bytes + s.other_bytes;
   const storeOf = (d: DeviceInfo): DeviceStorageInfo => storage.find((x) => x.id === d.id) ?? { id: d.id, originals: 0, original_bytes: 0, other_bytes: 0 };
   // This device first, then the others by how much they keep (the bars share one scale).
@@ -79,33 +79,13 @@
   // that is no admin, needs the recovery phrase.
   const needsPhrase = $derived(!!revoking && (revoking.admin || !me?.admin));
 
-  async function loadStorage() {
-    const [s, c] = await Promise.all([api.deviceStorage(), api.counts()]);
-    storage = s;
-    total = c.photos;
-    growth.add(s);
-    rates = growth.rates();
-  }
   async function load() {
     devices = await api.devices();
     // Totals walk every photo's holdings: fetched after the list so it never waits on them.
     loadStorage().catch(() => {});
   }
-  // While the screen is open: what moves, every 1.5 s; who holds what, every 10 s.
-  let ticks = 0;
-  const poll = setInterval(() => {
-    api.transfers().then((t) => (transfers = t)).catch(() => {});
-    if (++ticks % 7 === 0) loadStorage().catch(() => {});
-  }, 1500);
-  onDestroy(() => clearInterval(poll));
-  onMount(() => {
-    load().catch(fail);
-    api.transfers().then((t) => (transfers = t)).catch(() => {});
-    const refreshSearch = () => api.searchStatus().then((st) => (search = st)).catch(() => {});
-    refreshSearch();
-    const timer = setInterval(refreshSearch, 10_000);
-    return () => clearInterval(timer);
-  });
+  // While the panel is open: what moves every 1.5 s, who holds what every 10 s (shared).
+  onMount(() => watch({ search: mode === 'devices' }));
   $effect(() => {
     app.devicesVersion;
     untrack(() => { load().catch(() => {}); });

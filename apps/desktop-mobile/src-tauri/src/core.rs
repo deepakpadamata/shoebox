@@ -685,14 +685,26 @@ impl AppCore {
     fn forward_library_changes(self: &Arc<Self>, ln: &LibraryNode<Library>) {
         let weak = Arc::downgrade(self);
         let mut changes = ln.store().subscribe();
+        // Screens are told what kind changed, so a fetch that only moves holdings does not reload
+        // the photo list; index, people and sync-progress changes have their own status calls and
+        // send nothing.
         tokio::spawn(async move {
             use shoebox_core::store::Change;
             while let Some(change) = futures::StreamExt::next(&mut changes).await {
-                let Some(core) = weak.upgrade() else { break };
-                core.emit(match change {
+                let event = match change {
+                    Change::PhotoUpserted(_)
+                    | Change::PhotoDeleted(_)
+                    | Change::MotionChanged(_)
+                    | Change::SettingChanged(_) => AppEvent::LibraryChanged,
+                    Change::AlbumChanged(_) => AppEvent::AlbumsChanged,
+                    Change::HoldingsChanged { .. } => AppEvent::HoldingsChanged,
                     Change::DeviceListChanged => AppEvent::DevicesChanged,
-                    _ => AppEvent::LibraryChanged,
-                });
+                    Change::IndexChanged
+                    | Change::PeopleChanged
+                    | Change::RemoteSyncProgress { .. } => continue,
+                };
+                let Some(core) = weak.upgrade() else { break };
+                core.emit(event);
             }
         });
     }

@@ -68,7 +68,10 @@ fn heif_has_metadata_item(d: &[u8]) -> Result<bool, StripError> {
                 1 => {
                     let big = d.get(pos + 8..pos + 16).ok_or_else(|| bad("box size"))?;
                     let big = u64::from_be_bytes(big.try_into().expect("8 bytes"));
-                    (16, pos.saturating_add(usize::try_from(big).map_err(|_| bad("box size"))?))
+                    (
+                        16,
+                        pos.saturating_add(usize::try_from(big).map_err(|_| bad("box size"))?),
+                    )
                 }
                 n => (8, pos.saturating_add(n)),
             };

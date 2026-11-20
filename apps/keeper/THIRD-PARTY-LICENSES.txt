@@ -42,7 +42,7 @@ From OpenAI CLIP (https://github.com/openai/CLIP), Copyright (c) 2021 OpenAI, MI
 libheif 1.23.1 (vendor/libheif-sys/vendor/libheif), HEIC decoding: LGPL-3.0-or-later  (full text below, each source tree in this repository)
 libde265 1.0.16 (vendor/libde265), HEVC decoding: LGPL-3.0-or-later  (full text below, each source tree in this repository)
 
-== Rust crates (648) ==
+== Rust crates (683) ==
 
 acto 0.8.2: Apache-2.0 OR MIT  [standard MIT text; copyright Roland Kuhn <rk@rkuhn.info>]
 adler2 2.0.1: 0BSD OR MIT OR Apache-2.0  [a21c914647d3, 1bc86297d032, 30fefc3a7d6a]
@@ -51,6 +51,8 @@ aes 0.8.4: MIT OR Apache-2.0  [e8541ea93f02, 33e996382660]
 aes-gcm 0.10.3: Apache-2.0 OR MIT  [e8541ea93f02, e90ad0f8f6fe]
 ahash 0.8.12: MIT OR Apache-2.0  [954f335b8baf, d03325792f3d]
 aho-corasick 1.1.5: Unlicense OR MIT  [65314a6c9668, 154c1af2b38e]
+aligned 0.4.3: MIT OR Apache-2.0  [954f335b8baf, 8adee6e9dc6d]
+aligned-vec 0.6.4: MIT  [f3d5a6ab65e6]
 android_system_properties 0.1.6: MIT OR Apache-2.0  [dd0815108f8e, af6e2a74133b]
 anstream 1.0.0: MIT OR Apache-2.0  [6dc0e068dcf3, 4498464c2864]
 anstyle 1.0.14: MIT OR Apache-2.0  [6dc0e068dcf3, 4498464c2864]
@@ -62,8 +64,10 @@ anymap3 1.1.0: BlueOak-1.0.0 OR MIT OR Apache-2.0  [4afd83b2f5b6]
 append-only-bytes 0.1.12: MIT  [standard MIT text; copyright zxch3n <remch183@outlook.com>]
 arbitrary 1.5.0: MIT OR Apache-2.0  [954f335b8baf, 66a2ea9ed607]
 arc-swap 1.9.3: MIT OR Apache-2.0  [954f335b8baf, 0f1d575cfca3]
+arg_enum_proc_macro 0.3.4: MIT  [d35b20f68e40]
 arrayvec 0.7.8: MIT OR Apache-2.0  [954f335b8baf, 92c666480f81]
 arref 0.1.0: MIT  [standard MIT text; copyright zxch3n <remch183@outlook.com>]
+as-slice 0.2.1: MIT OR Apache-2.0  [954f335b8baf, 42926e590380]
 asn1-rs 0.7.2: MIT OR Apache-2.0  [954f335b8baf, 9206df1d7be3]
 asn1-rs-derive 0.6.0: MIT OR Apache-2.0  [954f335b8baf, 9206df1d7be3]
 asn1-rs-impl 0.2.0: MIT/Apache-2.0  [standard MIT text; copyright Pierre Chifflier <chifflier@wzdftpd.net>]
@@ -74,6 +78,9 @@ atomic-polyfill 1.0.3: MIT OR Apache-2.0  [954f335b8baf, e8cf216ee150]
 atomic-waker 1.1.2: Apache-2.0 OR MIT  [954f335b8baf, 30fefc3a7d6a, 20746cc8a2fd]
 attohttpc 0.30.1: MPL-2.0  [4e861f72ed7f]
 autocfg 1.5.1: Apache-2.0 OR MIT  [954f335b8baf, 99afaa30c178]
+av-scenechange 0.14.1: MIT  [1adaa62299b4]
+av1-grain 0.2.5: BSD-2-Clause  [c65bfe3f2047]
+avif-serialize 0.8.9: BSD-3-Clause  [a0d6ea9932a4]
 backon 1.6.0: Apache-2.0  [3bd0a7ed85d4]
 bao-tree 0.16.1: MIT OR Apache-2.0  [ccbceaf32328, 45febb07067a]
 base16ct 1.0.0: Apache-2.0 OR MIT  [e8541ea93f02, 37ddaab5dc31]
@@ -88,11 +95,13 @@ bit-vec 0.9.1: Apache-2.0 OR MIT  [7e1b38c60796, 4c4e6eed8b86]
 bitcoin_hashes 0.14.101: CC0-1.0  [public-domain dedication: no notice required]
 bitflags 2.13.2: MIT OR Apache-2.0  [954f335b8baf, 14435fbcd271]
 bitmaps 2.1.0: MPL-2.0+  [f7d76d358113]
+bitstream-io 4.10.0: MIT/Apache-2.0  [954f335b8baf, 39cf2da102e4]
 blake3 1.8.7: CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception  [fb348df332f3, 75b396e36891, 6d489af62926]
 block-buffer 0.12.1: MIT OR Apache-2.0  [e8541ea93f02, 775a3e20a9af]
 block2 0.6.2: MIT  [standard MIT text; copyright Mads Marquart <mads@marquart.dk>]
 borsh 1.8.1: MIT OR Apache-2.0  [628e23a221a6, 30fefc3a7d6a]
 borsh-derive 1.8.1: Apache-2.0  [628e23a221a6, 30fefc3a7d6a]
+built 0.8.1: MIT  [20005777a5fe]
 bumpalo 3.20.3: MIT OR Apache-2.0  [954f335b8baf, 5662394bebb1]
 bytemuck 1.25.2: Zlib OR Apache-2.0 OR MIT  [0e3cbff251c1, dfbd1c2a36dc, 943f36fd309f]
 byteorder 1.5.0: Unlicense OR MIT  [65314a6c9668, 154c1af2b38e]
@@ -172,6 +181,8 @@ enum-as-inner 0.6.1: MIT/Apache-2.0  [6dc0e068dcf3, 5aa1a733b86e]
 enum-assoc 1.4.1: MIT OR Apache-2.0  [standard MIT text; copyright Griffin O'Neill <gsoneill1003@gmail.com>]
 enum_dispatch 0.3.13: MIT OR Apache-2.0  [5c0ef05f8439]
 enumn 0.1.14: MIT OR Apache-2.0  [85ad950cce87, 30fefc3a7d6a]
+equator 0.4.2: MIT  [fcda9ee8d6c9]
+equator-macro 0.4.2: MIT  [fcda9ee8d6c9]
 equivalent 1.0.3: Apache-2.0 OR MIT  [954f335b8baf, 4428cd87371a]
 erased-serde 0.4.10: MIT OR Apache-2.0  [85ad950cce87, 30fefc3a7d6a]
 errno 0.3.14: MIT OR Apache-2.0  [954f335b8baf, 7f91c2a4eddb]
@@ -256,11 +267,13 @@ igd-next 0.17.1: MIT  [ebc0dd25a19e]
 im 15.1.0: MPL-2.0+  [f7d76d358113]
 image 0.25.10: MIT OR Apache-2.0  [4bf96504d6e8, 77949ead506e]
 image-webp 0.2.4: MIT OR Apache-2.0  [4bf96504d6e8, 77949ead506e]
+imgref 1.12.3: CC0-1.0 OR Apache-2.0  [283ea6cc2997, 6d489af62926]
 indexmap 2.14.2: Apache-2.0 OR MIT  [954f335b8baf, 4f2ac128e429]
 inotify 0.11.5: ISC  [f68878c9ca61]
 inotify-sys 0.1.8: ISC  [f68878c9ca61]
 inout 0.1.4: MIT OR Apache-2.0  [e8541ea93f02, 71366a4092ad]
 inplace-vec-builder 0.1.1: MIT OR Apache-2.0  [standard MIT text; copyright Rüdiger Klaehn <rklaehn@protonmail.com>]
+interpolate_name 0.2.4: MIT  [d35b20f68e40]
 inventory 0.3.25: MIT OR Apache-2.0  [85ad950cce87, 30fefc3a7d6a]
 ipconfig 0.3.4: MIT/Apache-2.0  [954f335b8baf, a92280f13b91]
 ipnet 2.12.2: MIT OR Apache-2.0  [9d8e882729a5, c935506fff2e]
@@ -282,6 +295,7 @@ irpc-derive 0.17.0: Apache-2.0/MIT  [standard MIT text; copyright Rüdiger Klaeh
 is_terminal_polyfill 1.70.2: MIT OR Apache-2.0  [6dc0e068dcf3, 4498464c2864]
 itertools 0.11.0: MIT OR Apache-2.0  [954f335b8baf, fdd1c2117bcf]
 itertools 0.12.1: MIT OR Apache-2.0  [954f335b8baf, fdd1c2117bcf]
+itertools 0.14.0: MIT OR Apache-2.0  [954f335b8baf, fdd1c2117bcf]
 itertools 0.15.0: MIT OR Apache-2.0  [954f335b8baf, fdd1c2117bcf]
 itoa 1.0.18: MIT OR Apache-2.0  [85ad950cce87, 30fefc3a7d6a]
 jni 0.21.1: MIT/Apache-2.0  [954f335b8baf, 6c1dcd86d8ae]
@@ -290,6 +304,7 @@ jni-macros 0.22.4: MIT OR Apache-2.0  [standard MIT text]
 jni-sys 0.3.1: MIT OR Apache-2.0  [6dc0e068dcf3, 3a771adcf280]
 jni-sys 0.4.1: MIT OR Apache-2.0  [6dc0e068dcf3, 3a771adcf280]
 jni-sys-macros 0.4.1: MIT OR Apache-2.0  [standard MIT text; copyright Robert Bragg <robert@sixbynine.org>]
+jobserver 0.1.35: MIT OR Apache-2.0  [954f335b8baf, 84e1bbfebd74]
 jpeg-encoder 0.7.1: (MIT OR Apache-2.0) AND IJG  [041f184d92c8, 2f0fcada1abd, 4d022727ea39]
 js-sys 0.3.106: MIT OR Apache-2.0  [954f335b8baf, 84e1bbfebd74]
 kamadak-exif 0.6.1: BSD-2-Clause  [933c358b539d]
@@ -298,6 +313,7 @@ kqueue-sys 1.1.2: MIT  [208693b9bfa9]
 lazy_static 1.5.1: MIT OR Apache-2.0  [954f335b8baf, 30fefc3a7d6a]
 leb128 0.2.7: MIT OR Apache-2.0  [954f335b8baf, 033a9383ff21]
 libc 0.2.189: MIT OR Apache-2.0  [85ad950cce87, c96302294382]
+libfuzzer-sys 0.4.13: (MIT OR Apache-2.0) AND NCSA  [954f335b8baf, 9e0027807b0c]
 libheif-rs 3.0.0: MIT  [5377a4be6a94]
 libheif-sys 5.3.1+1.23.1: MIT  [5377a4be6a94]
 libm 0.2.16: MIT  [5f5535fee8ec]
@@ -306,6 +322,7 @@ litemap 0.8.3: Unicode-3.0  [cde87abe221f]
 lock_api 0.4.14: MIT OR Apache-2.0  [954f335b8baf, 8d1f81ea4e87]
 log 0.4.34: MIT OR Apache-2.0  [954f335b8baf, 14435fbcd271]
 loom 0.7.2: MIT  [12c7116c4425]
+loop9 0.1.5: MIT  [e8b343631bd8]
 loro 1.17.0: MIT  [bf160605d9c7]
 loro-common 1.17.0: MIT  [bf160605d9c7]
 loro-delta 1.13.0: MIT  [2510255dd9df]
@@ -321,6 +338,7 @@ mac-addr 0.3.0: MIT  [7d18562adb19]
 maplit 1.0.2: MIT/Apache-2.0  [954f335b8baf, fdd1c2117bcf]
 matchers 0.2.0: MIT  [2aca90f05dbb]
 matrixmultiply 0.3.11: MIT/Apache-2.0  [954f335b8baf, ba688422eec3]
+maybe-rayon 0.1.1: MIT  [0492c8a4e61d]
 md5 0.7.0: Apache-2.0/MIT  [b5b039d5fd70]
 memchr 2.8.3: Unlicense OR MIT  [65314a6c9668, 154c1af2b38e]
 memmap2 0.9.12: MIT OR Apache-2.0  [b733dbc79d3d, c18ee669bac9]
@@ -338,6 +356,7 @@ n0-error 1.0.1: MIT OR Apache-2.0  [9c25f475f1c4, 2df1f251deeb]
 n0-error-macros 1.0.1: MIT OR Apache-2.0  [standard MIT text; copyright Frando <franz@n0.computer>, n0 team]
 n0-future 0.3.2: MIT OR Apache-2.0  [c2a82d0611f0, 71b022e7957b]
 n0-watcher 1.0.1: MIT OR Apache-2.0  [9c25f475f1c4, 2df1f251deeb]
+nasm-rs 0.3.2: MIT OR Apache-2.0  [954f335b8baf, 8d1f81ea4e87]
 ndarray 0.17.2: MIT OR Apache-2.0  [954f335b8baf, 4592fdb8ac55]
 ndk-context 0.1.1: MIT OR Apache-2.0  [standard MIT text; copyright The Rust Windowing contributors]
 nested_enum_utils 0.2.3: MIT OR Apache-2.0  [c2a82d0611f0, 71b022e7957b]
@@ -351,11 +370,14 @@ netlink-proto 0.12.2: MIT  [778f4b3d1627]
 netlink-sys 0.8.8: MIT  [778f4b3d1627]
 netlink-sys 0.9.0: MIT  [778f4b3d1627]
 netwatch 0.19.3: MIT OR Apache-2.0  [standard MIT text; copyright n0 team]
+new_debug_unreachable 1.0.6: MIT  [42d8a095dbff]
 nix 0.31.3: MIT  [b9b039b5058c]
+no_std_io2 0.9.4: Apache-2.0 OR MIT  [6dc0e068dcf3, 8b36c5b71ae0]
 nom 7.1.3: MIT  [e9f8a16f9ed6]
 nom 8.0.0: MIT  [e9f8a16f9ed6]
 nom-language 0.1.0: MIT  [standard MIT text; copyright contact@geoffroycouprie.com]
 nonmax 0.5.5: MIT OR Apache-2.0  [3807885510ca, a7a9cf0c9371]
+noop_proc_macro 0.3.0: MIT  [c458d35c33fe]
 noq 1.4.0: MIT OR Apache-2.0  [794a707adfe7, b508bd23034d]
 noq-proto 1.4.0: MIT OR Apache-2.0  [794a707adfe7, b508bd23034d]
 noq-udp 1.4.0: MIT OR Apache-2.0  [794a707adfe7, b508bd23034d]
@@ -366,6 +388,7 @@ num 0.4.3: MIT OR Apache-2.0  [954f335b8baf, 14435fbcd271]
 num-bigint 0.4.8: MIT OR Apache-2.0  [954f335b8baf, 14435fbcd271]
 num-complex 0.4.6: MIT OR Apache-2.0  [954f335b8baf, 14435fbcd271]
 num-conv 0.2.2: MIT OR Apache-2.0  [4bf96504d6e8, 4d83b119f786]
+num-derive 0.4.2: MIT OR Apache-2.0  [954f335b8baf, 14435fbcd271]
 num-integer 0.1.47: MIT OR Apache-2.0  [954f335b8baf, 14435fbcd271]
 num-iter 0.1.46: MIT OR Apache-2.0  [954f335b8baf, 14435fbcd271]
 num-rational 0.4.2: MIT OR Apache-2.0  [954f335b8baf, 14435fbcd271]
@@ -390,6 +413,7 @@ parking 2.2.1: Apache-2.0 OR MIT  [954f335b8baf, 30fefc3a7d6a, c43e20176655]
 parking_lot 0.12.5: MIT OR Apache-2.0  [954f335b8baf, 8d1f81ea4e87]
 parking_lot_core 0.9.12: MIT OR Apache-2.0  [954f335b8baf, 8d1f81ea4e87]
 paste 1.0.15: MIT OR Apache-2.0  [85ad950cce87, 30fefc3a7d6a]
+pastey 0.1.1: MIT OR Apache-2.0  [85ad950cce87, 30fefc3a7d6a]
 pastey 0.2.3: MIT OR Apache-2.0  [85ad950cce87, 30fefc3a7d6a]
 pem 4.0.0: MIT  [fd270b8c59ed]
 pem-rfc7468 1.0.0: Apache-2.0 OR MIT  [e8541ea93f02, 52e2ebc2e3f5]
@@ -424,6 +448,8 @@ proc-macro-error 0.4.12: MIT OR Apache-2.0  [a74f32c9e481, 1128477e9c9f]
 proc-macro-error-attr 0.4.12: MIT OR Apache-2.0  [2bbedf556bfd, c7495b7b3a52]
 proc-macro-hack 0.5.20+deprecated: MIT OR Apache-2.0  [954f335b8baf, 815ee3575dd3]
 proc-macro2 1.0.107: MIT OR Apache-2.0  [85ad950cce87, 30fefc3a7d6a]
+profiling 1.0.18: MIT OR Apache-2.0  [standard MIT text; copyright Philip Degarmo <aclysma@gmail.com>]
+profiling-procmacros 1.0.18: MIT OR Apache-2.0  [standard MIT text; copyright Philip Degarmo <aclysma@gmail.com>]
 prost 0.14.4: Apache-2.0  [954f335b8baf]
 prost-derive 0.14.4: Apache-2.0  [954f335b8baf]
 psm 0.1.24: MIT OR Apache-2.0  [041f184d92c8, 5299390bd4b8]
@@ -436,14 +462,19 @@ r-efi 5.3.0: MIT OR Apache-2.0 OR LGPL-2.1-or-later  [standard MIT text]
 r-efi 6.0.0: MIT OR Apache-2.0 OR LGPL-2.1-or-later  [standard MIT text]
 rand 0.10.3: MIT OR Apache-2.0  [fee4d7ce394c, cc367a7134c2]
 rand 0.8.8: MIT OR Apache-2.0  [fee4d7ce394c, cc367a7134c2]
+rand 0.9.5: MIT OR Apache-2.0  [fee4d7ce394c, cc367a7134c2]
 rand_chacha 0.3.1: MIT OR Apache-2.0  [e7330bf53074, cc367a7134c2]
+rand_chacha 0.9.0: MIT OR Apache-2.0  [fee4d7ce394c, cc367a7134c2]
 rand_core 0.10.1: MIT OR Apache-2.0  [179c83ef07a5, 704f0e5f1c84]
 rand_core 0.6.4: MIT OR Apache-2.0  [179c83ef07a5, cc367a7134c2]
+rand_core 0.9.5: MIT OR Apache-2.0  [179c83ef07a5, cc367a7134c2]
 rand_distr 0.6.0: MIT OR Apache-2.0  [179c83ef07a5, 7e079b7f6983]
 rand_pcg 0.10.2: MIT OR Apache-2.0  [179c83ef07a5, c3df7fccc8e5]
 rand_xoshiro 0.6.0: MIT OR Apache-2.0  [954f335b8baf, b27b33ef41f4]
 range-collections 0.4.6: MIT OR Apache-2.0  [283ea6cc2997, 442f380582c6]
 rapidhash 4.5.1: MIT OR Apache-2.0  [3dda849c28f6, 66adf177cdcd]
+rav1e 0.8.1: BSD-2-Clause  [c0333bf27066]
+ravif 0.13.0: BSD-3-Clause  [15422e729573]
 rawpointer 0.2.1: MIT/Apache-2.0  [954f335b8baf, fdd1c2117bcf]
 rayon 1.12.0: MIT OR Apache-2.0  [954f335b8baf, 9e0027807b0c]
 rayon-core 1.13.0: MIT OR Apache-2.0  [954f335b8baf, 9e0027807b0c]
@@ -457,6 +488,7 @@ reflink-copy 0.1.30: MIT/Apache-2.0  [85ad950cce87, 30fefc3a7d6a]
 regex-automata 0.4.18: MIT OR Apache-2.0  [954f335b8baf, 14435fbcd271]
 regex-syntax 0.8.11: MIT OR Apache-2.0  [954f335b8baf, 14435fbcd271]
 reqwest 0.13.5: MIT OR Apache-2.0  [5c3866f31ed2, bde59a7e336f]
+rgb 0.8.53: MIT  [c7d50fa44b04]
 ring 0.17.14: Apache-2.0 AND ISC  [edb9c6dbff46, 473867fcf89f, 07414b6c33f3]
 rustc-hash 2.1.3: Apache-2.0 OR MIT  [85ad950cce87, 30fefc3a7d6a]
 rustc_version 0.4.1: MIT OR Apache-2.0  [954f335b8baf, 8d1f81ea4e87]
@@ -500,6 +532,7 @@ signal-hook-registry 1.4.8: MIT OR Apache-2.0  [954f335b8baf, aaac889d0a4a]
 signature 3.0.0: Apache-2.0 OR MIT  [e8541ea93f02, 44280199f723]
 simd-adler32 0.3.10: MIT  [627eff66d6c4]
 simd_cesu8 1.2.0: Apache-2.0 OR MIT  [954f335b8baf, 30fefc3a7d6a]
+simd_helpers 0.1.0: MIT  [standard MIT text; copyright Luca Barbato <lu_zero@gentoo.org>]
 simdutf8 0.1.5: MIT OR Apache-2.0  [4bf96504d6e8, 1847e0e06981]
 simple-dns 0.12.0: MIT  [8ae7cbc4e89c]
 siphasher 1.0.4: MIT OR Apache-2.0  [24e26e8fb783, 283ea6cc2997, 21a2121221d2]
@@ -597,6 +630,7 @@ untrusted 0.9.0: ISC  [a1fff3442978]
 url 2.5.8: MIT OR Apache-2.0  [954f335b8baf, 7a8093fb4a93]
 utf8_iter 1.0.4: Apache-2.0 OR MIT  [283ea6cc2997, 7dc2f6402447]
 utf8parse 0.2.2: Apache-2.0 OR MIT  [85ad950cce87, db2c904eb568]
+v_frame 0.3.9: BSD-2-Clause  [615e13b59408]
 valuable 0.1.1: MIT  [standard MIT text]
 vcpkg 0.2.15: MIT/Apache-2.0  [954f335b8baf, 6196143cbaf5]
 version-compare 0.2.1: MIT  [2970d8b03b77]
@@ -674,6 +708,7 @@ xattr 1.7.0: MIT OR Apache-2.0  [954f335b8baf, 7bdd5c5e8ad0]
 xml-rs 0.8.29: MIT  [06250c7066bc]
 xmltree 0.10.3: MIT  [a585c8731f2d]
 xxhash-rust 0.8.19: BSL-1.0  [8d8291caf1ce]
+y4m 0.8.0: MIT  [6e2d308b0350]
 yansi 1.0.1: MIT OR Apache-2.0  [6b2b73c04ae9, aa62629b3907]
 yasna 0.6.0: MIT OR Apache-2.0  [954f335b8baf, 02273814a856]
 yoke 0.8.3: Unicode-3.0  [cde87abe221f]
@@ -929,7 +964,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
---- [30fefc3a7d6a] used by: adler2 2.0.1, anyhow 1.0.104, async-channel 2.5.0, async-trait 0.1.92, atomic-waker 1.1.2, borsh 1.8.1, borsh-derive 1.8.1, concurrent-queue 2.5.0, curve25519-dalek-derive 0.1.1, displaydoc 0.2.7, dyn-clone 1.0.20, dyn-hash 1.0.0, enumn 0.1.14, erased-serde 0.4.10, event-listener 5.4.2, event-listener-strategy 0.5.4, fastrand 2.5.0, futures-lite 2.6.1, inventory 0.3.25, itoa 1.0.18, lazy_static 1.5.1, linux-raw-sys 0.12.1, minimal-lexical 0.2.1, num_enum 0.7.6, num_enum_derive 0.7.6, once_cell 1.21.4, parking 2.2.1, paste 1.0.15, pastey 0.2.3, pest 2.9.4, pest_derive 2.9.4, pest_generator 2.9.4, pest_meta 2.9.4, pin-project 1.1.13, pin-project-internal 1.1.13, pin-project-lite 0.2.17, portable-atomic 1.15.0, portable-atomic-util 0.2.8, proc-macro-crate 3.5.0, proc-macro2 1.0.107, quote 1.0.47, ref-cast 1.0.27, ref-cast-impl 1.0.27, reflink-copy 0.1.30, rustc-hash 2.1.3, rustix 1.1.6, rustversion 1.0.23, semver 1.0.28, send_wrapper 0.6.0, serde 1.0.229, serde_bytes 0.11.19, serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.154, simd_cesu8 1.2.0, smol_str 0.1.24, syn 1.0.109, syn 2.0.119, syn 3.0.9, syn-mid 0.5.4, system-deps 8.0.0, thiserror 1.0.69, thiserror 2.0.21, thiserror-impl 1.0.69, thiserror-impl 2.0.21, tract-core 0.23.9, tract-data 0.23.9, tract-hir 0.23.9, tract-linalg 0.23.9, tract-nnef 0.23.9, tract-onnx 0.23.9, tract-onnx-opl 0.23.9, typed-path 0.13.0, typeid 1.0.3, unicode-ident 1.0.27, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.4+wasi-0.2.12, wasm-streams 0.5.0, wit-bindgen 0.57.1, wmi 0.18.4, zmij 1.0.23
+--- [30fefc3a7d6a] used by: adler2 2.0.1, anyhow 1.0.104, async-channel 2.5.0, async-trait 0.1.92, atomic-waker 1.1.2, borsh 1.8.1, borsh-derive 1.8.1, concurrent-queue 2.5.0, curve25519-dalek-derive 0.1.1, displaydoc 0.2.7, dyn-clone 1.0.20, dyn-hash 1.0.0, enumn 0.1.14, erased-serde 0.4.10, event-listener 5.4.2, event-listener-strategy 0.5.4, fastrand 2.5.0, futures-lite 2.6.1, inventory 0.3.25, itoa 1.0.18, lazy_static 1.5.1, linux-raw-sys 0.12.1, minimal-lexical 0.2.1, num_enum 0.7.6, num_enum_derive 0.7.6, once_cell 1.21.4, parking 2.2.1, paste 1.0.15, pastey 0.1.1, pastey 0.2.3, pest 2.9.4, pest_derive 2.9.4, pest_generator 2.9.4, pest_meta 2.9.4, pin-project 1.1.13, pin-project-internal 1.1.13, pin-project-lite 0.2.17, portable-atomic 1.15.0, portable-atomic-util 0.2.8, proc-macro-crate 3.5.0, proc-macro2 1.0.107, quote 1.0.47, ref-cast 1.0.27, ref-cast-impl 1.0.27, reflink-copy 0.1.30, rustc-hash 2.1.3, rustix 1.1.6, rustversion 1.0.23, semver 1.0.28, send_wrapper 0.6.0, serde 1.0.229, serde_bytes 0.11.19, serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.154, simd_cesu8 1.2.0, smol_str 0.1.24, syn 1.0.109, syn 2.0.119, syn 3.0.9, syn-mid 0.5.4, system-deps 8.0.0, thiserror 1.0.69, thiserror 2.0.21, thiserror-impl 1.0.69, thiserror-impl 2.0.21, tract-core 0.23.9, tract-data 0.23.9, tract-hir 0.23.9, tract-linalg 0.23.9, tract-nnef 0.23.9, tract-onnx 0.23.9, tract-onnx-opl 0.23.9, typed-path 0.13.0, typeid 1.0.3, unicode-ident 1.0.27, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.4+wasi-0.2.12, wasm-streams 0.5.0, wit-bindgen 0.57.1, wmi 0.18.4, zmij 1.0.23
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -1259,7 +1294,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
---- [954f335b8baf] used by: ahash 0.8.12, arbitrary 1.5.0, arc-swap 1.9.3, arrayvec 0.7.8, asn1-rs 0.7.2, asn1-rs-derive 0.6.0, async-channel 2.5.0, atomic-polyfill 1.0.3, atomic-waker 1.1.2, autocfg 1.5.1, base64 0.22.1, base64 0.23.1, bitflags 2.13.2, bumpalo 3.20.3, cc 1.9.0, cfg-if 1.0.5, cmake 0.1.58, concurrent-queue 2.5.0, core-foundation 0.10.1, core-foundation-sys 0.8.7, critical-section 1.2.0, crossbeam-deque 0.8.8, crossbeam-epoch 0.9.21, crossbeam-utils 0.8.23, curve25519-dalek-derive 0.1.1, der-parser 10.0.0, derive_arbitrary 1.5.0, displaydoc 0.2.7, either 1.19.0, embedded-io 0.4.0, embedded-io 0.6.1, equivalent 1.0.3, errno 0.3.14, event-listener 5.4.2, event-listener-strategy 0.5.4, fastrand 2.5.0, filetime 0.2.29, find-msvc-tools 0.1.15, fixedbitset 0.5.7, flate2 1.1.10, fnv 1.0.7, form_urlencoded 1.2.2, four-cc 0.4.0, futures-lite 2.6.1, gif 0.14.2, hash32 0.2.1, hash32 0.3.1, hashbrown 0.16.1, hashbrown 0.17.1, heapless 0.7.17, heapless 0.8.0, heapless 0.9.3, heck 0.4.1, heck 0.5.0, httparse 1.10.1, hyper-rustls 0.27.10, idna 1.1.0, idna_adapter 1.2.2, indexmap 2.14.2, ipconfig 0.3.4, iroh-io 0.6.2, itertools 0.11.0, itertools 0.12.1, itertools 0.15.0, jni 0.21.1, js-sys 0.3.106, lazy_static 1.5.1, leb128 0.2.7, linux-raw-sys 0.12.1, lock_api 0.4.14, log 0.4.34, maplit 1.0.2, matrixmultiply 0.3.11, memo-map 0.3.4, minijinja 2.24.0, ndarray 0.17.2, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-integer 0.1.47, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, oid-registry 0.8.1, once_cell 1.21.4, openssl-probe 0.2.1, parking 2.2.1, parking_lot 0.12.5, parking_lot_core 0.9.12, percent-encoding 2.3.2, pest 2.9.4, pest_derive 2.9.4, pest_generator 2.9.4, pest_meta 2.9.4, pkg-config 0.3.34, png 0.18.1, postcard 1.1.3, postcard-derive 0.2.2, primal-check 0.3.4, proc-macro-hack 0.5.20+deprecated, prost 0.14.4, prost-derive 0.14.4, rand_xoshiro 0.6.0, rawpointer 0.2.1, rayon 1.12.0, rayon-core 1.13.0, regex-automata 0.4.18, regex-syntax 0.8.11, rustc_version 0.4.1, rusticata-macros 4.1.0, rustix 1.1.6, rustls 0.23.46, rustls-native-certs 0.8.5, scoped-tls 1.0.1, scopeguard 1.2.0, security-framework 3.7.0, security-framework-sys 2.17.0, send_wrapper 0.6.0, signal-hook-registry 1.4.8, simd_cesu8 1.2.0, smallvec 1.16.3, smol_str 0.1.24, socket2 0.6.5, stable_deref_trait 1.2.1, stacker 0.1.25, syn 1.0.109, system-configuration 0.8.0, system-configuration-sys 0.6.0, system-deps 8.0.0, tar 0.4.46, tempfile 3.27.0, thread_local 1.1.10, tract-core 0.23.9, tract-data 0.23.9, tract-hir 0.23.9, tract-linalg 0.23.9, tract-nnef 0.23.9, tract-onnx 0.23.9, tract-onnx-opl 0.23.9, ucd-trie 0.1.7, unicode-normalization 0.1.26, unicode-segmentation 1.13.3, unicode-xid 0.2.6, url 2.5.8, vcpkg 0.2.15, version_check 0.9.5, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.4+wasi-0.2.12, wasm-bindgen 0.2.129, wasm-bindgen-futures 0.4.79, wasm-bindgen-macro 0.2.129, wasm-bindgen-macro-support 0.2.129, wasm-bindgen-shared 0.2.129, web-sys 0.3.106, weezl 0.1.12, wit-bindgen 0.57.1, wmi 0.18.4, x509-parser 0.18.1, xattr 1.7.0, yasna 0.6.0
+--- [954f335b8baf] used by: ahash 0.8.12, aligned 0.4.3, arbitrary 1.5.0, arc-swap 1.9.3, arrayvec 0.7.8, as-slice 0.2.1, asn1-rs 0.7.2, asn1-rs-derive 0.6.0, async-channel 2.5.0, atomic-polyfill 1.0.3, atomic-waker 1.1.2, autocfg 1.5.1, base64 0.22.1, base64 0.23.1, bitflags 2.13.2, bitstream-io 4.10.0, bumpalo 3.20.3, cc 1.9.0, cfg-if 1.0.5, cmake 0.1.58, concurrent-queue 2.5.0, core-foundation 0.10.1, core-foundation-sys 0.8.7, critical-section 1.2.0, crossbeam-deque 0.8.8, crossbeam-epoch 0.9.21, crossbeam-utils 0.8.23, curve25519-dalek-derive 0.1.1, der-parser 10.0.0, derive_arbitrary 1.5.0, displaydoc 0.2.7, either 1.19.0, embedded-io 0.4.0, embedded-io 0.6.1, equivalent 1.0.3, errno 0.3.14, event-listener 5.4.2, event-listener-strategy 0.5.4, fastrand 2.5.0, filetime 0.2.29, find-msvc-tools 0.1.15, fixedbitset 0.5.7, flate2 1.1.10, fnv 1.0.7, form_urlencoded 1.2.2, four-cc 0.4.0, futures-lite 2.6.1, gif 0.14.2, hash32 0.2.1, hash32 0.3.1, hashbrown 0.16.1, hashbrown 0.17.1, heapless 0.7.17, heapless 0.8.0, heapless 0.9.3, heck 0.4.1, heck 0.5.0, httparse 1.10.1, hyper-rustls 0.27.10, idna 1.1.0, idna_adapter 1.2.2, indexmap 2.14.2, ipconfig 0.3.4, iroh-io 0.6.2, itertools 0.11.0, itertools 0.12.1, itertools 0.14.0, itertools 0.15.0, jni 0.21.1, jobserver 0.1.35, js-sys 0.3.106, lazy_static 1.5.1, leb128 0.2.7, libfuzzer-sys 0.4.13, linux-raw-sys 0.12.1, lock_api 0.4.14, log 0.4.34, maplit 1.0.2, matrixmultiply 0.3.11, memo-map 0.3.4, minijinja 2.24.0, nasm-rs 0.3.2, ndarray 0.17.2, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-derive 0.4.2, num-integer 0.1.47, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, oid-registry 0.8.1, once_cell 1.21.4, openssl-probe 0.2.1, parking 2.2.1, parking_lot 0.12.5, parking_lot_core 0.9.12, percent-encoding 2.3.2, pest 2.9.4, pest_derive 2.9.4, pest_generator 2.9.4, pest_meta 2.9.4, pkg-config 0.3.34, png 0.18.1, postcard 1.1.3, postcard-derive 0.2.2, primal-check 0.3.4, proc-macro-hack 0.5.20+deprecated, prost 0.14.4, prost-derive 0.14.4, rand_xoshiro 0.6.0, rawpointer 0.2.1, rayon 1.12.0, rayon-core 1.13.0, regex-automata 0.4.18, regex-syntax 0.8.11, rustc_version 0.4.1, rusticata-macros 4.1.0, rustix 1.1.6, rustls 0.23.46, rustls-native-certs 0.8.5, scoped-tls 1.0.1, scopeguard 1.2.0, security-framework 3.7.0, security-framework-sys 2.17.0, send_wrapper 0.6.0, signal-hook-registry 1.4.8, simd_cesu8 1.2.0, smallvec 1.16.3, smol_str 0.1.24, socket2 0.6.5, stable_deref_trait 1.2.1, stacker 0.1.25, syn 1.0.109, system-configuration 0.8.0, system-configuration-sys 0.6.0, system-deps 8.0.0, tar 0.4.46, tempfile 3.27.0, thread_local 1.1.10, tract-core 0.23.9, tract-data 0.23.9, tract-hir 0.23.9, tract-linalg 0.23.9, tract-nnef 0.23.9, tract-onnx 0.23.9, tract-onnx-opl 0.23.9, ucd-trie 0.1.7, unicode-normalization 0.1.26, unicode-segmentation 1.13.3, unicode-xid 0.2.6, url 2.5.8, vcpkg 0.2.15, version_check 0.9.5, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.4+wasi-0.2.12, wasm-bindgen 0.2.129, wasm-bindgen-futures 0.4.79, wasm-bindgen-macro 0.2.129, wasm-bindgen-macro-support 0.2.129, wasm-bindgen-shared 0.2.129, web-sys 0.3.106, weezl 0.1.12, wit-bindgen 0.57.1, wmi 0.18.4, x509-parser 0.18.1, xattr 1.7.0, yasna 0.6.0
 
 Apache License
                         Version 2.0, January 2004
@@ -1521,6 +1556,58 @@ This project is dual-licensed under the Unlicense and MIT licenses.
 
 You may use this code under the terms of either license.
 
+--- [8adee6e9dc6d] used by: aligned 0.4.3, heapless 0.7.17, heapless 0.8.0, heapless 0.9.3
+
+Copyright (c) 2017 Jorge Aparicio
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+--- [f3d5a6ab65e6] used by: aligned-vec 0.6.4
+
+MIT License
+
+Copyright (c) 2022 sarah
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 --- [af6e2a74133b] used by: android_system_properties 0.1.6
 
 The MIT License (MIT)
@@ -1582,7 +1669,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
---- [6dc0e068dcf3] used by: anstream 1.0.0, anstyle 1.0.14, anstyle-parse 1.0.0, anstyle-query 1.1.5, anstyle-wincon 3.0.11, cobs 0.3.0, colorchoice 1.0.5, crc32fast 1.5.3, diff 0.1.13, enum-as-inner 0.5.1, enum-as-inner 0.6.1, float-ord 0.3.2, hex 0.4.3, is_terminal_polyfill 1.70.2, jni-sys 0.3.1, jni-sys 0.4.1, once_cell_polyfill 1.70.2, pretty_assertions 1.4.1, quick-error 2.0.1, rustfft 6.4.1, serde_spanned 0.6.9, strength_reduce 0.2.4, toml 0.8.23, toml_datetime 0.6.11, toml_edit 0.22.27, toml_write 0.1.2, winapi 0.3.9
+--- [6dc0e068dcf3] used by: anstream 1.0.0, anstyle 1.0.14, anstyle-parse 1.0.0, anstyle-query 1.1.5, anstyle-wincon 3.0.11, cobs 0.3.0, colorchoice 1.0.5, crc32fast 1.5.3, diff 0.1.13, enum-as-inner 0.5.1, enum-as-inner 0.6.1, float-ord 0.3.2, hex 0.4.3, is_terminal_polyfill 1.70.2, jni-sys 0.3.1, jni-sys 0.4.1, no_std_io2 0.9.4, once_cell_polyfill 1.70.2, pretty_assertions 1.4.1, quick-error 2.0.1, rustfft 6.4.1, serde_spanned 0.6.9, strength_reduce 0.2.4, toml 0.8.23, toml_datetime 0.6.11, toml_edit 0.22.27, toml_write 0.1.2, winapi 0.3.9
 
 Apache License
                            Version 2.0, January 2004
@@ -1786,7 +1873,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
---- [85ad950cce87] used by: anyhow 1.0.104, async-trait 0.1.92, constant_time_eq 0.4.2, dyn-clone 1.0.20, dyn-hash 1.0.0, enumn 0.1.14, erased-serde 0.4.10, fastbloom 0.17.0, inventory 0.3.25, itoa 1.0.18, libc 0.2.189, num_enum 0.7.6, num_enum_derive 0.7.6, paste 1.0.15, pastey 0.2.3, proc-macro2 1.0.107, quote 1.0.47, ref-cast 1.0.27, ref-cast-impl 1.0.27, reflink-copy 0.1.30, rustc-hash 2.1.3, rustversion 1.0.23, ryu 1.0.23, semver 1.0.28, serde 1.0.229, serde_bytes 0.11.19, serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.154, syn 2.0.119, syn 3.0.9, thiserror 1.0.69, thiserror 2.0.21, thiserror-impl 1.0.69, thiserror-impl 2.0.21, typed-path 0.13.0, typeid 1.0.3, unicode-ident 1.0.27, utf8parse 0.2.2, wasm-streams 0.5.0
+--- [85ad950cce87] used by: anyhow 1.0.104, async-trait 0.1.92, constant_time_eq 0.4.2, dyn-clone 1.0.20, dyn-hash 1.0.0, enumn 0.1.14, erased-serde 0.4.10, fastbloom 0.17.0, inventory 0.3.25, itoa 1.0.18, libc 0.2.189, num_enum 0.7.6, num_enum_derive 0.7.6, paste 1.0.15, pastey 0.1.1, pastey 0.2.3, proc-macro2 1.0.107, quote 1.0.47, ref-cast 1.0.27, ref-cast-impl 1.0.27, reflink-copy 0.1.30, rustc-hash 2.1.3, rustversion 1.0.23, ryu 1.0.23, semver 1.0.28, serde 1.0.229, serde_bytes 0.11.19, serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.154, syn 2.0.119, syn 3.0.9, thiserror 1.0.69, thiserror 2.0.21, thiserror-impl 1.0.69, thiserror-impl 2.0.21, typed-path 0.13.0, typeid 1.0.3, unicode-ident 1.0.27, utf8parse 0.2.2, wasm-streams 0.5.0
 
 Apache License
                         Version 2.0, January 2004
@@ -2043,9 +2130,61 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
+--- [d35b20f68e40] used by: arg_enum_proc_macro 0.3.4, interpolate_name 0.2.4
+
+MIT License
+
+Copyright (c) 2018 Luca Barbato
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 --- [92c666480f81] used by: arrayvec 0.7.8
 
 Copyright (c) Ulrik Sverdrup "bluss" 2015-2023
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+--- [42926e590380] used by: as-slice 0.2.1, hash32 0.2.1, hash32 0.3.1
+
+Copyright (c) 2018 Jorge Aparicio
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -2606,6 +2745,90 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
+--- [1adaa62299b4] used by: av-scenechange 0.14.1
+
+MIT License
+
+Copyright (c) 2019 Multimedia and Rust
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--- [c65bfe3f2047] used by: av1-grain 0.2.5
+
+BSD 2-Clause License
+
+Copyright (c) 2022-2022, the rav1e contributors
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+- Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+- Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+--- [a0d6ea9932a4] used by: avif-serialize 0.8.9
+
+BSD 3-Clause License
+
+Copyright (c) 2020, Cloudflare, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 --- [3bd0a7ed85d4] used by: backon 1.6.0
 
 Apache License
@@ -3148,7 +3371,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
---- [6d489af62926] used by: bip39 3.0.0, blake3 1.8.7, constant_time_eq 0.4.2, hex-conservative 0.2.3
+--- [6d489af62926] used by: bip39 3.0.0, blake3 1.8.7, constant_time_eq 0.4.2, hex-conservative 0.2.3, imgref 1.12.3
 
 Creative Commons Legal Code
 
@@ -3504,7 +3727,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
---- [14435fbcd271] used by: bitflags 2.13.2, log 0.4.34, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-integer 0.1.47, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, regex-automata 0.4.18, regex-syntax 0.8.11
+--- [14435fbcd271] used by: bitflags 2.13.2, log 0.4.34, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-derive 0.4.2, num-integer 0.1.47, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, regex-automata 0.4.18, regex-syntax 0.8.11
 
 Copyright (c) 2014 The Rust Project Developers
 
@@ -3889,6 +4112,34 @@ You may add additional accurate notices of copyright ownership.
 
     This Source Code Form is "Incompatible With Secondary Licenses", as
     defined by the Mozilla Public License, v. 2.0.
+
+--- [39cf2da102e4] used by: bitstream-io 4.10.0
+
+Copyright (c) 2017 Brian Langenberger
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 
 --- [75b396e36891] used by: blake3 1.8.7
 
@@ -4547,6 +4798,30 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
+--- [20005777a5fe] used by: built 0.8.1
+
+MIT License
+
+Copyright (c) 2017-2023 Lukas Lueg
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 --- [5662394bebb1] used by: bumpalo 3.20.3
 
 Copyright (c) 2019 Nick Fitzgerald
@@ -4693,7 +4968,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
---- [84e1bbfebd74] used by: cc 1.9.0, cfg-if 1.0.5, cmake 0.1.58, filetime 0.2.29, find-msvc-tools 0.1.15, js-sys 0.3.106, openssl-probe 0.2.1, pkg-config 0.3.34, scoped-tls 1.0.1, socket2 0.6.5, stacker 0.1.25, wasm-bindgen 0.2.129, wasm-bindgen-futures 0.4.79, wasm-bindgen-macro 0.2.129, wasm-bindgen-macro-support 0.2.129, wasm-bindgen-shared 0.2.129, web-sys 0.3.106
+--- [84e1bbfebd74] used by: cc 1.9.0, cfg-if 1.0.5, cmake 0.1.58, filetime 0.2.29, find-msvc-tools 0.1.15, jobserver 0.1.35, js-sys 0.3.106, openssl-probe 0.2.1, pkg-config 0.3.34, scoped-tls 1.0.1, socket2 0.6.5, stacker 0.1.25, wasm-bindgen 0.2.129, wasm-bindgen-futures 0.4.79, wasm-bindgen-macro 0.2.129, wasm-bindgen-macro-support 0.2.129, wasm-bindgen-shared 0.2.129, web-sys 0.3.106
 
 Copyright (c) 2014 Alex Crichton
 
@@ -5291,7 +5566,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
---- [283ea6cc2997] used by: cmov 0.5.4, ctutils 0.4.3, identity-hash 0.1.0, lru-slab 0.1.3, range-collections 0.4.6, redb 3.1.3, redb 4.4.0, rustls-platform-verifier 0.7.1, self_cell 1.3.0, serdect 0.4.3, siphasher 1.0.4, tinyvec 1.13.3, utf8_iter 1.0.4, zeroize 1.9.1, zeroize_derive 1.5.0, zune-core 0.5.3, zune-jpeg 0.5.15
+--- [283ea6cc2997] used by: cmov 0.5.4, ctutils 0.4.3, identity-hash 0.1.0, imgref 1.12.3, lru-slab 0.1.3, range-collections 0.4.6, redb 3.1.3, redb 4.4.0, rustls-platform-verifier 0.7.1, self_cell 1.3.0, serdect 0.4.3, siphasher 1.0.4, tinyvec 1.13.3, utf8_iter 1.0.4, zeroize 1.9.1, zeroize_derive 1.5.0, zune-core 0.5.3, zune-jpeg 0.5.15
 
 Apache License
                            Version 2.0, January 2004
@@ -6684,7 +6959,7 @@ LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
---- [fdd1c2117bcf] used by: either 1.19.0, itertools 0.11.0, itertools 0.12.1, itertools 0.15.0, maplit 1.0.2, rawpointer 0.2.1
+--- [fdd1c2117bcf] used by: either 1.19.0, itertools 0.11.0, itertools 0.12.1, itertools 0.14.0, itertools 0.15.0, maplit 1.0.2, rawpointer 0.2.1
 
 Copyright (c) 2015
 
@@ -7023,6 +7298,30 @@ SOFTWARE.
 MIT License
 
 Copyright (c) 2019 Anton Lazarev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--- [fcda9ee8d6c9] used by: equator 0.4.2, equator-macro 0.4.2
+
+MIT License
+
+Copyright (c) 2023 sarah
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -8743,65 +9042,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
---- [42926e590380] used by: hash32 0.2.1, hash32 0.3.1
-
-Copyright (c) 2018 Jorge Aparicio
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
 --- [ae9791f02f2b] used by: hashbrown 0.16.1, hashbrown 0.17.1
 
 Copyright (c) 2016 Amanieu d'Antras
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
---- [8adee6e9dc6d] used by: heapless 0.7.17, heapless 0.8.0, heapless 0.9.3
-
-Copyright (c) 2017 Jorge Aparicio
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -11388,6 +11631,34 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
+--- [9e0027807b0c] used by: libfuzzer-sys 0.4.13, rayon 1.12.0, rayon-core 1.13.0
+
+Copyright (c) 2010 The Rust Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
 --- [5377a4be6a94] used by: libheif-rs 3.0.0, libheif-sys 5.3.1+1.23.1
 
 MIT License
@@ -11894,7 +12165,7 @@ prospectively choose to deem waived or otherwise exclude such Section(s) of
 the License, but only in their entirety and only with respect to the Combined
 Software.
 
---- [8d1f81ea4e87] used by: lock_api 0.4.14, parking_lot 0.12.5, parking_lot_core 0.9.12, rustc_version 0.4.1, thread_local 1.1.10
+--- [8d1f81ea4e87] used by: lock_api 0.4.14, nasm-rs 0.3.2, parking_lot 0.12.5, parking_lot_core 0.9.12, rustc_version 0.4.1, thread_local 1.1.10
 
 Copyright (c) 2016 The Rust Project Developers
 
@@ -11949,6 +12220,16 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+--- [e8b343631bd8] used by: loop9 0.1.5
+
+© Kornel Lesiński
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --- [bf160605d9c7] used by: loro 1.17.0, loro-common 1.17.0, loro-rle 1.6.0
 
@@ -12426,6 +12707,30 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+--- [0492c8a4e61d] used by: maybe-rayon 0.1.1
+
+MIT License
+
+Copyright (c) 2021 Joshua Holmer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 --- [b5b039d5fd70] used by: md5 0.7.0
 
@@ -13229,6 +13534,34 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+--- [42d8a095dbff] used by: new_debug_unreachable 1.0.6
+
+Copyright (c) 2015 Jonathan Reem
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
 --- [b9b039b5058c] used by: nix 0.31.3
 
 The MIT License (MIT)
@@ -13253,6 +13586,28 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
+--- [8b36c5b71ae0] used by: no_std_io2 0.9.4
+
+Copyright (c) 2020-2021  Brendan Molloy <brendan@bbqsrc.net>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 --- [e9f8a16f9ed6] used by: nom 7.1.3, nom 8.0.0
 
 Copyright (c) 2014-2019 Geoffroy Couprie
@@ -13275,6 +13630,30 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+--- [c458d35c33fe] used by: noop_proc_macro 0.3.0
+
+MIT License
+
+Copyright (c) 2019 Luca Barbato
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 --- [794a707adfe7] used by: noq 1.4.0, noq-proto 1.4.0, noq-udp 1.4.0
 
@@ -15180,7 +15559,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
---- [cc367a7134c2] used by: rand 0.10.3, rand 0.8.8, rand_chacha 0.3.1, rand_core 0.6.4
+--- [cc367a7134c2] used by: rand 0.10.3, rand 0.8.8, rand 0.9.5, rand_chacha 0.3.1, rand_chacha 0.9.0, rand_core 0.6.4, rand_core 0.9.5
 
 Copyright 2018 Developers of the Rand project
 Copyright (c) 2014 The Rust Project Developers
@@ -15209,7 +15588,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
---- [fee4d7ce394c] used by: rand 0.10.3, rand 0.8.8
+--- [fee4d7ce394c] used by: rand 0.10.3, rand 0.8.8, rand 0.9.5, rand_chacha 0.9.0
 
 Apache License
                         Version 2.0, January 2004
@@ -15388,7 +15767,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
 END OF TERMS AND CONDITIONS
 
---- [179c83ef07a5] used by: rand_core 0.10.1, rand_core 0.6.4, rand_distr 0.6.0, rand_pcg 0.10.2
+--- [179c83ef07a5] used by: rand_core 0.10.1, rand_core 0.6.4, rand_core 0.9.5, rand_distr 0.6.0, rand_pcg 0.10.2
 
 Apache License
                         Version 2.0, January 2004
@@ -15941,33 +16320,65 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
---- [9e0027807b0c] used by: rayon 1.12.0, rayon-core 1.13.0
+--- [c0333bf27066] used by: rav1e 0.8.1
 
-Copyright (c) 2010 The Rust Project Developers
+BSD 2-Clause License
 
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
+Copyright (c) 2017-2023, the rav1e contributors
+All rights reserved.
 
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+--- [15422e729573] used by: ravif 0.13.0
+
+BSD 3-Clause License
+
+Copyright (c) 2020, Kornel
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --- [acce84ab5a3a] used by: rcgen 0.14.10
 
@@ -16458,6 +16869,30 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+--- [c7d50fa44b04] used by: rgb 0.8.53
+
+MIT License
+
+Copyright (c) 2019 Kornel
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 --- [07414b6c33f3] used by: ring 0.17.14
 
@@ -19341,6 +19776,34 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
+--- [615e13b59408] used by: v_frame 0.3.9
+
+BSD 2-Clause License
+
+Copyright (c) 2017-2022, the rav1e contributors
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+- Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+- Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 --- [6196143cbaf5] used by: vcpkg 0.2.15
 
 Copyright (c) 2017 Jim McGrath
@@ -20056,6 +20519,31 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+--- [6e2d308b0350] used by: y4m 0.8.0
+
+The MIT License (MIT)
+
+Copyright (c) 2015-2019 PistonDevelopers
+Copyright (c) 2019 image-rs contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 --- [6b2b73c04ae9] used by: yansi 1.0.1
 

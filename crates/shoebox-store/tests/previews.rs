@@ -121,9 +121,18 @@ async fn a_jpeg_preview_is_converted_to_avif_once_and_every_device_takes_it() {
     let mut refs = vec![];
     for n in [phone, keeper] {
         let b = n.node().blobs();
-        let o = b.add_bytes(bytes.clone(), Protection::Library).await.unwrap();
-        let p = b.add_bytes(jpeg.clone(), Protection::Library).await.unwrap();
-        let t = b.add_bytes(thumb.clone(), Protection::Library).await.unwrap();
+        let o = b
+            .add_bytes(bytes.clone(), Protection::Library)
+            .await
+            .unwrap();
+        let p = b
+            .add_bytes(jpeg.clone(), Protection::Library)
+            .await
+            .unwrap();
+        let t = b
+            .add_bytes(thumb.clone(), Protection::Library)
+            .await
+            .unwrap();
         n.publish_holdings(vec![
             (o, BlobKind::Original),
             (p, BlobKind::Preview),
@@ -166,7 +175,12 @@ async fn a_jpeg_preview_is_converted_to_avif_once_and_every_device_takes_it() {
     assert_eq!(keeper.convert_previews(10).await.unwrap(), 1);
     let rec = keeper.store().photo(&a.hash).await.unwrap().unwrap();
     assert_eq!(rec.preview.mime, "image/avif");
-    assert!(rec.preview.size < jpeg.len() as u64, "{} vs {}", rec.preview.size, jpeg.len());
+    assert!(
+        rec.preview.size < jpeg.len() as u64,
+        "{} vs {}",
+        rec.preview.size,
+        jpeg.len()
+    );
     let avif = shoebox_media::remake_preview(&bytes, "image/jpeg", "image/avif").unwrap();
     assert_eq!(
         rec.preview.hash,

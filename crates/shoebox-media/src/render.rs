@@ -217,14 +217,20 @@ fn encode_avif(image: &DynamicImage) -> Result<Rendition, AnalyzeError> {
     let (width, height) = (rgb.width(), rgb.height());
     let pixels: Vec<ravif::RGB8> = rgb
         .as_raw()
-        .chunks_exact(3)
-        .map(|c| ravif::RGB8::new(c[0], c[1], c[2]))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|&[r, g, b]| ravif::RGB8::new(r, g, b))
         .collect();
     let encoded = ravif::Encoder::new()
         .with_quality(PREVIEW_AVIF_QUALITY)
         .with_speed(PREVIEW_AVIF_SPEED)
         .with_num_threads(Some(1))
-        .encode_rgb(ravif::Img::new(&pixels[..], width as usize, height as usize))
+        .encode_rgb(ravif::Img::new(
+            &pixels[..],
+            width as usize,
+            height as usize,
+        ))
         .map_err(|e| AnalyzeError::Decode(format!("could not encode the preview: {e}")))?;
     Ok(Rendition {
         bytes: encoded.avif_file,

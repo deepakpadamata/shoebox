@@ -524,7 +524,11 @@ fn previews_are_made_again_byte_for_byte_in_either_format() {
     assert_eq!(again, preview.bytes, "the same AVIF bytes");
 
     let jpeg = shoebox_media::remake_preview(&original, "image/jpeg", "image/jpeg").unwrap();
-    assert_eq!(decode(&jpeg).dimensions(), (1365, 2048), "the old JPEG preview, upright");
+    assert_eq!(
+        decode(&jpeg).dimensions(),
+        (1365, 2048),
+        "the old JPEG preview, upright"
+    );
     assert_eq!(
         shoebox_media::remake_preview(&original, "image/jpeg", "image/jpeg").unwrap(),
         jpeg

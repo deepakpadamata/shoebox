@@ -24,6 +24,8 @@ be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held w
 | `alerts` / `alerts ack` | security alerts (a new admin, a replaced recovery phrase); `ack` clears them |
 | `search "<query>" [--limit N] [--tz-offset M] [--json]` | search the library here: the chips the query was read as, then the photos found |
 | `index [status\|pause\|resume\|compact] [--json]` | search indexing: coverage by kind, the devices indexing and their rates, time left, search data held; pause or resume this keeper's indexing (paused, it announces 0 photos a minute and the others take its share); merge small index shards now |
+| `import <parts or folder>… [--yes] [--detach] [--dry-run] [--json]` | import a Google Takeout or an iCloud Photos export (its zip/tgz parts, all at once, or the folder they unpack to): shows what it will import and asks, then the daemon runs it and this command shows its progress (Ctrl-C only stops watching). The daemon goes on if the command exits and continues an unfinished import when it starts again. `--detach` returns once it has started, `--dry-run` only shows the plan |
+| `import [--json]` / `import --stop` / `import --forget` | where the import stands, or the last one's report; stop the running import (what it did stays, the same `import <files>` continues it); forget an unfinished import |
 | `licences` | this keeper's licence, where its source is, and the third-party notices |
 | `stop` | ask the daemon to shut down |
 
@@ -38,14 +40,26 @@ be set with `--storage` or `$SHOEBOX_STORAGE`. `<storage>/keeper.lock` is held w
   "devices": 3,
   "alerts": [ { "kind": "admin_added | phrase_replaced", "device_id": "<64 hex or empty>", "device_name": "…", "at_ms": 0 } ],
   "peers": [ { "id": "<64 hex>", "name": "Asha's phone", "path": "lan | direct | relay | none", "latency_ms": 12 } ],
-  "shared_albums": [ { "id": "<32 hex>", "name": "Trip", "photos": 12, "members": 3, "keep_originals": false } ]
+  "shared_albums": [ { "id": "<32 hex>", "name": "Trip", "photos": 12, "members": 3, "keep_originals": false } ],
+  "import": { "state": "running | stopped", "done": 10, "total": 120 }
 }
 ```
+`import` is there only while an import runs or an unfinished one waits; `done` and `total` are null until the
+import has read its files.
 Unpaired keepers return only the top-level fields with `"paired": false`.
 
 ## Control protocol
 
-Request: one JSON object per line, `{"cmd": "status" | "devices" | "revoke" | "role" | "make_admin" | "replace_phrase" | "pair" | "add_device" | "album" | "shutdown", ...}`.
+Request: one JSON object per line, `{"cmd": "status" | "devices" | "revoke" | "role" | "make_admin" | "replace_phrase" | "pair" | "add_device" | "album" | "import" | "shutdown", ...}`.
 Reply: `{"type":"ok","data":…}` or `{"type":"error","message":…}`. `pair` is a conversation: the daemon sends
 `{"type":"code","sas":"123456","peer_name":…,"peer_role":…}`, the client answers `{"confirm":true|false}`, then the
 final reply follows. `add_device` is the same conversation the other way round: the daemon first sends `{"type":"ticket","ticket":…,"expires_in_secs":300}`, then (when the new device arrives) the `code`, and the final reply names the device.
+
+`import` takes `"action": "plan" | "start" | "stop" | "forget" | "status"` (default `status`); `plan` and `start` take
+`"paths"`, a list of absolute paths the daemon can read. `plan` writes nothing and answers `{source: "google" |
+"icloud" | "files", photos, already, copies, trashed, not_photos, albums: [{title, photos}], with_export_data,
+unmatched, missing: [names], part_errors: [text], needed_bytes, free_bytes}`. `start` answers with the status:
+`{state: "idle" | "running" | "stopped" | "done", paths, done, total, report, error}`, where `report` (once a run
+ends) is `{imported, duplicates, skipped, failed: [text], resumed, copies, albums, export_dates, export_places,
+favorites, trashed, not_photos, unmatched, missing, part_errors}`. The paths are kept in `<storage>/import.json`
+until a run ends with nothing to retry.

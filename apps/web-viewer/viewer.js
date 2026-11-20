@@ -36,6 +36,8 @@ function sniff(bytes) {
   if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57 && bytes[9] === 0x45) return ['image/webp', 'webp'];
   if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
     const brand = String.fromCharCode(...bytes.slice(8, 12));
+    // AVIF is an ISO box file like MP4: previews are AVIF (major brand `avif`).
+    if (brand === 'avif' || brand === 'avis') return ['image/avif', 'avif'];
     return brand === 'qt  ' ? ['video/quicktime', 'mov'] : ['video/mp4', 'mp4'];
   }
   if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) return ['video/webm', 'mkv'];

@@ -405,3 +405,87 @@ async fn removing_a_member_moves_the_album_without_them_and_nobody_else_has_to_d
     assert!(leaves.has(&first.thumb.hash).await.unwrap());
     assert!(leaves.fetch_now(&id, &second.thumb.hash).await.is_err());
 }
+
+/// A-152: a person who joined as a viewer on one device takes part on their other devices too.
+/// The second device has no invitation of its own; the first introduces it to the owner, who
+/// records it in the album, and from then on it syncs and fetches from the owner directly.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_viewers_other_device_is_introduced_and_fetches_from_the_owner() {
+    let c = Cluster::new(3).await.unwrap();
+    let _h0 = household(&c, 0).await;
+    let dirs: Vec<_> = (0..3).map(|_| tempfile::tempdir().unwrap()).collect();
+    let owner = open(&c, 0, dirs[0].path(), false).await;
+    let laptop = open(&c, 1, dirs[1].path(), false).await;
+    let phone = open(&c, 2, dirs[2].path(), false).await;
+    let person = LibraryId([7; 16]);
+    laptop.set_person(person);
+    phone.set_person(person);
+    let (laptop_id, phone_id) = (
+        shoebox_node::from_iroh_id(&c.node(1).id()),
+        shoebox_node::from_iroh_id(&c.node(2).id()),
+    );
+
+    let id = owner.create("Porto", "Ana").await.unwrap();
+    let it = item(c.node(0), 9).await;
+    owner.add_items(&id, vec![it.clone()]).await.unwrap();
+    let text = owner.invite(&id, MemberRole::Viewer, 7).await.unwrap();
+    laptop.join(&text, "Dev").await.unwrap();
+
+    // The owner writes the viewer's entry (the viewer cannot), so all its devices know it.
+    let o = owner.clone();
+    wait_until(Duration::from_secs(10), || {
+        let o = o.clone();
+        async move {
+            o.members(&id)
+                .await
+                .unwrap()
+                .iter()
+                .any(|m| m.member.key == laptop_id && m.member.role == MemberRole::Viewer)
+        }
+    })
+    .await
+    .expect("the owner records the viewer");
+
+    // The phone takes part through the person's library: no invitation of its own.
+    let r = laptop
+        .refs()
+        .await
+        .into_iter()
+        .find(|r| r.album == id)
+        .unwrap();
+    assert_eq!(r.role, MemberRole::Viewer);
+    let laptop_addr = shoebox_node::from_endpoint_addr(&c.node(1).addr());
+    phone.adopt(&r, vec![laptop_addr], "Dev").await.unwrap();
+    phone.sync_now(&id).await.unwrap();
+    assert!(
+        phone.fetch_now(&id, &it.preview.hash).await.is_err(),
+        "the owner does not know the phone yet"
+    );
+
+    // The laptop introduces the person's other devices; the owner records them.
+    laptop.set_siblings(vec![phone_id]);
+    laptop.sync_now(&id).await.unwrap();
+    let members = owner.members(&id).await.unwrap();
+    let rec = |k| members.iter().find(|m| m.member.key == k).unwrap();
+    assert_eq!(rec(phone_id).member.role, MemberRole::Viewer);
+    assert_eq!(rec(phone_id).person, Some(person));
+    assert_eq!(
+        rec(laptop_id).member.display_name,
+        "Dev",
+        "the name came along"
+    );
+    assert_eq!(
+        owner.list().await.unwrap()[0].member_count,
+        2,
+        "one person with two devices counts once"
+    );
+
+    // Now the phone syncs and fetches from the owner itself, with the laptop not involved.
+    phone.sync_now(&id).await.unwrap();
+    c.node(1).block_peer(c.node(2).id());
+    c.node(2).block_peer(c.node(1).id());
+    assert_eq!(phone.fetch_all(&id).await.unwrap(), 2);
+    assert!(phone.has(&it.preview.hash).await.unwrap());
+    let seen = phone.members(&id).await.unwrap();
+    assert!(seen.iter().any(|m| m.member.key == phone_id && m.me));
+}

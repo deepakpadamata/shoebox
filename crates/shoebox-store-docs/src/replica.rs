@@ -178,8 +178,11 @@ impl Replica {
     /// Entries (any author) that are new or changed since the last scan *and* whose content is
     /// already stored locally. Entries whose content has not arrived yet are returned by a later
     /// scan once it has.
+    ///
+    /// Counts as activity for blob GC only when it finds something: iroh-docs reports a finished
+    /// (often failed) sync every few seconds while a member is unreachable, each one rescans, and
+    /// a rescan that finds nothing must not keep GC from ever running (A-151).
     pub async fn scan(&mut self) -> Result<Scan> {
-        self.node.note_activity();
         let stream = self
             .doc
             .get_many(Query::all().build())
@@ -221,6 +224,9 @@ impl Replica {
             }
         }
         self.missing_since.retain(|h, _| still_missing.contains(h));
+        if pending > 0 || !out.is_empty() {
+            self.node.note_activity();
+        }
         if pending > 0 {
             self.fetch_missing(overdue);
             // Keep looking until everything has arrived, even if no further event comes.
@@ -417,5 +423,43 @@ where
             LiveEvent::PendingContentReady if finished => return Ok(()),
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shoebox_node::NodeConfig;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_rescan_that_finds_nothing_leaves_blob_gc_free_to_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = Node::open(NodeConfig::local_only(dir.path().join("n"), "n"))
+            .await
+            .unwrap();
+        let doc = node.docs().create().await.unwrap();
+        let author = node.docs().author_default().await.unwrap();
+        let mut replica = Replica::new(doc, author, node.clone());
+        replica.put("mine", b"1".to_vec()).await.unwrap();
+        let quiet = Duration::from_millis(100);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(!node.busy_within(quiet));
+
+        // Nothing new (as after a failed sync): not activity, however often it happens.
+        for _ in 0..3 {
+            assert!(replica.scan().await.unwrap().entries.is_empty());
+        }
+        assert!(!node.busy_within(quiet), "an empty rescan kept GC away");
+
+        // An entry from another author arrives: that is activity.
+        let other = node.docs().author_create().await.unwrap();
+        replica
+            .doc
+            .set_bytes(other, b"theirs".to_vec(), b"2".to_vec())
+            .await
+            .unwrap();
+        assert_eq!(replica.scan().await.unwrap().entries.len(), 1);
+        assert!(node.busy_within(quiet));
+        node.shutdown().await.unwrap();
     }
 }

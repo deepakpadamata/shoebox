@@ -174,7 +174,7 @@ impl AlbumState {
 
     /// Say which person this device belongs to (needs a member role, like the name).
     pub fn set_my_person(&mut self, person: LibraryId, now_ms: u64) -> Result<AlbumEffect> {
-        self.my_role().ok_or(StoreError::ReadOnly)?;
+        self.my_writer_role()?;
         let mut fx = AlbumEffect::default();
         if self.person_of(&self.me) == Some(person) {
             return Ok(fx);
@@ -182,6 +182,49 @@ impl AlbumState {
         let hlc = self.tick(now_ms);
         let me = self.me;
         self.put_person(hlc, me, person, &mut fx);
+        Ok(fx)
+    }
+
+    /// This device's role if it may write (a viewer's entry is written for it by a writer).
+    fn my_writer_role(&self) -> Result<MemberRole> {
+        match self.my_role() {
+            Some(r @ (MemberRole::Owner | MemberRole::Contributor)) => Ok(r),
+            _ => Err(StoreError::ReadOnly),
+        }
+    }
+
+    /// Record `device` as a viewer, written by a member who may write: a viewer holds a read-only
+    /// capability and cannot write its own entry, and without one only the device that let it in
+    /// would know it (A-152). `person` says which person it belongs to (kept once set). A device
+    /// that has a writer's entry keeps it; a viewer's entry only takes a new name.
+    pub fn record_viewer(
+        &mut self,
+        device: EndpointId,
+        name: &str,
+        person: Option<LibraryId>,
+        now_ms: u64,
+    ) -> Result<AlbumEffect> {
+        self.my_writer_role()?;
+        let mut fx = AlbumEffect::default();
+        let write = match self.members.get(&device) {
+            None => true,
+            Some((_, m)) => m.role == MemberRole::Viewer && m.display_name != name,
+        };
+        if write {
+            let hlc = self.tick(now_ms);
+            let member = Member {
+                key: device,
+                display_name: name.to_string(),
+                role: MemberRole::Viewer,
+            };
+            self.put_member(hlc, member, &mut fx);
+        }
+        if let Some(p) = person {
+            if self.person_of(&device).is_none() {
+                let hlc = self.tick(now_ms);
+                self.put_person(hlc, device, p, &mut fx);
+            }
+        }
         Ok(fx)
     }
 
@@ -277,7 +320,7 @@ impl AlbumState {
 
     /// Publish this device's display name for the album (shown to the other members).
     pub fn set_my_name(&mut self, name: &str, now_ms: u64) -> Result<AlbumEffect> {
-        let role = self.my_role().ok_or(StoreError::ReadOnly)?;
+        let role = self.my_writer_role()?;
         let mut fx = AlbumEffect::default();
         let hlc = self.tick(now_ms);
         let member = Member {

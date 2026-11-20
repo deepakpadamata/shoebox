@@ -30,6 +30,7 @@ tracing.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 shoebox-testkit.workspace = true
 shoebox-search.workspace = true
+shoebox-media.workspace = true
 shoebox-core = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 iroh-blobs.workspace = true

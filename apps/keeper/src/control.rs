@@ -1,7 +1,7 @@
 //! The local control socket: newline-delimited JSON over a Unix domain socket (mode 0600).
 //!
 //! One request per connection line: `{"cmd": "status" | "devices" | "revoke" | "pair" | "album" | "web" |
-//! "search" | "index" | "shutdown", ...}`. Replies are `{"type":"ok","data":…}` or `{"type":"error","message":…}`.
+//! "search" | "index" | "import" | "shutdown", ...}`. Replies are `{"type":"ok","data":…}` or `{"type":"error","message":…}`.
 //! `pair` is a short conversation: the daemon first sends `{"type":"code","sas":…,
 //! "peer_name":…,"peer_role":…}`, the client answers `{"confirm":true|false}` and the final
 //! `ok`/`error` follows.
@@ -144,6 +144,49 @@ async fn resolve_device(
 async fn dispatch(shared: &Arc<Shared>, cmd: &str, req: &Value) -> Result<Value> {
     match cmd {
         "status" => status::report(shared).await,
+        "import" => {
+            let storage = &shared.opts.storage;
+            let paths = || -> Result<Vec<std::path::PathBuf>> {
+                let list: Vec<std::path::PathBuf> = req["paths"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(std::path::PathBuf::from)
+                    .collect();
+                anyhow::ensure!(!list.is_empty(), "missing `paths`");
+                // The daemon's working folder is not the caller's: only absolute paths mean the same here.
+                if let Some(p) = list.iter().find(|p| !p.is_absolute()) {
+                    bail!("`{}` is not an absolute path", p.display());
+                }
+                Ok(list)
+            };
+            match req["action"].as_str().unwrap_or("status") {
+                "plan" => {
+                    let ln = library(shared).await?;
+                    Ok(crate::import::plan_json(
+                        &ln.plan_archives(&paths()?).await?,
+                    ))
+                }
+                "start" => {
+                    let ln = library(shared).await?;
+                    crate::import::start(&shared.import, storage, ln, paths()?)?;
+                    Ok(crate::import::status(&shared.import, storage))
+                }
+                "stop" => {
+                    let stopped = crate::import::stop(&shared.import);
+                    Ok(json!({ "stopped": stopped }))
+                }
+                "forget" => {
+                    crate::import::forget(&shared.import, storage)?;
+                    Ok(json!({}))
+                }
+                "status" => Ok(crate::import::status(&shared.import, storage)),
+                other => {
+                    bail!("unknown import action `{other}`: plan, start, stop, forget or status")
+                }
+            }
+        }
         "devices" => status::devices(shared).await,
         "alerts" => Ok(json!({ "alerts": crate::alerts::load(&shared.opts.storage) })),
         "alerts_ack" => {

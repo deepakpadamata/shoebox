@@ -150,11 +150,42 @@ fn xmp_gps_properties_are_blanked() {
 
 #[test]
 fn heic_and_unknown_files_are_refused_not_passed_through() {
-    let heic = bx(b"ftyp", b"heic\0\0\0\0mif1heic");
-    assert!(matches!(
-        strip_location(&heic),
-        Err(StripError::Unsupported(_))
-    ));
+    // A HEIF item list (`meta` > `iinf` > `infe` version 2) with one item of `kind`.
+    let heif = |brand: &[u8; 4], kind: &[u8; 4]| {
+        let mut infe = vec![2, 0, 0, 0, 0, 1, 0, 0];
+        infe.extend(kind);
+        infe.push(0);
+        let mut iinf = vec![0, 0, 0, 0, 0, 1];
+        iinf.extend(bx(b"infe", &infe));
+        let mut meta = vec![0, 0, 0, 0];
+        meta.extend(bx(b"iinf", &iinf));
+        let mut ftyp = brand.to_vec();
+        ftyp.extend(b"\0\0\0\0mif1");
+        let mut f = bx(b"ftyp", &ftyp);
+        f.extend(bx(b"meta", &meta));
+        f.extend(bx(b"mdat", b"pixels"));
+        f
+    };
+    // An Exif or XMP item could hold a location: refused.
+    for (brand, kind) in [(b"heic", b"Exif"), (b"avif", b"mime")] {
+        assert!(matches!(
+            strip_location(&heif(brand, kind)),
+            Err(StripError::Unsupported(_))
+        ));
+    }
+    // Only pictures (Shoebox's own AVIF previews): nowhere to keep a location, passed as is.
+    for brand in [b"avif", b"heic"] {
+        let f = heif(brand, b"av01");
+        assert_eq!(
+            strip_location(&f),
+            Ok(shoebox_media::Stripped {
+                bytes: f.clone(),
+                changed: false
+            })
+        );
+    }
+    let cut = &heif(b"avif", b"av01")[..30];
+    assert!(matches!(strip_location(cut), Err(StripError::Malformed(_))));
     assert!(matches!(
         strip_location(b"GIF89a....."),
         Err(StripError::Unsupported(_))
@@ -178,4 +209,16 @@ fn a_jpeg_with_a_vendor_trailer_after_its_end_marker_is_complete() {
     let cut = &jpeg[..jpeg.len() / 2];
     std::fs::write(&p, cut).unwrap();
     assert!(analyze(&p).is_err());
+}
+
+#[test]
+fn a_preview_passes_the_location_check_unchanged() {
+    let jpeg = render_jpeg(&spec(None), 5);
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("p.jpg");
+    std::fs::write(&p, &jpeg).unwrap();
+    let preview = shoebox_media::analyze(&p).unwrap().preview.unwrap().bytes;
+    let st = strip_location(&preview).expect("an AVIF preview can be checked");
+    assert!(!st.changed);
+    assert_eq!(st.bytes, preview);
 }

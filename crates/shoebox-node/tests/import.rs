@@ -87,7 +87,7 @@ async fn importing_a_folder_creates_one_record_per_unique_photo() {
             );
         }
         assert_eq!(p.id, p.original.hash);
-        assert_eq!(p.preview.mime, "image/jpeg");
+        assert_eq!(p.preview.mime, "image/avif");
         // This device holds all three and publishes it.
         let holders = r.ln.store().holders(&p.original.hash).await.unwrap();
         assert_eq!(holders.len(), 1);

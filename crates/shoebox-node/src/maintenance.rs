@@ -133,7 +133,8 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// or purge (including ones that arrive from other devices), run
     /// [`LibraryNode::purge_expired`], [`LibraryNode::reconcile_blobs`] and
     /// [`LibraryNode::release_previews`]. Every device does this
-    /// for itself; purges replicate.
+    /// for itself; purges replicate. Also starts converting old previews to AVIF
+    /// ([`LibraryNode::convert_previews`]).
     pub fn start_maintenance(&self, cfg: MaintenanceConfig) {
         let wake = std::sync::Arc::new(tokio::sync::Notify::new());
         let signal = wake.clone();
@@ -152,6 +153,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         });
         let weak = std::sync::Arc::downgrade(&self.inner);
         tokio::spawn(maintenance_loop(weak, cfg, wake));
+        self.start_preview_conversion();
     }
 }
 

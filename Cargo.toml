@@ -80,6 +80,11 @@ incremental = false
 debug = false
 opt-level = 2
 
+# rav1e's generic encoder is compiled into the crate that calls it: unoptimised, a 640 px AVIF
+# preview took 1 s instead of 0.1 s, and import tests timed out.
+[profile.dev.package.shoebox-media]
+opt-level = 2
+
 # Smaller downloads: the keeper went from 47.6 MB to 27.7 MB (macOS arm64). Fat LTO failed to link and took longer.
 # Panics still unwind: media import and the Android JNI bridge catch them.
 [profile.release]

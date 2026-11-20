@@ -21,6 +21,9 @@ blake3.workspace = true
 thiserror.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff"] }
 jpeg-encoder = { version = "0.7", features = ["simd"] }
+# AVIF previews (rav1e, pure Rust). No `threading`: the importer already encodes several photos at
+# once, and one tile per picture keeps the bytes the same on every device (`render::encode_avif`).
+ravif = { version = "0.13", default-features = false }
 kamadak-exif = "0.6"
 libheif-rs = { version = "3", optional = true }
 libheif-sys = { version = "5", optional = true }
@@ -29,6 +32,11 @@ serde_json = "1"
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 tar = "0.4"
 flate2 = "1"
+
+# rav1e's hand-written assembly: about three times as fast, the same bytes. Only on ARM, where
+# it builds with the C compiler; on x86 it needs nasm, which our builds do not have.
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+ravif = { version = "0.13", default-features = false, features = ["asm"] }
 
 [dev-dependencies]
 xtask = { path = "../../xtask" }

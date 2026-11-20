@@ -7,8 +7,20 @@ use image::{DynamicImage, ImageFormat};
 
 /// Square thumbnail edge.
 pub const THUMB_SIZE: u32 = 256;
-/// Preview long edge (smaller images are kept at their size).
-pub const PREVIEW_LONG_EDGE: u32 = 2048;
+/// Preview long edge (smaller images are kept at their size). Enough for a full-screen view on
+/// a phone or laptop; zooming further in shows the original where the device holds it.
+pub const PREVIEW_LONG_EDGE: u32 = 1280;
+/// AVIF quality (ravif's 0–100 scale) and encoder speed (10 is the fastest) of a preview. About
+/// 0.12 of the old JPEG preview's size; 130 ms a 12 MP photo on one Apple M core.
+const PREVIEW_AVIF_QUALITY: f32 = 55.0;
+const PREVIEW_AVIF_SPEED: u8 = 10;
+/// Faces and text are found in pictures brought down to at most this long edge: an original,
+/// or a preview (which is smaller).
+pub const INDEX_LONG_EDGE: u32 = 2048;
+/// Previews made before they were AVIF: JPEG at quality 85, this long edge. Still made again,
+/// byte for byte, for photos whose record holds such a preview (`crate::remake_preview`).
+const JPEG_PREVIEW_LONG_EDGE: u32 = 2048;
+const JPEG_PREVIEW_QUALITY: u8 = 85;
 
 /// JPEG decoders happily return a partly grey picture for a cut-off file; an importer must not
 /// accept that. Walk the file's own structure and require that the first image ends with an
@@ -197,6 +209,46 @@ fn encode_jpeg(image: &DynamicImage, quality: u8) -> Result<Rendition, AnalyzeEr
     })
 }
 
+/// AVIF (4:4:4, 8 bit, sRGB) of an opaque picture. One thread and so one tile: rav1e splits a
+/// picture into a tile per thread, so a fixed count is what keeps the bytes (and the hash in the
+/// record) the same on every device. Its assembly and plain-Rust paths give the same bytes.
+fn encode_avif(image: &DynamicImage) -> Result<Rendition, AnalyzeError> {
+    let rgb = image.to_rgb8();
+    let (width, height) = (rgb.width(), rgb.height());
+    let pixels: Vec<ravif::RGB8> = rgb
+        .as_raw()
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|&[r, g, b]| ravif::RGB8::new(r, g, b))
+        .collect();
+    let encoded = ravif::Encoder::new()
+        .with_quality(PREVIEW_AVIF_QUALITY)
+        .with_speed(PREVIEW_AVIF_SPEED)
+        .with_num_threads(Some(1))
+        .encode_rgb(ravif::Img::new(
+            &pixels[..],
+            width as usize,
+            height as usize,
+        ))
+        .map_err(|e| AnalyzeError::Decode(format!("could not encode the preview: {e}")))?;
+    Ok(Rendition {
+        bytes: encoded.avif_file,
+        mime: "image/avif".into(),
+        width,
+        height,
+    })
+}
+
+/// The picture brought down to at most `edge` px on its long side (never up).
+fn fit(image: DynamicImage, edge: u32) -> DynamicImage {
+    if image.width().max(image.height()) > edge {
+        image.resize(edge, edge, FilterType::Triangle)
+    } else {
+        image
+    }
+}
+
 /// Center-cropped square thumbnail.
 pub fn thumbnail(image: &DynamicImage) -> Result<Rendition, AnalyzeError> {
     encode_jpeg(
@@ -208,12 +260,7 @@ pub fn thumbnail(image: &DynamicImage) -> Result<Rendition, AnalyzeError> {
 /// A decoded picture brought down to at most `max_edge` px on its long side (never up), then
 /// turned upright.
 pub fn upright(image: DynamicImage, exif_orientation: u16, max_edge: u32) -> DynamicImage {
-    let image = if image.width().max(image.height()) > max_edge {
-        image.resize(max_edge, max_edge, FilterType::Triangle)
-    } else {
-        image
-    };
-    orient(image, exif_orientation)
+    orient(fit(image, max_edge), exif_orientation)
 }
 
 /// A `size` × `size` JPEG around a face in a decoded picture that is not yet upright. `rect` is
@@ -225,7 +272,7 @@ pub fn face_crop(
     rect: [f32; 4],
     size: u32,
 ) -> Result<Rendition, AnalyzeError> {
-    let image = upright(image, exif_orientation, PREVIEW_LONG_EDGE);
+    let image = upright(image, exif_orientation, INDEX_LONG_EDGE);
     let (w, h) = (image.width() as f32, image.height() as f32);
     let [x1, y1, x2, y2] = rect.map(|v| v.clamp(0.0, 1.0));
     let side = ((x2 - x1) * w).max((y2 - y1) * h) * 1.5;
@@ -236,8 +283,8 @@ pub fn face_crop(
     encode_jpeg(&square.resize_exact(size, size, FilterType::Triangle), 85)
 }
 
-/// The thumbnail and the preview (long edge at most [`PREVIEW_LONG_EDGE`], never upscaled) of a
-/// decoded picture that is not yet upright, and its upright size. The work is done on the
+/// The thumbnail and the preview (AVIF, long edge at most [`PREVIEW_LONG_EDGE`], never upscaled)
+/// of a decoded picture that is not yet upright, and its upright size. The work is done on the
 /// smallest picture that serves: the preview is cut from the full image and turned upright, the
 /// thumbnail is cut from the preview. (For a 12 MP photo, cutting the thumbnail from the full
 /// image cost 21 ms against 6, and turning it upright 12 ms against 4.)
@@ -252,13 +299,27 @@ pub fn renditions(
     } else {
         (w, h)
     };
-    let small = if w.max(h) > PREVIEW_LONG_EDGE {
-        image.resize(PREVIEW_LONG_EDGE, PREVIEW_LONG_EDGE, FilterType::Triangle)
-    } else {
-        image
-    };
-    let small = orient(small, exif_orientation);
-    Ok((thumbnail(&small)?, encode_jpeg(&small, 85)?, upright))
+    let small = orient(fit(image, PREVIEW_LONG_EDGE), exif_orientation);
+    Ok((thumbnail(&small)?, encode_avif(&small)?, upright))
+}
+
+/// The preview of a decoded picture that is not yet upright, as `mime` says it was made: AVIF
+/// as [`renditions`] makes it now, or the JPEG (2048 px, quality 85) of photos imported before.
+pub fn preview_as(
+    image: DynamicImage,
+    exif_orientation: u16,
+    mime: &str,
+) -> Result<Rendition, AnalyzeError> {
+    match mime {
+        "image/avif" => encode_avif(&orient(fit(image, PREVIEW_LONG_EDGE), exif_orientation)),
+        "image/jpeg" => encode_jpeg(
+            &orient(fit(image, JPEG_PREVIEW_LONG_EDGE), exif_orientation),
+            JPEG_PREVIEW_QUALITY,
+        ),
+        other => Err(AnalyzeError::Unsupported(format!(
+            "no preview recipe for {other}"
+        ))),
+    }
 }
 
 #[cfg(test)]

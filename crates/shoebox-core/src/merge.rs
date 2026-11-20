@@ -128,7 +128,8 @@ impl PhotoRecord {
     ///
     /// - immutable fields (blobs, EXIF, importer) come from the content-addressed original; if
     ///   two importers produced different previews/thumbs, the lowest `(original, preview, thumb,
-    ///   taken_at, exif, imported_by)` wins on every replica, except that a real thumb always
+    ///   taken_at, exif, imported_by)` wins on every replica, except that an AVIF preview always
+    ///   beats a JPEG one (previews made before A-149 are converted, A-150) and a real thumb always
     ///   beats a placeholder (a video's thumb is its original until a device adds a poster frame);
     /// - `favorite` and `deleted_at` are independent [`Lww`] registers.
     pub fn merge(&self, other: &Self) -> Result<Self, IdMismatch> {
@@ -138,6 +139,7 @@ impl PhotoRecord {
         let key = |p: &PhotoRecord| {
             (
                 p.original.clone(),
+                p.preview.mime != "image/avif",
                 p.preview.clone(),
                 p.thumb.hash == p.original.hash,
                 p.thumb.clone(),

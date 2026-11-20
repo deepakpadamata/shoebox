@@ -261,6 +261,26 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(out)
     }
 
+    /// Photo ids of the live shards of `model` and `kind`: what [`Self::live_shards_of`] gives
+    /// without decoding them (the ids of a held shard are learned once and kept).
+    pub(crate) async fn live_shard_ids_of(
+        &self,
+        model: shoebox_core::model::ModelId,
+        kind: shoebox_core::model::ShardKind,
+    ) -> Result<Vec<Arc<Vec<PhotoId>>>> {
+        let view = self.shard_view().await?;
+        let mut out = vec![];
+        for h in &view.live {
+            let r = &view.records[h];
+            if r.model == model && r.kind == kind {
+                if let Some(ids) = self.shard_ids(r).await? {
+                    out.push(ids);
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// The image–text model this build searches with: shards of an older model are let go once
     /// this one covers as many photos (S1-15).
     pub fn set_search_model(&self, model: shoebox_core::model::ModelId) {

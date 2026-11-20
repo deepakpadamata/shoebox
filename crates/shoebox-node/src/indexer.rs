@@ -68,6 +68,10 @@ pub struct IndexerConfig {
     pub status_every: Duration,
     /// Compact shards (an always-on indexer only) at most this often (S1-15).
     pub compact_every: Duration,
+    /// Once a pass found nothing to do, look again after this long (or on a relevant library
+    /// change) instead of every `tick`: what becomes due by time alone (another device's photos
+    /// past `grace`, a buffer past `shard_after`) does not need a 30 s poll.
+    pub idle_tick: Duration,
 }
 
 impl Default for IndexerConfig {
@@ -83,6 +87,7 @@ impl Default for IndexerConfig {
             rate_override: None,
             status_every: Duration::from_secs(600),
             compact_every: Duration::from_secs(3600),
+            idle_tick: Duration::from_secs(600),
         }
     }
 }
@@ -146,6 +151,25 @@ pub struct FaceModels {
     pub model: ModelId,
 }
 
+/// Whether a library change can give the indexer something to do: photos, shards and indexer
+/// statuses, settings (people on or off), and blobs arriving here. Albums, people, sync progress
+/// and other devices' holdings cannot.
+fn wakes_indexer(change: &shoebox_core::store::Change, me: &EndpointId) -> bool {
+    use shoebox_core::store::Change;
+    match change {
+        Change::PhotoUpserted(_)
+        | Change::PhotoDeleted(_)
+        | Change::MotionChanged(_)
+        | Change::IndexChanged
+        | Change::SettingChanged(_) => true,
+        Change::HoldingsChanged { device } => device == me,
+        Change::AlbumChanged(_)
+        | Change::DeviceListChanged
+        | Change::PeopleChanged
+        | Change::RemoteSyncProgress { .. } => false,
+    }
+}
+
 /// How often the grouping device looks at whether faces should be grouped again.
 const REGROUP_EVERY: Duration = Duration::from_secs(600);
 
@@ -190,10 +214,13 @@ impl<L: LibraryStore> LibraryNode<L> {
         tokio::spawn(index_loop(weak, cfg, encoder, gate));
         let weak = Arc::downgrade(&self.inner);
         let mut changes = self.inner.store.subscribe();
+        let me = self.device();
         tokio::spawn(async move {
-            while futures::StreamExt::next(&mut changes).await.is_some() {
+            while let Some(change) = futures::StreamExt::next(&mut changes).await {
                 let Some(inner) = weak.upgrade() else { break };
-                inner.indexer.wake.notify_one();
+                if wakes_indexer(&change, &me) {
+                    inner.indexer.wake.notify_one();
+                }
             }
         });
     }
@@ -348,8 +375,8 @@ impl<L: LibraryStore> LibraryNode<L> {
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?;
         let mut done: HashSet<PhotoId> = HashSet::new();
-        for (_, s) in self.live_shards_of(model, ShardKind::Vec8).await? {
-            done.extend(s.ids.iter().copied());
+        for ids in self.live_shard_ids_of(model, ShardKind::Vec8).await? {
+            done.extend(ids.iter().copied());
         }
         done.extend(
             self.inner
@@ -558,8 +585,8 @@ impl<L: LibraryStore> LibraryNode<L> {
         since_ms: u64,
     ) -> Result<Vec<(PhotoId, Vec<Blake3Hash>)>> {
         let mut done: HashSet<PhotoId> = HashSet::new();
-        for (_, s) in self.live_shards_of(model, ShardKind::Faces).await? {
-            done.extend(s.ids.iter().copied());
+        for ids in self.live_shard_ids_of(model, ShardKind::Faces).await? {
+            done.extend(ids.iter().copied());
         }
         done.extend(
             self.inner
@@ -993,11 +1020,28 @@ async fn index_loop<L: LibraryStore>(
                 p.stage = "";
             }
         }
+        // Paused: only a resume (or a change) wakes it. Caught up with nothing buffered: a
+        // relevant change wakes it, and a slow tick covers what becomes due by time alone. The
+        // gate closed or work left: the normal tick, to look at the gate and continue.
+        let buffered = !st.buffer.lock().unwrap().rows.is_empty()
+            || !st.ocr_rows.lock().unwrap().0.is_empty()
+            || !st.face_rows.lock().unwrap().0.is_empty();
+        let tick = if ln.indexer_paused() {
+            None
+        } else if open && !busy && !buffered {
+            Some(cfg.idle_tick.max(cfg.tick))
+        } else {
+            Some(cfg.tick)
+        };
         let wait = {
             let inner = ln.inner.clone();
-            let tick = cfg.tick;
             async move {
-                let _ = tokio::time::timeout(tick, inner.indexer.wake.notified()).await;
+                match tick {
+                    Some(tick) => {
+                        let _ = tokio::time::timeout(tick, inner.indexer.wake.notified()).await;
+                    }
+                    None => inner.indexer.wake.notified().await,
+                }
             }
         };
         drop(ln);

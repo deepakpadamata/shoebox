@@ -24,6 +24,8 @@ use tracing::{debug, warn};
 
 /// How often a changed index is written to disk at most.
 const PERSIST_EVERY: Duration = Duration::from_secs(5);
+/// With nothing to save and no text model loaded, look again this often (a change wakes it).
+const QUIET_CHECK: Duration = Duration::from_secs(60);
 /// Meaning results within this much of the best score are shown (tuned on the eval set, S1-12:
 /// the captioned photo survives 97% of the time and about 1% of the photos are shown).
 pub const MEANING_MARGIN: f32 = 0.08;
@@ -123,9 +125,15 @@ impl<L: LibraryStore> LibraryNode<L> {
             }
             let mut last_write = Instant::now();
             loop {
-                let next =
-                    tokio::time::timeout(PERSIST_EVERY, futures::StreamExt::next(&mut changes))
-                        .await;
+                // A short timer only while there is something to do on time: an index to save,
+                // or a text model to let go. Otherwise a slow one, in case a search elsewhere
+                // loaded the model or built the index meanwhile.
+                let timed = weak.upgrade().is_some_and(|inner| {
+                    inner.search.dirty.load(Ordering::SeqCst)
+                        || inner.search.meaning.lock().unwrap().encoder.is_some()
+                });
+                let wait = if timed { PERSIST_EVERY } else { QUIET_CHECK };
+                let next = tokio::time::timeout(wait, futures::StreamExt::next(&mut changes)).await;
                 let Some(inner) = weak.upgrade() else { break };
                 let ln = LibraryNode { inner };
                 match next {

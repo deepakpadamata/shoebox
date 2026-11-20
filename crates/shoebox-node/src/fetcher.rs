@@ -30,6 +30,11 @@ const PARTIAL_HOLD: Duration = Duration::from_secs(3600);
 /// Blobs fetched per batch before their holdings are published.
 const CHUNK: usize = 64;
 
+/// After a plan with nothing to fetch, look again after this many ticks (or on a relevant
+/// change): a fully fetched library has nothing that becomes missing by time alone, and each
+/// plan walks every photo.
+const IDLE_TICKS: u32 = 60;
+
 #[derive(Clone, Debug)]
 pub struct FetcherConfig {
     /// Downloads in flight at once.
@@ -89,9 +94,11 @@ impl<L: LibraryStore> LibraryNode<L> {
         let weak = Arc::downgrade(&self.inner);
         let mut changes = self.inner.store.subscribe();
         tokio::spawn(async move {
-            while futures::StreamExt::next(&mut changes).await.is_some() {
+            while let Some(change) = futures::StreamExt::next(&mut changes).await {
                 let Some(inner) = weak.upgrade() else { break };
-                inner.fetcher.wake.notify_one();
+                if wakes_fetcher(&change) {
+                    inner.fetcher.wake.notify_one();
+                }
             }
         });
     }
@@ -435,18 +442,43 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 }
 
+/// Whether a library change can make a blob missing here or fetchable: photos, videos, shards,
+/// holdings (copies counted, sources), settings (the redundancy target) and devices. Albums,
+/// people and sync progress cannot.
+fn wakes_fetcher(change: &shoebox_core::store::Change) -> bool {
+    use shoebox_core::store::Change;
+    match change {
+        Change::PhotoUpserted(_)
+        | Change::PhotoDeleted(_)
+        | Change::MotionChanged(_)
+        | Change::IndexChanged
+        | Change::HoldingsChanged { .. }
+        | Change::SettingChanged(_)
+        | Change::DeviceListChanged => true,
+        Change::AlbumChanged(_) | Change::PeopleChanged | Change::RemoteSyncProgress { .. } => {
+            false
+        }
+    }
+}
+
 async fn fetch_loop<L: LibraryStore>(
     weak: Weak<crate::library_node::Inner<L>>,
     cfg: FetcherConfig,
 ) {
     let permits = Arc::new(Semaphore::new(cfg.concurrency.max(1)));
+    // The last plan found nothing missing: wait longer (a relevant change still wakes it).
+    let mut idle = false;
     loop {
         let Some(inner) = weak.upgrade() else { break };
         let ln = LibraryNode { inner };
         let wake = {
             // Wait for a signal or the next tick.
             let inner = ln.inner.clone();
-            let tick = cfg.tick;
+            let tick = if idle {
+                cfg.tick * IDLE_TICKS
+            } else {
+                cfg.tick
+            };
             async move {
                 let _ = tokio::time::timeout(tick, inner.fetcher.wake.notified()).await;
             }
@@ -459,9 +491,21 @@ async fn fetch_loop<L: LibraryStore>(
             Ok(q) => q,
             Err(e) => {
                 warn!("could not plan fetches: {e:#}");
+                idle = false;
                 continue;
             }
         };
+        idle = queue.is_empty();
+        {
+            // Cooling entries past their time say nothing an absent entry does not.
+            let now = Instant::now();
+            ln.inner
+                .fetcher
+                .busy
+                .lock()
+                .unwrap()
+                .retain(|_, until| until.is_none_or(|t| t > now));
+        }
         // Work through the queue in chunks so holdings are published as we go, not at the very end.
         for chunk in queue.chunks(CHUNK) {
             let mut handles = vec![];

@@ -25,6 +25,8 @@ const ENC: TestEncoder = TestEncoder { dims: 64 };
 fn cfg(weight: u32) -> IndexerConfig {
     IndexerConfig {
         tick: Duration::from_millis(200),
+        // The tests move the clock past the grace and expect the next look to notice.
+        idle_tick: Duration::from_millis(200),
         batch: 32,
         shard_size: 64,
         shard_after: Duration::from_millis(300),

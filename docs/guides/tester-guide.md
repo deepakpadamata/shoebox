@@ -54,11 +54,13 @@ On the Mac the sidebar lists Photos, Favorites and People, then Albums, then Bac
     a long run shows a progress notification. It stops when the phone is hot or unplugged. This is new and has not yet
     run for a night on a real phone: tell us how it goes;
   * a computer or keeper does the same faster, and shares the work with your phones.
-* **Importing from Google Photos is new** (Mac and other computers, *＋ Import → From Google Photos…*; not on phones yet).
-  It has been tried on public samples and generated test exports, **not on a current real Takeout**: please try one,
-  start with a small export, and tell us about photos with a wrong date, a missing album or a file it left out. A
-  Takeout needs free disk space for the photos about to be copied in, plus 512 MB. Windows has no free-space check yet.
-  The iCloud export is not supported yet.
+* **Importing from Google Photos or iCloud is new** (Mac and other computers, *＋ Import → From Google Photos…* or
+  *From iCloud…*; not on phones yet). The Google import has been tried on public samples and on test exports modelled
+  on a real Takeout of June 2026, the iCloud import on a test export modelled on a real one from an iPad (no albums,
+  Live Photos or hidden photos in it): **neither on a real export yet**. Please try one, start with a small export,
+  and tell us about photos with a wrong date, a missing album or a file it left out. An import needs free disk space
+  for the photos about to be copied in, plus 512 MB. Windows has no free-space check yet. On a Mac that syncs iCloud
+  Photos, *Settings → Back up the Photos library* is quicker than an export.
 * **Shared links on the web (Shoebox Cloud)** are only available if the service is running for your group. Ask whoever gave
   you this build.
 

@@ -140,6 +140,17 @@ fn every_naming_rule() {
             sidecar("IMG_1.HEIC", 10).leak(),
         ),
         ("Photos from 2023/IMG_1.MP4", "KK"),
+        ("Photos from 2023/PXL_2.MP.jpg", "M"),
+        (
+            "Photos from 2023/PXL_2.MP.jpg.json",
+            sidecar("PXL_2.MP.jpg", 11).leak(),
+        ),
+        ("Photos from 2023/PXL_2.MP", "MM"),
+        ("Photos from 2023/VID_3", "N"),
+        (
+            "Photos from 2023/VID_3.mp4.supplemental-metadata.json",
+            sidecar("VID_3.mp4", 12).leak(),
+        ),
         ("Photos from 2023/lonely.png", "L"),
     ];
     let x = export(&files);
@@ -163,6 +174,14 @@ fn every_naming_rule() {
     assert_eq!(r("/Upper.JPG"), Some(Rule::IgnoringCase));
     assert_eq!(r("/IMG_8416-modifié.JPG"), Some(Rule::EditOf));
     assert_eq!(r("/IMG_1.MP4"), Some(Rule::LivePhoto));
+    // A Pixel `.MP` beside its `.MP.jpg` is that photo's video, not a photo of its own.
+    assert_eq!(r("/PXL_2.MP"), Some(Rule::LivePhoto));
+    let item = |m| p.item_of(index(&x, m)).unwrap();
+    assert_eq!(
+        p.items[item("/PXL_2.MP")].live_photo_of,
+        Some(item("/PXL_2.MP.jpg"))
+    );
+    assert_eq!(r("/VID_3"), Some(Rule::NoExtension));
     assert_eq!(r("/lonely.png"), None);
     assert_eq!(p.unmatched, vec![index(&x, "/lonely.png")]);
     assert!(p.ambiguous.is_empty());
@@ -538,7 +557,7 @@ fn fixture_export_matches_its_truth() {
     let json: std::collections::BTreeSet<usize> = (0..entries.len())
         .filter(|&i| entries[i].path.ends_with(".json"))
         .collect();
-    let bytes = set.read_small(&json);
+    let bytes = set.read_small(&json, shoebox_media::archive::MAX_JSON_BYTES);
     let p = plan(&entries, |i| bytes.get(&i).cloned());
 
     let at = |path: &str| {
@@ -601,5 +620,156 @@ fn fixture_export_matches_its_truth() {
         left.iter()
             .all(|l| matches!(l, Left::Trashed | Left::NotPhotos)),
         "{left:?}"
+    );
+}
+
+// ---------- the checked-in export (`fixtures/exports/google-takeout`, `cargo xtask exports`) ----------
+
+/// The minimal, anonymised Takeout modelled on a real June 2026 export: read as one unpacked
+/// folder, every media file must be planned as its `truth.json` says. All mismatches are listed
+/// before the test fails.
+#[test]
+fn checked_in_export_matches_its_truth() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/exports/google-takeout");
+    let truth: Vec<xtask::exports::GoogleCase> =
+        serde_json::from_slice(&std::fs::read(dir.join("truth.json")).unwrap()).unwrap();
+    let mut files = vec![];
+    walk(&dir, &dir.join("Takeout"), 0, &mut files);
+    let entries: Vec<Entry> = files.iter().map(|(e, _)| e.clone()).collect();
+    let p = plan(&entries, |i| std::fs::read(&files[i].1).ok());
+    let at = |path: &str| {
+        entries
+            .iter()
+            .position(|e| e.path == path)
+            .unwrap_or_else(|| panic!("{path}"))
+    };
+    let path_of = |i: usize| entries[i].path.clone();
+    let first_of = |n: Option<usize>| n.map(|n| path_of(p.items[n].entries[0]));
+    let mut wrong: Vec<String> = vec![];
+    let mut check = |ok: bool, path: &str, what: String| {
+        if !ok {
+            wrong.push(format!("{path}: {what}"));
+        }
+    };
+    for t in &truth {
+        let c = &t.truth;
+        let i = at(&c.path);
+        let Some(item) = p.item_of(i).map(|n| &p.items[n]) else {
+            check(c.trashed, &c.path, "in no item".into());
+            continue;
+        };
+        check(!c.trashed, &c.path, "trashed but planned".into());
+        if let Some(copy_of) = &c.copy_of {
+            let first = path_of(item.entries[0]);
+            check(
+                first == *copy_of,
+                &c.path,
+                format!("joined to {first}, not {copy_of}"),
+            );
+        } else {
+            check(
+                item.entries[0] == i,
+                &c.path,
+                format!("joined to {}", path_of(item.entries[0])),
+            );
+            let got = item.sidecar.map(|(s, _)| path_of(s));
+            check(
+                got == c.sidecar,
+                &c.path,
+                format!("sidecar {got:?}, want {:?}", c.sidecar),
+            );
+        }
+        let mut albums: Vec<String> = item
+            .albums
+            .iter()
+            .map(|&a| p.albums[a].title.clone())
+            .collect();
+        albums.sort();
+        let mut want = c.albums.clone();
+        want.sort();
+        check(
+            albums == want,
+            &c.path,
+            format!("albums {albums:?}, want {want:?}"),
+        );
+        check(
+            item.meta.favorite == c.favorite,
+            &c.path,
+            "favourite".into(),
+        );
+        check(item.meta.archived == c.archived, &c.path, "archived".into());
+        let got = first_of(item.edit_of);
+        check(
+            got == c.edit_of,
+            &c.path,
+            format!("edit of {got:?}, want {:?}", c.edit_of),
+        );
+        let got = first_of(item.live_photo_of);
+        check(
+            got == c.live_photo_of,
+            &c.path,
+            format!("live photo of {got:?}, want {:?}", c.live_photo_of),
+        );
+        let mut people = item.meta.people.clone();
+        people.sort();
+        if c.copy_of.is_none() {
+            check(
+                people == t.people,
+                &c.path,
+                format!("people {people:?}, want {:?}", t.people),
+            );
+        }
+        if c.place.is_some() {
+            check(
+                item.meta.place == c.place,
+                &c.path,
+                format!("place {:?}", item.meta.place),
+            );
+        }
+    }
+    let unmatched: Vec<String> = p.unmatched.iter().map(|&i| path_of(i)).collect();
+    check(
+        unmatched.is_empty(),
+        "plan",
+        format!("unmatched {unmatched:?}"),
+    );
+    check(
+        p.ambiguous.is_empty(),
+        "plan",
+        format!("ambiguous {:?}", p.ambiguous),
+    );
+    for (i, l) in &p.left {
+        let path = path_of(*i);
+        let ok = match l {
+            Left::Trashed => path.contains("/Trash/"),
+            Left::NotPhotos => !path.starts_with("Takeout/Google Photos/"),
+            _ => {
+                path.ends_with("shared_album_comments.json")
+                    || path.ends_with("user-generated-memory-titles.json")
+            }
+        };
+        check(ok, &path, format!("left as {l:?}"));
+    }
+    let mut titles: Vec<&str> = p.albums.iter().map(|a| a.title.as_str()).collect();
+    titles.sort();
+    check(
+        titles
+            == [
+                "Beach Day",
+                "Mom's 60th",
+                "Road Trip",
+                "Shared Picnic",
+                "Trip 6/10/23",
+                "Untitled(3)",
+                "Weekend Hike",
+            ],
+        "plan",
+        format!("albums {titles:?}"),
+    );
+    assert!(
+        wrong.is_empty(),
+        "{} mismatches:\n{}",
+        wrong.len(),
+        wrong.join("\n")
     );
 }

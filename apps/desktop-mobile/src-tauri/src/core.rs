@@ -1498,7 +1498,13 @@ impl AppCore {
                 .collect(),
             needed_bytes: p.needed_bytes as f64,
             free_bytes: p.free_bytes.map(|b| b as f64),
-            is_takeout: p.is_takeout,
+            source: match p.source {
+                Some(shoebox_media::takeout::Source::GoogleTakeout) => "google",
+                Some(shoebox_media::takeout::Source::Icloud) => "icloud",
+                None => "files",
+            }
+            .into(),
+            missing: p.missing,
         })
     }
 
@@ -2655,6 +2661,7 @@ fn archive_report(r: &shoebox_node::ArchiveImportReport) -> ArchiveReportInfo {
         favorites: r.favorites as u32,
         trashed: r.trashed as u32,
         unmatched: (r.unmatched + r.ambiguous) as u32,
+        missing: r.missing.clone(),
         part_errors: r
             .part_errors
             .iter()

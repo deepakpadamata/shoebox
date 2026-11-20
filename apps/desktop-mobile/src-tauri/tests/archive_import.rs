@@ -44,7 +44,7 @@ async fn a_takeout_is_planned_imported_stopped_and_continued() {
 
     assert_eq!(core.archive_import_status().state, "idle");
     let plan = core.plan_archive_import(&parts).await.unwrap();
-    assert!(plan.is_takeout && plan.photos > 0 && plan.trashed == 2);
+    assert!(plan.source == "google" && plan.photos > 0 && plan.trashed == 2);
     assert_eq!(plan.albums.len(), 3);
     assert_eq!(
         core.archive_import_status().state,

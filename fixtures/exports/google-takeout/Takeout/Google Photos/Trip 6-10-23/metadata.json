@@ -1,0 +1,25 @@
+{
+  "title": "Trip 6/10/23",
+  "description": "",
+  "access": "protected",
+  "date": {
+    "timestamp": "1686813000",
+    "formatted": "15 Jun 2023, 07:10:00 UTC"
+  },
+  "enrichments": [{
+    "mapEnrichment": {
+      "origin": [{
+        "name": "Bengaluru",
+        "description": "Karnataka",
+        "latitudeE7": 129716000,
+        "longitudeE7": 775946000
+      }],
+      "destination": [{
+        "name": "Mysuru",
+        "description": "Karnataka",
+        "latitudeE7": 122958000,
+        "longitudeE7": 766394000
+      }]
+    }
+  }]
+}

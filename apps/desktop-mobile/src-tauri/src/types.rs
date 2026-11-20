@@ -426,7 +426,8 @@ ts_type! {
 }
 
 ts_type! {
-    /// What importing a Google Takeout would do (`plan_archive_import`): nothing is written.
+    /// What importing a Google Takeout or an iCloud export would do (`plan_archive_import`):
+    /// nothing is written.
     pub struct ArchivePlanInfo {
         /// Photos and videos still to read.
         pub photos: u32,
@@ -445,7 +446,11 @@ ts_type! {
         pub part_errors: Vec<String>,
         pub needed_bytes: f64,
         pub free_bytes: Option<f64>,
-        pub is_takeout: bool,
+        /// `google` (a Takeout), `icloud` (an iCloud Photos export) or `files` (neither: the
+        /// photos and videos import as plain files).
+        pub source: String,
+        /// Files the export lists that are not in the files chosen (iCloud), by name.
+        pub missing: Vec<String>,
     }
 }
 
@@ -457,7 +462,7 @@ ts_type! {
 }
 
 ts_type! {
-    /// How far a Google Photos import is (`archive_import_status`).
+    /// How far an import from Google Photos or iCloud is (`archive_import_status`).
     pub struct ArchiveImportInfo {
         /// `idle`, `running`, `stopped` (unfinished: continue it), or `done`.
         pub state: String,
@@ -482,6 +487,8 @@ ts_type! {
         pub favorites: u32,
         pub trashed: u32,
         pub unmatched: u32,
+        /// Files the export lists that were not in the files chosen (iCloud), by name.
+        pub missing: Vec<String>,
         pub part_errors: Vec<String>,
     }
 }

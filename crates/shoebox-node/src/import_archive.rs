@@ -23,7 +23,9 @@ use shoebox_core::merge::{Lww, OrSet};
 use shoebox_core::model::{AlbumId, AlbumMeta, BlobKind, Gps, PhotoId};
 use shoebox_core::store::LibraryStore;
 use shoebox_media::archive::ArchiveSet;
-use shoebox_media::takeout::{self, Left, PlanItem, TakeoutPlan};
+use shoebox_media::archive::{MAX_JSON_BYTES, MAX_LIST_BYTES};
+use shoebox_media::icloud;
+use shoebox_media::takeout::{self, Left, PlanItem, Source, TakeoutPlan};
 use shoebox_media::{analyze, AnalyzeError, ImportResult, TakenAtSource};
 use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
@@ -73,6 +75,8 @@ pub struct ArchiveImportReport {
     pub ambiguous: usize,
     /// Sidecars and other JSON files nothing used.
     pub unused_json: usize,
+    /// Files the export lists that are in none of the parts given (iCloud), by name.
+    pub missing: Vec<String>,
     /// The journal of this set of parts.
     pub journal: PathBuf,
 }
@@ -173,12 +177,13 @@ pub fn available_space(path: &Path) -> std::io::Result<Option<u64>> {
 /// place fills in only where the file has none). Returns whether each was used.
 fn apply_export(r: &mut ImportResult, item: &PlanItem) -> (bool, bool) {
     let own = item.sidecar.is_some_and(|(_, rule)| rule.is_own());
+    let cut = item.sidecar.map_or(1000, |(_, rule)| rule.date_cut_ms());
     let export = item.meta.taken_at_ms;
     let file = (r.taken_at_source == TakenAtSource::Exif).then_some(r.taken_at.0);
     // A date borrowed from another file (an edit's original, a Live Photo's picture) only fills
     // in; it never overrides the file's own.
     let date = if own {
-        takeout::resolve_taken_at(file, export)
+        takeout::resolve_taken_at_cut(file, export, cut)
     } else {
         file.or(export)
     };
@@ -305,11 +310,18 @@ async fn open_and_plan(
     let (set, plan, errors) = tokio::task::spawn_blocking(move || {
         let (set, errors) = ArchiveSet::open(&owned);
         let entries = set.takeout_entries();
-        let json: BTreeSet<usize> = (0..entries.len())
-            .filter(|&i| entries[i].path.to_lowercase().ends_with(".json"))
-            .collect();
-        let bytes = set.read_small(&json);
-        let plan = takeout::plan(&entries, |i| bytes.get(&i).cloned());
+        let ending = |e: &str| -> BTreeSet<usize> {
+            (0..entries.len())
+                .filter(|&i| entries[i].path.to_lowercase().ends_with(e))
+                .collect()
+        };
+        // An iCloud export has its list of files (`Photo Details.csv`); anything else is read as
+        // a Takeout, which takes a plain archive's files as they are.
+        let csv = set.read_small(&ending(".csv"), MAX_LIST_BYTES);
+        let plan = icloud::plan(&entries, |i| csv.get(&i).cloned()).unwrap_or_else(|| {
+            let json = set.read_small(&ending(".json"), MAX_JSON_BYTES);
+            takeout::plan(&entries, |i| json.get(&i).cloned())
+        });
         (set, plan, errors)
     })
     .await?;
@@ -344,8 +356,11 @@ pub struct ArchivePlanSummary {
     /// What reading them needs on disk, and what is free there (`None`: not known here).
     pub needed_bytes: u64,
     pub free_bytes: Option<u64>,
-    /// The parts have the layout of a Google Takeout (sidecars or album folders).
-    pub is_takeout: bool,
+    /// The kind of export the parts are: `None` when they are neither a Google Takeout (no
+    /// sidecars, no album folders) nor an iCloud export (no `Photo Details.csv`).
+    pub source: Option<Source>,
+    /// Files the export lists that are in none of the parts given (iCloud), by name.
+    pub missing: Vec<String>,
 }
 
 impl<L: LibraryStore> LibraryNode<L> {
@@ -375,7 +390,11 @@ impl<L: LibraryStore> LibraryNode<L> {
             unmatched: plan.unmatched.len(),
             ambiguous: plan.ambiguous.len(),
             copies: plan.items.iter().map(|i| i.entries.len() - 1).sum(),
-            is_takeout: !plan.albums.is_empty() || plan.items.iter().any(|i| i.sidecar.is_some()),
+            source: (plan.source == Source::Icloud
+                || !plan.albums.is_empty()
+                || plan.items.iter().any(|i| i.sidecar.is_some()))
+            .then_some(plan.source),
+            missing: plan.missing.clone(),
             ..Default::default()
         };
         for (_, why) in &plan.left {
@@ -481,6 +500,7 @@ impl<L: LibraryStore> LibraryNode<L> {
             }
         }
         report.unmatched = run.plan.unmatched.len();
+        report.missing = run.plan.missing.clone();
         report.ambiguous = run.plan.ambiguous.len();
         report.copies = run.plan.items.iter().map(|i| i.entries.len() - 1).sum();
 
@@ -625,7 +645,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 report.albums.push((album.title.clone(), 0));
                 continue;
             }
-            let id = imported_album_id("google-takeout", &album.title);
+            let id = imported_album_id(run.plan.source.album_kind(), &album.title);
             // Registers at GENESIS: a name the user gave the album since wins.
             store
                 .upsert_album(AlbumMeta {

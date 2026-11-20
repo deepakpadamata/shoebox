@@ -5,7 +5,18 @@ use jpeg_encoder::{ColorType, Encoder};
 
 /// A small JPEG whose pixels depend on `content_seed` (so different seeds → different bytes).
 pub fn render_jpeg(spec: &ExifSpec, content_seed: u64) -> Vec<u8> {
-    let (w, h) = (spec.width as usize, spec.height as usize);
+    let mut app1 = b"Exif\0\0".to_vec();
+    app1.extend(build_exif_tiff(spec));
+    encode(spec.width, spec.height, content_seed, Some(app1))
+}
+
+/// A small JPEG with no EXIF at all (a saved or messaging-app image).
+pub fn render_plain_jpeg(width: u32, height: u32, content_seed: u64) -> Vec<u8> {
+    encode(width, height, content_seed, None)
+}
+
+fn encode(width: u32, height: u32, content_seed: u64, app1: Option<Vec<u8>>) -> Vec<u8> {
+    let (w, h) = (width as usize, height as usize);
     let s = content_seed.to_le_bytes();
     let (r0, g0, b0) = (s[0], s[1], s[2]);
     let block = 4 + (s[3] % 8) as usize;
@@ -23,10 +34,10 @@ pub fn render_jpeg(spec: &ExifSpec, content_seed: u64) -> Vec<u8> {
     }
     let mut out = Vec::new();
     let mut enc = Encoder::new(&mut out, 80);
-    let mut app1 = b"Exif\0\0".to_vec();
-    app1.extend(build_exif_tiff(spec));
-    enc.add_app_segment(1, app1)
-        .expect("EXIF fits in an APP1 segment");
+    if let Some(app1) = app1 {
+        enc.add_app_segment(1, app1)
+            .expect("EXIF fits in an APP1 segment");
+    }
     enc.encode(&rgb, w as u16, h as u16, ColorType::Rgb)
         .expect("encode in-memory JPEG");
     out

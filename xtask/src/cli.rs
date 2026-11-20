@@ -19,6 +19,10 @@ pub enum Command {
         out: PathBuf,
         seed: u64,
     },
+    /// `exports`: the checked-in Google Takeout and iCloud export fixtures.
+    Exports {
+        out: PathBuf,
+    },
     Gazetteer {
         input: PathBuf,
         out: PathBuf,
@@ -40,6 +44,9 @@ usage:
       docs/notes/takeout-format.md, and truth.json with what an import must make of it.
   cargo xtask samples [--out DIR]
       Regenerate the checked-in sample files (default: fixtures/samples).
+  cargo xtask exports [--out DIR]
+      Regenerate the checked-in export fixtures (default: fixtures/exports): a minimal,
+      anonymised Google Takeout and iCloud Photos export with truth.json each.
   cargo xtask gazetteer [--in DIR] [--out FILE]
       Build the place list from GeoNames dumps downloaded by hand into DIR
       (default: fixtures-out/geonames) into FILE (default: crates/shoebox-search/data/places.bin).
@@ -98,6 +105,16 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                 }
             }
             Ok(Command::Samples { out })
+        }
+        Some("exports") => {
+            let mut out = PathBuf::from("fixtures/exports");
+            while let Some(flag) = it.next() {
+                match flag {
+                    "--out" => out = PathBuf::from(it.next().ok_or("--out needs a value")?),
+                    other => return Err(format!("unknown flag `{other}`")),
+                }
+            }
+            Ok(Command::Exports { out })
         }
         Some("gazetteer") => {
             let mut input = PathBuf::from("fixtures-out/geonames");

@@ -23,6 +23,12 @@ What it produces:
   `gps`, `width`, `height`, `duplicate_of`. In metadata-only mode there are no image bytes, so `size` is 0 and
   `blake3` is a stable stand-in derived from the content seed (duplicates still share a hash).
 
+## Export fixtures (`fixtures/exports/`, regenerate with `cargo xtask exports`)
+
+A minimal, anonymised Google Takeout and iCloud Photos export, laid out like real ones the owner made, each with a
+`truth.json` of what an import must make of every file (about 0.5 MB, CC0-1.0). See
+[`exports/README.md`](exports/README.md).
+
 ## Checked-in samples (`fixtures/samples/`, regenerate with `cargo xtask samples`)
 
 Total ≈ 0.3 MB (limit: 20 MB). All files were generated from scratch by `xtask` (video via `ffmpeg`, HEIC via

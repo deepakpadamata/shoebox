@@ -9,7 +9,7 @@
   import RecoveryKit from './RecoveryKit.svelte';
   import AddDeviceSheet from '../components/AddDeviceSheet.svelte';
   import BackupCard from '../components/BackupCard.svelte';
-  import GoogleImportSheet from '../components/GoogleImportSheet.svelte';
+  import ExportImportSheet from '../components/ExportImportSheet.svelte';
   import Icon from '../components/Icon.svelte';
 
   import { isHandheld } from '../lib/pick';
@@ -29,6 +29,7 @@
   let changeRole = $state(false);
   let addOpen = $state(false);
   let googleOpen = $state(false);
+  let exportFrom = $state<'google' | 'icloud'>('google');
   let created = $state<CreatedLibrary | null>(null);
 
   async function create() {
@@ -153,7 +154,8 @@
           <BackupCard compact />
         {/if}
         <Button block onclick={() => (addOpen = true)}><Icon name="devices" size={18} /> Add {handheld ? 'a computer' : 'another device'}</Button>
-        <Button block onclick={() => (googleOpen = true)}><Icon name="download" size={18} /> Import from Google Photos</Button>
+        <Button block onclick={() => { exportFrom = 'google'; googleOpen = true; }}><Icon name="download" size={18} /> Import from Google Photos</Button>
+        <Button block onclick={() => { exportFrom = 'icloud'; googleOpen = true; }}><Icon name="download" size={18} /> Import from iCloud</Button>
         <Button kind="primary" block onclick={finish}>Open my library</Button>
       </div>
     {:else if step === 'join'}
@@ -196,7 +198,7 @@
 </div>
 
 <AddDeviceSheet open={addOpen} onclose={() => (addOpen = false)} />
-<GoogleImportSheet open={googleOpen} onclose={() => (googleOpen = false)} />
+<ExportImportSheet open={googleOpen} from={exportFrom} onclose={() => (googleOpen = false)} />
 
 <style>
   .onboarding { height: 100%; display: grid; place-items: center; background: var(--bg); padding: 20px; overflow: auto; }

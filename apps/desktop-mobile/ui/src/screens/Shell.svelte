@@ -10,7 +10,7 @@
   import Banner from '../components/Banner.svelte';
   import Button from '../components/Button.svelte';
   import Sheet from '../components/Sheet.svelte';
-  import GoogleImportSheet from '../components/GoogleImportSheet.svelte';
+  import ExportImportSheet from '../components/ExportImportSheet.svelte';
   import Library from './Library.svelte';
   import Albums from './Albums.svelte';
   import AlbumPage from './AlbumPage.svelte';
@@ -55,6 +55,7 @@
   $effect(() => { if (app.importRequest > 0) importOpen = true; });
   let importPath = $state('');
   let googleOpen = $state(false);
+  let exportFrom = $state<'google' | 'icloud'>('google');
   let busy = $state(false);
   let kitOpen = $state(false);
   let kitDismissed = $state(false);
@@ -173,7 +174,7 @@
     {:else if app.state?.update}
       <div class="banners"><Banner tone="info" icon="download" action="Download" onaction={() => window.open(app.state!.update!.page, '_blank')} ondismiss={() => api.dismissUpdate().catch(fail)}><b>Shoebox {app.state.update.version}</b> is available. Download it and install it over this one: your library and settings stay.</Banner></div>
     {:else if app.archive?.state === 'stopped'}
-      <div class="banners"><Banner tone="info" icon="download" action="Continue" onaction={() => (googleOpen = true)}>A Google Photos import did not finish. What it had done is kept.</Banner></div>
+      <div class="banners"><Banner tone="info" icon="download" action="Continue" onaction={() => (googleOpen = true)}>An import from Google Photos or iCloud did not finish. What it had done is kept.</Banner></div>
     {:else if line.banner && sec !== 'backup'}
       <div class="banners"><Banner tone={line.tone === 'risk' ? 'risk' : 'warn'} icon={line.tone === 'risk' ? 'warning' : 'pause'} action="View" onaction={() => go('backup')}>{line.long}</Banner></div>
     {:else if app.state && !app.state.recovery_kit_saved && !kitDismissed}
@@ -207,7 +208,8 @@
       <Button kind="primary" block disabled={busy} onclick={async () => doImport(await pickFiles().catch((e) => { fail(e); return []; }))}>{busy ? 'Importing…' : 'Choose photos and videos…'}</Button>
       <Button block disabled={busy} onclick={async () => { const d = await pickFolder('Import a folder').catch((e) => { fail(e); return null; }); if (d) doImport([d]); }}>Choose a folder…</Button>
     {/if}
-    <Button block disabled={busy} onclick={() => { importOpen = false; googleOpen = true; }}>From Google Photos…</Button>
+    <Button block disabled={busy} onclick={() => { importOpen = false; exportFrom = 'google'; googleOpen = true; }}>From Google Photos…</Button>
+    <Button block disabled={busy} onclick={() => { importOpen = false; exportFrom = 'icloud'; googleOpen = true; }}>From iCloud…</Button>
     {#if !canPick() && !isHandheld()}
       <input class="input" placeholder="/Users/you/Pictures" bind:value={importPath} onkeydown={(e) => e.key === 'Enter' && doImport([importPath.trim()])} />
       <Button kind="primary" block disabled={busy || !importPath.trim()} onclick={() => doImport([importPath.trim()])}>{busy ? 'Importing…' : 'Import'}</Button>
@@ -215,7 +217,7 @@
   </div>
 </Sheet>
 
-<GoogleImportSheet open={googleOpen} onclose={() => (googleOpen = false)} />
+<ExportImportSheet open={googleOpen} from={exportFrom} onclose={() => (googleOpen = false)} />
 
 <Sheet open={newAlbumOpen} title="New album" onclose={() => (newAlbumOpen = false)} width={380}>
   <form class="stack" onsubmit={(e) => { e.preventDefault(); createAlbum(); }}>

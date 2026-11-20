@@ -1,10 +1,13 @@
 //! I1-04 / I1-05 / I1-07 (Google half): a Takeout in zip parts imports with its dates, places,
 //! favourites and albums; a run stopped half way continues; damaged parts are reported by name.
+//! I1-06 / I1-07 (iCloud half): an iCloud Photos export imports with its dates, favourites,
+//! hidden photos and albums.
 
 use shoebox_core::clock::ManualClock;
 use shoebox_core::ids::Blake3Hash;
 use shoebox_core::model::*;
 use shoebox_core::store::*;
+use shoebox_media::takeout::Source;
 use shoebox_node::{
     imported_album_id, ArchiveImportReport, ImportOptions, LibraryNode, Node, NodeConfig, NodeEvent,
 };
@@ -268,7 +271,8 @@ async fn the_plan_says_what_an_import_will_do_and_writes_nothing() {
     let r = rig().await;
     let (parts, _) = export(&r);
     let plan = r.ln.plan_archives(&parts).await.unwrap();
-    assert!(plan.is_takeout);
+    assert_eq!(plan.source, Some(Source::GoogleTakeout));
+    assert!(plan.missing.is_empty());
     assert_eq!(plan.trashed, 2);
     assert_eq!(plan.not_photos, 3);
     assert_eq!(plan.already, 0);
@@ -301,4 +305,94 @@ async fn a_plan_names_unreadable_parts_and_fails_when_none_can_be_read() {
     assert_eq!(plan.part_errors.len(), 1);
     let none = r.ln.plan_archives(&[r.dir.path().join("nope.zip")]).await;
     assert!(none.is_err());
+}
+
+/// The checked-in iCloud export (`fixtures/exports/icloud`), unpacked, against its truth.
+#[tokio::test]
+async fn an_icloud_export_imports_with_what_its_lists_say() {
+    let r = rig().await;
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/exports/icloud");
+    let truth: Vec<xtask::exports::IcloudCase> =
+        serde_json::from_slice(&std::fs::read(dir.join("truth.json")).unwrap()).unwrap();
+    // The export's folder, not the fixture's (which also holds `truth.json`).
+    let part = dir.join("iCloud Photos");
+    let plan =
+        r.ln.plan_archives(std::slice::from_ref(&part))
+            .await
+            .unwrap();
+    assert_eq!(plan.source, Some(Source::Icloud));
+    assert_eq!(plan.missing, vec!["IMG_0011.JPG".to_owned()]);
+    assert_eq!(plan.trashed, 1);
+    assert_eq!(plan.not_photos, 1, "the Memories list");
+    assert_eq!(plan.unmatched + plan.ambiguous, 0);
+
+    let report = r.ln.import_archives(&[part], opts(4)).await.unwrap();
+    assert!(report.import.failed.is_empty(), "{report:#?}");
+    assert_eq!(report.missing, vec!["IMG_0011.JPG".to_owned()]);
+    let store = r.ln.store();
+    let photos: BTreeMap<PhotoId, PhotoRecord> = store
+        .photos_by_time(TimeRange::ALL, Page::all())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|p| (p.id, p))
+        .collect();
+    // A file the analysis cannot read here (the HEIC, without a platform decoder) is skipped, and
+    // its Live Photo video with it; everything else must be as the truth says.
+    let skipped: Vec<String> = report
+        .import
+        .skipped
+        .iter()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .collect();
+    let was_skipped = |path: &str| skipped.iter().any(|s| s.ends_with(path));
+    let mut albums: BTreeMap<String, BTreeSet<PhotoId>> = BTreeMap::new();
+    for t in &truth {
+        if t.missing {
+            continue;
+        }
+        let id = hash(&t.blake3);
+        if t.deleted {
+            assert!(!photos.contains_key(&id), "{} imported", t.path);
+            continue;
+        }
+        if let Some(still) = &t.live_photo_of {
+            if was_skipped(still) {
+                continue;
+            }
+            let still = truth.iter().find(|s| &s.path == still).unwrap();
+            let m = store.motion(&hash(&still.blake3)).await.unwrap();
+            assert_eq!(
+                m.map(|m| m.video.hash),
+                Some(id),
+                "{} goes with its picture",
+                t.path
+            );
+            continue;
+        }
+        if was_skipped(&t.path) {
+            assert!(t.path.ends_with(".HEIC"), "{} skipped", t.path);
+            continue;
+        }
+        let p = photos
+            .get(&id)
+            .unwrap_or_else(|| panic!("{} not imported", t.path));
+        if let Some(ms) = t.taken_at_ms {
+            assert_eq!(p.taken_at.0, ms, "date of {}", t.path);
+        }
+        assert_eq!(p.favorite.value, t.favorite, "favourite of {}", t.path);
+        for a in &t.albums {
+            albums.entry(a.clone()).or_default().insert(id);
+        }
+    }
+    for (title, ids) in albums {
+        let id = imported_album_id("icloud", &title);
+        let items: BTreeSet<PhotoId> = store
+            .album_items(&id, Page::all())
+            .await
+            .unwrap()
+            .into_iter()
+            .collect();
+        assert_eq!(items, ids, "album {title}");
+    }
 }

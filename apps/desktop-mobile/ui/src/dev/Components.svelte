@@ -12,7 +12,7 @@
   import Segmented from '../components/Segmented.svelte';
   import StatusChip from '../components/StatusChip.svelte';
   import Sheet from '../components/Sheet.svelte';
-  import GoogleImportSheet from '../components/GoogleImportSheet.svelte';
+  import ExportImportSheet from '../components/ExportImportSheet.svelte';
   import Tile from '../components/Tile.svelte';
   import Toggle from '../components/Toggle.svelte';
 
@@ -20,9 +20,10 @@
   let seg = $state('b');
   let sheet = $state(false);
   // Google Photos import: each state of the sheet, shown without the app core.
-  let google = $state<'' | 'plan' | 'running' | 'stopped' | 'done'>('');
-  const plan = { photos: 18420, already: 0, copies: 6310, trashed: 41, not_photos: 3, albums: [{ title: 'Kerala trip', photos: 212 }, { title: 'Trip 6/10/23', photos: 64 }], with_export_data: 18398, unmatched: 22, ambiguous: 0, part_errors: [], needed_bytes: 61_400_000_000, free_bytes: 212_000_000_000, is_takeout: true };
-  const report = { imported: 18390, duplicates: 30, skipped: 3, failed: [], albums: [{ title: 'Kerala trip', photos: 212 }], export_dates: 311, export_places: 1204, favorites: 96, trashed: 41, unmatched: 22, part_errors: [] };
+  let google = $state<'' | 'plan' | 'running' | 'stopped' | 'done' | 'icloud' | 'icloud-plan'>('');
+  const plan = { photos: 18420, already: 0, copies: 6310, trashed: 41, not_photos: 3, albums: [{ title: 'Kerala trip', photos: 212 }, { title: 'Trip 6/10/23', photos: 64 }], with_export_data: 18398, unmatched: 22, ambiguous: 0, part_errors: [], needed_bytes: 61_400_000_000, free_bytes: 212_000_000_000, source: 'google', missing: [] as string[] };
+  const icloudPlan = { photos: 4210, already: 0, copies: 0, trashed: 12, not_photos: 2, albums: [{ title: 'Trip 2015', photos: 48 }, { title: 'Hidden (from iCloud)', photos: 7 }], with_export_data: 4208, unmatched: 2, ambiguous: 0, part_errors: [], needed_bytes: 9_800_000_000, free_bytes: 212_000_000_000, source: 'icloud', missing: ['IMG_0411.JPG', 'IMG_0412.MOV'] };
+  const report = { imported: 18390, duplicates: 30, skipped: 3, failed: [], albums: [{ title: 'Kerala trip', photos: 212 }], export_dates: 311, export_places: 1204, favorites: 96, trashed: 41, unmatched: 22, missing: [] as string[], part_errors: [] };
   const statusFor = (g: string) => ({ state: g === 'running' ? 'running' : g === 'stopped' ? 'stopped' : g === 'done' ? 'done' : 'idle', paths: ['takeout-001.zip', 'takeout-002.zip'], error: null, report: g === 'done' ? report : null });
   const attr = document.documentElement.getAttribute('data-theme');
   let dark = $state(attr ? attr === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches);
@@ -117,14 +118,16 @@
     </div>
   </section>
 
-  <section><h2>Google Photos import</h2>
+  <section><h2>Google Photos and iCloud import</h2>
     <div class="row-flex">
       <Button size="sm" onclick={() => (google = 'plan')}>Plan</Button>
       <Button size="sm" onclick={() => (google = 'running')}>Running</Button>
       <Button size="sm" onclick={() => (google = 'stopped')}>Stopped</Button>
       <Button size="sm" onclick={() => (google = 'done')}>Report</Button>
+      <Button size="sm" onclick={() => (google = 'icloud')}>iCloud</Button>
+      <Button size="sm" onclick={() => (google = 'icloud-plan')}>iCloud plan</Button>
     </div>
-    {#if google}<GoogleImportSheet open={true} onclose={() => (google = '')} preview={{ status: statusFor(google), plan: google === 'plan' ? plan : undefined }} />{/if}
+    {#if google}<ExportImportSheet open={true} onclose={() => (google = '')} from={google.startsWith('icloud') ? 'icloud' : 'google'} preview={{ status: statusFor(google), plan: google === 'plan' ? plan : google === 'icloud-plan' ? icloudPlan : undefined }} />{/if}
   </section>
 
   <section><h2>Sheet &amp; QR</h2>

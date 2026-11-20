@@ -60,6 +60,14 @@ keeps no copy of them, only the gallery does. Free-up also leaves alone what the
    get a report of what came over and what did not. The files are copied into your library and read only once; your
    downloaded parts stay where they are, so you can delete them afterwards.
 
+   **Moving over from iCloud Photos.** On a Mac that syncs iCloud Photos, turn on *Settings → Back up the Photos
+   library* instead: it is quicker and keeps edits. Otherwise ask Apple at privacy.apple.com: *Request a copy of your
+   data*, tick only *iCloud Photos*, choose the largest file size, and wait for Apple's email (a few days). In Shoebox
+   choose **＋ Import → From iCloud…** and select every zip at once (or the unpacked folder). The import keeps the
+   dates, favourites and albums in the export; hidden photos go into an album called *Hidden (from iCloud)*, photos
+   in Recently Deleted are left out, and Memories and shared albums do not come over. The rest works as for Google
+   Photos above.
+
 ## Sharing an album
 
 *Albums* lists your albums and the ones shared with you in one list (shared ones carry a *Shared* label and a badge for new photos).

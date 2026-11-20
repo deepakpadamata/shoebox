@@ -3,6 +3,7 @@
 pub mod cli;
 pub mod corpus;
 pub mod exifgen;
+pub mod exports;
 pub mod gazetteer;
 pub mod jpeg;
 pub mod models;

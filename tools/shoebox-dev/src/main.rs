@@ -15,9 +15,9 @@ use shoebox_core::ids::EndpointId;
 use shoebox_core::model::{BlobKind, PhotoRecord, Role};
 use shoebox_core::store::{LibraryStore, Page, PeerAddr, StoreBackend, TimeRange};
 use shoebox_node::{
-    DecideFn, FetcherConfig, ImportMode, ImportOptions, LibraryNode, LibraryTicket,
-    MaintenanceConfig, Node, NodeConfig, NodeEvent, PairTicket, PathKind, PresenceConfig,
-    RelaySetting,
+    to_endpoint_addr, DecideFn, FetcherConfig, ImportMode, ImportOptions, LibraryNode,
+    LibraryTicket, MaintenanceConfig, Node, NodeConfig, NodeEvent, PairTicket, PathKind,
+    PresenceConfig, RelaySetting,
 };
 use shoebox_store::{HybridBackend, Library};
 use std::path::{Path, PathBuf};
@@ -161,8 +161,19 @@ fn short(id: &EndpointId) -> String {
     hex::encode(&id.0[..4])
 }
 
-/// Open an existing device (after `init` or `join`).
+/// Open an existing device (after `init` or `join`) and start syncing with its peers.
 async fn open(cli: &Cli) -> Result<Session> {
+    open_with(cli, true).await
+}
+
+/// Open an existing device for a command that only reads it: the node learns how to reach its
+/// peers but starts no sync. A sync still connecting when a one-shot command closes the node
+/// holds its shutdown for the QUIC probe timeout (about 3 s).
+async fn open_local(cli: &Cli) -> Result<Session> {
+    open_with(cli, false).await
+}
+
+async fn open_with(cli: &Cli, sync: bool) -> Result<Session> {
     let dir = data_dir(cli)?;
     let text = std::fs::read_to_string(state_path(&dir)).map_err(|_| {
         anyhow!(
@@ -180,7 +191,12 @@ async fn open(cli: &Cli) -> Result<Session> {
     let library = backend.open_library(&ticket.cap).await?;
     let ln = LibraryNode::new(node, Arc::new(library), SystemClock).with_capability(ticket.cap);
     for peer in &state.peers {
-        ln.add_peer(peer.clone())?;
+        if sync {
+            ln.add_peer(peer.clone())?;
+        } else {
+            ln.node()
+                .add_peer_addr(to_endpoint_addr(peer).map_err(|e| anyhow!("{e}"))?);
+        }
     }
     Ok(Session { ln, state, dir })
 }
@@ -267,7 +283,7 @@ async fn main() -> Result<()> {
         Cmd::Join { ticket, name, role } => cmd_join(&cli, ticket, name, role).await,
         Cmd::Run => cmd_run(&cli).await,
         Cmd::Ticket => {
-            let s = open(&cli).await?;
+            let s = open_local(&cli).await?;
             let ticket = s.ln.ticket()?.to_string();
             print(&cli, json!({ "ticket": ticket }), || ticket.clone());
             s.close().await
@@ -563,7 +579,7 @@ async fn cmd_import(cli: &Cli, paths: &[PathBuf], reference: bool) -> Result<()>
 }
 
 async fn cmd_search(cli: &Cli, query: &str, limit: usize) -> Result<()> {
-    let s = open(cli).await?;
+    let s = open_local(cli).await?;
     let now = shoebox_core::ids::Timestamp(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -597,7 +613,7 @@ async fn cmd_search(cli: &Cli, query: &str, limit: usize) -> Result<()> {
 }
 
 async fn cmd_ls(cli: &Cli) -> Result<()> {
-    let s = open(cli).await?;
+    let s = open_local(cli).await?;
     let photos =
         s.ln.store()
             .photos_by_time(TimeRange::ALL, Page::all())
@@ -670,9 +686,11 @@ async fn cmd_sync(cli: &Cli) -> Result<()> {
 }
 
 async fn cmd_peers(cli: &Cli) -> Result<()> {
-    let s = open(cli).await?;
+    let s = open_local(cli).await?;
     let mut rows = vec![];
-    for id in s.ln.peers() {
+    let mut ids: Vec<EndpointId> = s.state.peers.iter().map(|p| p.id).collect();
+    ids.sort();
+    for id in ids {
         let iroh_id = shoebox_node::to_iroh_id(&id).map_err(|e| anyhow!("{e}"))?;
         let ping = tokio::time::timeout(Duration::from_secs(5), s.ln.node().ping(iroh_id)).await;
         let rtt = match ping {
@@ -723,7 +741,7 @@ async fn cmd_peers(cli: &Cli) -> Result<()> {
 }
 
 async fn cmd_holdings(cli: &Cli, prefix: &str) -> Result<()> {
-    let s = open(cli).await?;
+    let s = open_local(cli).await?;
     let rec = s.find(prefix).await?;
     let holders = s.ln.holders(&rec.original.hash).await?;
     let copies = s.ln.copy_count(&rec.id).await?;
@@ -771,7 +789,7 @@ async fn cmd_fetch(cli: &Cli, prefix: &str, kind: &str) -> Result<()> {
 }
 
 async fn cmd_status(cli: &Cli) -> Result<()> {
-    let s = open(cli).await?;
+    let s = open_local(cli).await?;
     let live =
         s.ln.store()
             .photos_by_time(TimeRange::ALL, Page::all())
@@ -788,7 +806,7 @@ async fn cmd_status(cli: &Cli) -> Result<()> {
         "deleted": deleted,
         "at_risk": at_risk,
         "redundancy_target": s.ln.redundancy_target().await?,
-        "peers": s.ln.peers().len(),
+        "peers": s.state.peers.len(),
     });
     print(cli, value.clone(), || {
         format!(
@@ -797,7 +815,7 @@ async fn cmd_status(cli: &Cli) -> Result<()> {
             short(&me),
             s.state.role,
             value["redundancy_target"],
-            s.ln.peers().len()
+            s.state.peers.len()
         )
     });
     s.close().await

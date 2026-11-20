@@ -4,7 +4,7 @@
 
 use crate::daemon::KeeperOptions;
 use shoebox_ml::files::{locate, search_dirs};
-use shoebox_ml::{ClipImage, ClipText, PpOcr, SFace, YuNet};
+use shoebox_ml::{ClipImage, ClipText, PpOcr, Reloading, SFace, YuNet};
 use shoebox_node::{Always, FaceModels, IndexerConfig, LibraryNode};
 use shoebox_search::encoder::{ImageEncoder, TextEncoder};
 use shoebox_search::models::{ALL, CLIP_IMAGE, CLIP_MODEL, FACES_MODEL, FACE_DETECT, FACE_EMBED};
@@ -39,15 +39,19 @@ pub(crate) async fn start(ln: &LibraryNode<Library>, opts: &KeeperOptions) {
         );
         return;
     };
-    let encoder =
-        match tokio::task::spawn_blocking(move || ClipImage::load(&path, CLIP_MODEL)).await {
-            Ok(Ok(e)) => e,
-            Ok(Err(e)) => return warn!("could not load the image model: {e:#}"),
-            Err(e) => return warn!("could not load the image model: {e}"),
-        };
+    let encoder = match tokio::task::spawn_blocking(move || {
+        // Let go when the indexer has caught up, loaded again when there is work.
+        Reloading::<ClipImage>::clip_image(path, CLIP_MODEL)
+    })
+    .await
+    {
+        Ok(Ok(e)) => e,
+        Ok(Err(e)) => return warn!("could not load the image model: {e:#}"),
+        Err(e) => return warn!("could not load the image model: {e}"),
+    };
     // Faces (S1-17), when both face models are installed.
     if let (Some(d), Some(e)) = (locate(&FACE_DETECT, &dirs), locate(&FACE_EMBED, &dirs)) {
-        match (YuNet::load(&d), SFace::load(&e)) {
+        match (Reloading::<YuNet>::yunet(d), Reloading::<SFace>::sface(e)) {
             (Ok(detector), Ok(embedder)) => ln.set_faces(FaceModels {
                 detector: Arc::new(detector),
                 embedder: Arc::new(embedder),

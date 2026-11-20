@@ -44,9 +44,19 @@ const REC_MAX_W: usize = 3200;
 const DROP_SCORE: f32 = 0.5;
 /// A crop at least this much taller than wide is vertical text and is turned a quarter.
 const VERTICAL: f32 = 1.5;
-/// Plans kept, so a library of odd shapes cannot grow memory without limit.
+/// Plans kept, so a library of odd shapes cannot grow memory without limit. Each plan holds its
+/// own copy of the model's weights.
 const MAX_DET_PLANS: usize = 16;
-const MAX_REC_PLANS: usize = 40;
+/// The widths a line is padded to: one recognition plan each, so at most this many are built.
+const REC_WIDTHS: [usize; 8] = [320, 480, 640, 960, 1280, 1920, 2560, 3200];
+
+/// The narrowest of [`REC_WIDTHS`] that fits a line `w` wide.
+fn rec_width(w: usize) -> usize {
+    REC_WIDTHS
+        .into_iter()
+        .find(|&b| b >= w)
+        .unwrap_or(REC_MAX_W)
+}
 
 fn err(e: impl std::fmt::Display) -> EncodeError {
     EncodeError(e.to_string())
@@ -129,9 +139,6 @@ impl PpOcr {
             return Ok(p.clone());
         }
         let p = plan(&self.rec, [1, 3, REC_H, w])?;
-        if plans.len() >= MAX_REC_PLANS {
-            plans.clear();
-        }
         plans.insert(w, p.clone());
         Ok(p)
     }
@@ -195,8 +202,8 @@ impl PpOcr {
         }
         let ratio = crop.width() as f32 / crop.height() as f32;
         let rw = ((REC_H as f32 * ratio).ceil() as usize).clamp(1, REC_MAX_W);
-        // Width of the input: at least 320, then a multiple of 32 so plans are shared.
-        let w = rw.max(REC_MIN_W).div_ceil(32) * 32;
+        // Width of the input: the line padded to one of a few widths, so plans are shared.
+        let w = rec_width(rw.max(REC_MIN_W));
         let small = image::imageops::resize(&crop, rw as u32, REC_H as u32, FilterType::Triangle);
         let mut input = vec![0f32; 3 * REC_H * w];
         for (x, y, p) in small.enumerate_pixels() {
@@ -254,6 +261,12 @@ impl Ocr for PpOcr {
         let img = shoebox_media::decode_upright(bytes, MAX_EDGE).map_err(err)?;
         let lines = self.read_image(&img.to_rgb8()).map_err(err)?;
         Ok(lines.join("\n"))
+    }
+
+    /// Drop the built plans (the weights in memory); the file contents stay for rebuilding.
+    fn release(&self) {
+        self.det_plans.lock().unwrap().clear();
+        self.rec_plans.lock().unwrap().clear();
     }
 }
 
@@ -500,6 +513,16 @@ fn min_area_rect(hull: &[(f32, f32)]) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lines_are_padded_to_a_few_widths() {
+        assert_eq!(rec_width(320), 320);
+        assert_eq!(rec_width(321), 480);
+        assert_eq!(rec_width(1000), 1280);
+        assert_eq!(rec_width(3200), 3200);
+        let widths: std::collections::HashSet<_> = (REC_MIN_W..=REC_MAX_W).map(rec_width).collect();
+        assert_eq!(widths.len(), REC_WIDTHS.len());
+    }
 
     #[test]
     fn the_rectangle_around_a_tilted_bar_is_found() {

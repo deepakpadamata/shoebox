@@ -225,6 +225,11 @@ impl<L: LibraryStore> LibraryNode<L> {
         });
     }
 
+    /// Whether [`LibraryNode::start_indexer`] has started the indexer (paused or not).
+    pub fn indexer_running(&self) -> bool {
+        self.inner.indexer.running.load(Ordering::SeqCst)
+    }
+
     /// Find and describe faces with these models (S1-17), as part of indexing, while the
     /// library's people setting is on.
     pub fn set_faces(&self, models: FaceModels) {
@@ -807,6 +812,8 @@ async fn index_loop<L: LibraryStore>(
     // The first round waits a full interval: at start other devices' shards are still arriving.
     let mut compacted: Option<Instant> = Some(Instant::now());
     let mut rate: u32 = cfg.rate_override.unwrap_or(30);
+    // The models were let go since they were last used (they load again on the next use).
+    let mut released = false;
     // Labels only when the list's vectors were made with this encoder's model.
     let (labels, since) = {
         let Some(inner) = weak.upgrade() else { return };
@@ -1033,6 +1040,20 @@ async fn index_loop<L: LibraryStore>(
         } else {
             Some(cfg.tick)
         };
+        // Going quiet (caught up, or paused): free the models' memory until there is work again.
+        let quiet = tick.is_none() || (open && !busy && !buffered);
+        if quiet && !released {
+            encoder.release();
+            if let Some(o) = st.ocr.lock().unwrap().as_ref() {
+                o.release();
+            }
+            if let Some(f) = st.faces.lock().unwrap().as_ref() {
+                f.detector.release();
+                f.embedder.release();
+            }
+            debug!("indexer caught up: released its models");
+        }
+        released = quiet;
         let wait = {
             let inner = ln.inner.clone();
             async move {

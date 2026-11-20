@@ -204,6 +204,9 @@ impl<L: LibraryStore> LibraryNode<L> {
             .into_iter()
             .map(|m| (m.photo, m))
             .collect();
+        // One listing of the tags for the whole pass: asking `kept` per photo lists every album
+        // tag each time, which grew with photos × shared-album items on every 5 s replan.
+        let protected = self.node().blobs().protected().await?;
         for rec in photos {
             let own_below = rec.imported_by == self.device()
                 && self
@@ -221,7 +224,8 @@ impl<L: LibraryStore> LibraryNode<L> {
                 own_capture_below_target: own_below,
                 recent: !offloaded && self.is_recent(&rec, &config),
                 kept_favorite: !offloaded && config.keep_favorites && rec.favorite.value,
-                holds_original: self.node().blobs().kept(&rec.original.hash).await?,
+                holds_original: protected.contains(&rec.original.hash)
+                    && self.node().blobs().has(&rec.original.hash).await?,
             };
             // An embedded clip is part of the original: wanted with it, never fetched on its own.
             let video = motions

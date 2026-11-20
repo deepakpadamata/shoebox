@@ -1112,6 +1112,12 @@ impl LibraryState {
         self.photos.len()
     }
 
+    /// How many live (not deleted) photos there are: [`Self::photos_by_time`] over all time,
+    /// counted without building the records.
+    pub fn live_photo_count(&self) -> usize {
+        self.timeline.len()
+    }
+
     /// Live photos in `range`, newest first, following `page`.
     pub fn photos_by_time(&self, range: TimeRange, page: Page) -> Vec<PhotoRecord> {
         let start: Bound<TimelineKey> = match page.after {
@@ -1252,5 +1258,17 @@ impl LibraryState {
             .map(|(id, _, _)| *id)
             .take(page.limit)
             .collect()
+    }
+
+    /// How many photos [`Self::at_risk`] would list over all pages, without collecting them.
+    pub fn at_risk_count(&self, min_copies: u8) -> usize {
+        self.photos
+            .range(..)
+            .filter(|(_, original, deleted)| {
+                !deleted
+                    && self.copy_count(original) < min_copies as usize
+                    && !self.held_by_keeper(original)
+            })
+            .count()
     }
 }

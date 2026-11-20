@@ -187,6 +187,14 @@ impl LibraryStore for MemLibrary {
         Ok(self.read(|s| s.at_risk(min_copies, page)))
     }
 
+    async fn at_risk_count(&self, min_copies: u8) -> Result<usize> {
+        Ok(self.read(|s| s.at_risk_count(min_copies)))
+    }
+
+    async fn live_photo_count(&self) -> Result<usize> {
+        Ok(self.read(|s| s.live_photo_count()))
+    }
+
     async fn setting(&self, key: &str) -> Result<Option<Vec<u8>>> {
         Ok(self.read(|s| s.setting(key)))
     }

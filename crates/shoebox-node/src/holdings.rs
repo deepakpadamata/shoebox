@@ -66,6 +66,12 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(self.store().at_risk(target, page).await?)
     }
 
+    /// How many photos [`LibraryNode::at_risk`] lists over all pages, without collecting them.
+    pub async fn at_risk_count(&self) -> Result<usize> {
+        let target = self.redundancy_target().await?;
+        Ok(self.store().at_risk_count(target).await?)
+    }
+
     /// What each device holds of the library's photos (Recently Deleted included: they take
     /// room until they are purged), as this replica knows it. A blob two records share counts
     /// once per device. Devices that hold nothing are absent.

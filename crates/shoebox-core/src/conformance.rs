@@ -506,6 +506,9 @@ async fn holdings_single_writer_and_at_risk<H: Harness>(h: &H) {
         vec![hash(1), hash(2)]
     );
     assert_eq!(a.store.at_risk(1, Page::all()).await.unwrap(), vec![]);
+    assert_eq!(a.store.at_risk_count(2).await.unwrap(), 2);
+    assert_eq!(a.store.at_risk_count(1).await.unwrap(), 0);
+    assert_eq!(a.store.live_photo_count().await.unwrap(), 2);
     let page = Page {
         after: Some(Cursor::after_id(hash(1))),
         limit: 10,
@@ -556,12 +559,14 @@ async fn holdings_single_writer_and_at_risk<H: Harness>(h: &H) {
         vec![dev(2)]
     );
 
-    // Deleted photos are not "at risk".
+    // Deleted photos are not "at risk", nor counted as live.
     a.store.mark_deleted(&hash(2)).await.unwrap();
     assert_eq!(
         a.store.at_risk(5, Page::all()).await.unwrap(),
         vec![hash(1)]
     );
+    assert_eq!(a.store.at_risk_count(5).await.unwrap(), 1);
+    assert_eq!(a.store.live_photo_count().await.unwrap(), 1);
 }
 
 /// Wait for the next change, skipping nothing: the suite asserts the exact sequence.

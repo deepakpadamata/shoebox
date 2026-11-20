@@ -286,7 +286,18 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let alerts_core = core.clone();
     tauri::async_runtime::spawn(async move {
         let mut syncing = 0i32;
-        while let Ok(ev) = events.recv().await {
+        loop {
+            let ev = match events.recv().await {
+                Ok(ev) => ev,
+                // Fell behind (a burst of transfer events): keep forwarding, and have the UI
+                // refetch, since a change it needed may have been among those dropped.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let _ = handle.emit("app-event", crate::types::AppEvent::LibraryChanged);
+                    let _ = handle.emit("app-event", crate::types::AppEvent::DevicesChanged);
+                    continue;
+                }
+                Err(_) => break,
+            };
             if let crate::types::AppEvent::Sync { phase, .. } = &ev {
                 syncing = if phase == "Started" {
                     syncing + 1

@@ -111,7 +111,15 @@ pub(crate) struct BackupState {
     pub last_permission: Option<Permission>,
     pub last_scan_ms: u64,
     pub last_error: Option<String>,
+    /// When `merge_scan` last wrote this file (not saved): a scan that found nothing new only
+    /// rewrites it, for `last_scan_ms`, once this is [`QUIET_SAVE_EVERY_MS`] old.
+    #[serde(skip)]
+    scan_saved_ms: u64,
 }
+
+/// How often a scan that found nothing still saves `backup.json` (for `last_scan_ms`). The file
+/// holds every tracked photo, so rewriting it each [`TICK`] was megabytes of writes for nothing.
+const QUIET_SAVE_EVERY_MS: u64 = 60 * 60 * 1000;
 
 impl BackupState {
     pub(crate) fn load(dir: &std::path::Path) -> Self {
@@ -393,8 +401,9 @@ impl AppCore {
             }
             st.token.clone()
         };
-        let scan = source.scan(token).await?;
+        let scan = source.scan(token.clone()).await?;
         let mut st = self.backup.lock().await;
+        let mut changed = token.as_deref() != Some(scan.token.as_str());
         for a in scan.assets {
             // A photo already in the library keeps following its edits whatever the scope.
             let tracked = st.tracked.get(&a.id).map(|t| t.modified_ms);
@@ -402,19 +411,26 @@ impl AppCore {
                 continue;
             }
             if tracked != Some(a.modified_ms) {
+                changed |= st.pending.get(&a.id) != Some(&a);
                 st.pending.insert(a.id.clone(), a);
             }
         }
         for id in scan.removed {
-            st.pending.remove(&id);
+            changed |= st.pending.remove(&id).is_some();
             if st.tracked.get(&id).is_some_and(Tracked::in_library)
                 && !st.removed_from_library.contains(&id)
             {
                 st.removed_from_library.push(id);
+                changed = true;
             }
         }
         st.token = Some(scan.token);
-        st.last_scan_ms = now_ms();
+        let now = now_ms();
+        st.last_scan_ms = now;
+        if !changed && now.saturating_sub(st.scan_saved_ms) < QUIET_SAVE_EVERY_MS {
+            return Ok(());
+        }
+        st.scan_saved_ms = now;
         st.save(self.data_dir())
     }
 

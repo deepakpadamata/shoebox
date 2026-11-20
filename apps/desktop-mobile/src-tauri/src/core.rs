@@ -66,8 +66,10 @@ impl Default for AppOptions {
             background: true,
             update_feed: default_update_feed(),
             // Released blobs (a deleted gallery photo's reference, a copy turned into a
-            // reference) are collected on the next pass: keep the wait short.
-            gc_interval: Some(Duration::from_secs(20)),
+            // reference) are collected on the next pass. Each pass lists every blob in the
+            // store, so this is a balance between freeing room soon and idle CPU: iroh-blobs
+            // has no public way to run one pass on demand right after a release.
+            gc_interval: Some(Duration::from_secs(120)),
             model_dirs: vec![],
             search_models: true,
         }
@@ -2034,12 +2036,9 @@ impl AppCore {
     pub async fn safety_status(&self) -> Result<crate::types::SafetyStatus> {
         use crate::safety::{compute, DeviceFact, Inputs};
         let ln = self.ln().await?;
-        let photos = ln
-            .store()
-            .photos_by_time(TimeRange::ALL, Page::all())
-            .await?
-            .len() as u32;
-        let not_safe = ln.at_risk(Page::all()).await?.len() as u32;
+        // Counted, not listed: this runs every few seconds.
+        let photos = ln.store().live_photo_count().await? as u32;
+        let not_safe = ln.at_risk_count().await? as u32;
         let devices = self.devices().await?;
         let snap = self.node.transfers();
         let transferring = !snap.downloads.is_empty() || !snap.uploads.is_empty();

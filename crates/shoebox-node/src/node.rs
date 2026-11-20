@@ -735,6 +735,11 @@ impl Node {
         self.inner.activity.touch();
     }
 
+    /// Whether real work was noted within `quiet` (blob GC skips its pass while it was).
+    pub fn busy_within(&self, quiet: Duration) -> bool {
+        self.inner.activity.busy_within(quiet)
+    }
+
     pub(crate) fn emit(&self, event: NodeEvent) {
         let _ = self.inner.events.send(event);
     }

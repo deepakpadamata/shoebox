@@ -169,6 +169,12 @@ async fn a_jpeg_preview_is_converted_to_avif_once_and_every_device_takes_it() {
     })
     .await
     .expect("both holdings reach the keeper");
+    // The phone decides from its own view: it must know the keeper holds the original too.
+    wait_until(Duration::from_secs(20), || async {
+        phone.store().holders(&refs[0]).await.unwrap().len() == 2
+    })
+    .await
+    .expect("both holdings reach the phone");
 
     // The phone holds the original too, but the keeper converts.
     assert_eq!(phone.convert_previews(10).await.unwrap(), 0);

@@ -6,7 +6,7 @@ use crate::core::AppCore;
 use anyhow::Result;
 use shoebox_core::store::LibraryStore;
 use shoebox_ml::files::{locate, search_dirs};
-use shoebox_ml::{ClipImage, ClipText, PpOcr, SFace, YuNet};
+use shoebox_ml::{ClipImage, ClipText, PpOcr, Reloading, SFace, YuNet};
 use shoebox_node::{FaceModels, IndexGate, IndexerConfig, LibraryNode, ModelSources};
 use shoebox_search::encoder::{ImageEncoder, TextEncoder};
 use shoebox_search::models::{
@@ -178,14 +178,18 @@ impl AppCore {
             tracing::info!("{} is not installed: no indexing here", CLIP_IMAGE.name);
             return;
         };
-        let encoder =
-            match tokio::task::spawn_blocking(move || ClipImage::load(&path, CLIP_MODEL)).await {
-                Ok(Ok(e)) => e,
-                Ok(Err(e)) => return tracing::warn!("could not load the image model: {e:#}"),
-                Err(e) => return tracing::warn!("could not load the image model: {e}"),
-            };
+        let encoder = match tokio::task::spawn_blocking(move || {
+            // Let go when the indexer has caught up, loaded again when there is work.
+            Reloading::<ClipImage>::clip_image(path, CLIP_MODEL)
+        })
+        .await
+        {
+            Ok(Ok(e)) => e,
+            Ok(Err(e)) => return tracing::warn!("could not load the image model: {e:#}"),
+            Err(e) => return tracing::warn!("could not load the image model: {e}"),
+        };
         if let (Some(d), Some(e)) = (locate(&FACE_DETECT, &dirs), locate(&FACE_EMBED, &dirs)) {
-            match (YuNet::load(&d), SFace::load(&e)) {
+            match (Reloading::<YuNet>::yunet(d), Reloading::<SFace>::sface(e)) {
                 (Ok(detector), Ok(embedder)) => ln.set_faces(FaceModels {
                     detector: Arc::new(detector),
                     embedder: Arc::new(embedder),
@@ -276,9 +280,16 @@ impl AppCore {
                 }));
             }
         };
-        let encoder =
-            tokio::task::spawn_blocking(move || ClipImage::from_bytes(&bytes, CLIP_MODEL))
-                .await??;
+        // On a core that has run before (the app's own, borrowed by the job) the indexer is already
+        // running with its model: loading another copy (about 100 MB) only to drop it is waste.
+        let encoder = if ln.indexer_running() {
+            None
+        } else {
+            Some(
+                tokio::task::spawn_blocking(move || ClipImage::from_bytes(&bytes, CLIP_MODEL))
+                    .await??,
+            )
+        };
         if let Some((d, e)) = faces {
             let loaded = tokio::task::spawn_blocking(move || {
                 Ok::<_, anyhow::Error>((YuNet::from_bytes(&d)?, SFace::from_bytes(&e)?))
@@ -304,17 +315,21 @@ impl AppCore {
                 Err(e) => tracing::warn!("could not load the text models: {e:#}"),
             }
         }
-        ln.start_indexer(
-            IndexerConfig {
-                tick: Duration::from_secs(2),
-                threads: 2,
-                ..Default::default()
-            },
-            Arc::new(encoder) as Arc<dyn ImageEncoder>,
-            Arc::new(shoebox_node::Always),
-        );
-        // On a core that has run before (the app's own, borrowed by the job) the indexer is
-        // already running, paused since the last run.
+        let started_here = encoder.is_some();
+        if let Some(encoder) = encoder {
+            ln.start_indexer(
+                IndexerConfig {
+                    tick: Duration::from_secs(2),
+                    threads: 2,
+                    ..Default::default()
+                },
+                Arc::new(encoder) as Arc<dyn ImageEncoder>,
+                Arc::new(shoebox_node::Always),
+            );
+        }
+        // An indexer that was already running (a desktop's own) may have been paused by its owner:
+        // it is put back as it was when the run ends.
+        let was_paused = !started_here && ln.indexer_paused();
         ln.resume_indexer();
         // Run until this device has nothing left to do (pictures, text, faces), the budget is
         // spent, or the Android side asks it to stop (too hot, unplugged): `index-stop`.
@@ -356,6 +371,15 @@ impl AppCore {
         let _ = self.sync_burst(Duration::from_secs(20)).await;
         let p = ln.index_progress();
         write_index_progress(self.data_dir(), &p, caught_up);
+        // An indexer this run started has models loaded from bytes, which cannot load again on
+        // their own: drop them (hundreds of MB) rather than keep them until the app is closed. The
+        // next run loads them again. An indexer that was already running (a desktop's own, whose
+        // models reload) is left as it was.
+        if started_here {
+            ln.stop_indexer();
+        } else if !was_paused {
+            ln.resume_indexer();
+        }
         Ok(serde_json::json!({
             "indexed": published,
             "caught_up": caught_up,

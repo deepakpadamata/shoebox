@@ -42,7 +42,9 @@ impl Default for SyncConfig {
             tick: Duration::from_secs(1),
             resync_interval: Duration::from_secs(300),
             backoff_min: Duration::from_secs(1),
-            backoff_max: Duration::from_secs(60),
+            // A peer that comes back connects (to us or we to it, see presence), and a
+            // connection syncs at once: retrying an unreachable one every minute only dials.
+            backoff_max: Duration::from_secs(15 * 60),
             timeout: Duration::from_secs(60),
         }
     }
@@ -117,7 +119,14 @@ impl<L: LibraryStore> LibraryNode<L> {
             // No live replication underneath: tell every peer soon after something changed.
             let mut changes = self.inner.store.subscribe();
             tokio::spawn(async move {
-                while futures::StreamExt::next(&mut changes).await.is_some() {
+                while let Some(change) = futures::StreamExt::next(&mut changes).await {
+                    // Progress of a sync running is not a change to the library to pass on.
+                    if matches!(
+                        change,
+                        shoebox_core::store::Change::RemoteSyncProgress { .. }
+                    ) {
+                        continue;
+                    }
                     let Some(inner) = weak.upgrade() else { break };
                     let ids: Vec<EndpointId> = {
                         let mut peers = inner.peers.lock().unwrap();
@@ -144,8 +153,24 @@ async fn manager<L: LibraryStore>(
     mut nudge: mpsc::UnboundedReceiver<EndpointId>,
     tick: Duration,
 ) {
-    let mut ticker = tokio::time::interval(tick);
     loop {
+        // Sleep until the earliest scheduled attempt. While a sync runs or a peer waits for one
+        // to end (`dirty`), look every `tick`, as their outcome sets the next time.
+        let wait = {
+            let Some(inner) = weak.upgrade() else { break };
+            let now = Instant::now();
+            let peers = inner.peers.lock().unwrap();
+            if peers.values().any(|p| p.syncing || p.dirty) {
+                tick
+            } else {
+                peers
+                    .values()
+                    .map(|p| p.next_attempt.saturating_duration_since(now))
+                    .min()
+                    .unwrap_or(Duration::MAX)
+                    .max(tick)
+            }
+        };
         // `nudged`: someone asked for this sync (a rotation, a new peer, presence), as opposed to a
         // connection coming up.
         let (due, nudged): (Vec<EndpointId>, bool) = tokio::select! {
@@ -155,7 +180,7 @@ async fn manager<L: LibraryStore>(
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             },
             Some(id) = nudge.recv() => (vec![id], true),
-            _ = ticker.tick() => (vec![], false),
+            _ = sleep_for(wait) => (vec![], false),
         };
         let Some(inner) = weak.upgrade() else { break };
         let now = Instant::now();
@@ -199,6 +224,14 @@ async fn manager<L: LibraryStore>(
                 let _ = sync_peer(&inner, id).await;
             });
         }
+    }
+}
+
+/// `tokio::time::sleep`, where `Duration::MAX` (no peers yet) means until woken otherwise.
+async fn sleep_for(d: Duration) {
+    match tokio::time::Instant::now().checked_add(d) {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
     }
 }
 

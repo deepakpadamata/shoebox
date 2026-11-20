@@ -6,7 +6,7 @@
   import Button from './Button.svelte';
   import { api, type FreeUpReport } from '../lib/api';
   import { bytes, plural } from '../lib/format';
-  import { fail, toast } from '../lib/store.svelte';
+  import { app, fail, toast } from '../lib/store.svelte';
   import { isHandheld } from '../lib/pick';
 
   let { ids, open, onclose, ondone }: { ids: string[]; open: boolean; onclose: () => void; ondone?: () => void } = $props();
@@ -21,17 +21,20 @@
     api.freePhotos(chosen, true).then((r) => { if (open) plan = r; }).catch((e) => { fail(e); onclose(); });
   });
 
+  // The run goes on in the background (as Free up space does): the sheet closes at once, and the
+  // result comes as a toast whichever screen is open by then.
   async function free() {
     busy = true;
+    const before = app.freeUp;
+    app.freeUp = { state: 'running', done: 0, total: plan?.photos ?? 0, report: null, error: null };
     try {
-      const r = await api.freePhotos(ids, false);
-      const asked = plan?.gallery ?? 0;
-      let msg = r.photos ? `Freed ${bytes(r.bytes)} from ${plural(r.photos, 'photo')}` : 'Nothing was freed';
-      if (asked > r.gallery) msg += `; ${plural(asked - r.gallery, 'photo')} stayed in the gallery`;
-      toast(msg);
+      const s = await api.startFreeUp(ids);
+      if (s.state !== 'running') app.freeUp = s;
+      if (ids.length > 1) toast('Freeing up space in the background');
       onclose();
       ondone?.();
     } catch (e) {
+      app.freeUp = before;
       fail(e);
     } finally {
       busy = false;
@@ -62,7 +65,7 @@
       {#if plan.kept > 0}
         <p class="small muted">{plural(plan.kept, 'other photo')} {plan.kept === 1 ? 'stays as it is' : 'stay as they are'}: not here in full size, not yet confirmed on another device, or needed here by a shared album.</p>
       {/if}
-      <Button kind="primary" block disabled={busy} onclick={free}>{busy ? 'Freeing…' : `Free up ${bytes(plan.bytes)}`}</Button>
+      <Button kind="primary" block disabled={busy || app.freeUp?.state === 'running'} onclick={free}>{app.freeUp?.state === 'running' ? 'Another Free up is running…' : `Free up ${bytes(plan.bytes)}`}</Button>
       <Button block onclick={onclose}>Cancel</Button>
     {/if}
   </div>

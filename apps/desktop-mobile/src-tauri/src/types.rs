@@ -626,6 +626,21 @@ ts_type! {
 }
 
 ts_type! {
+    /// A Free up space run going on in the background (`free_up_status`).
+    pub struct FreeUpStatus {
+        /// `idle`, `running`, `done` or `failed`.
+        pub state: String,
+        /// `running`: photos handled so far, of `total`.
+        pub done: u32,
+        pub total: u32,
+        /// `done`: what the run freed.
+        pub report: Option<FreeUpReport>,
+        /// `failed`: why.
+        pub error: Option<String>,
+    }
+}
+
+ts_type! {
     /// The one answer to "are my photos safe?" (U1-07), the same words on every screen.
     pub struct SafetyStatus {
         /// `safe`, `single_device`, `busy`, `waiting` or `at_risk`.
@@ -678,8 +693,12 @@ ts_type! {
 ts_type! {
     /// Everything the UI is told about as it happens.
     pub enum AppEvent {
-        /// The library changed (local write or sync): refetch what is on screen.
+        /// Photos were added, changed or deleted (local write or sync): refetch what is on screen.
         LibraryChanged,
+        /// An album's name, cover or photos changed.
+        AlbumsChanged,
+        /// Which devices keep which photos changed: backed-up marks, counts and totals move.
+        HoldingsChanged,
         DevicesChanged,
         PeerConnected { id: String },
         PeerDisconnected { id: String },
@@ -700,10 +719,13 @@ ts_type! {
         BackupPaused { reason: Option<String> },
         /// Many photos left the gallery at once; `count` wait for an answer (0: answered).
         GalleryDeletionsHeld { count: u32 },
-        /// Something changed in a shared album (new photos, members, downloads).
+        /// Something changed in a shared album (new photos, members, downloads). `album` is empty
+        /// when which one is not known (events were missed), so any of them may have.
         SharedChanged { album: String },
         /// The answer to "are my photos safe?" changed.
         Safety { status: SafetyStatus },
+        /// A background Free up space run moved on, finished or failed: `status` says which.
+        FreeUp { status: FreeUpStatus },
     }
 }
 

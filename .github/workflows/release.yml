@@ -127,6 +127,12 @@ jobs:
       - name: Install cargo-zigbuild
         if: matrix.os == 'ubuntu-latest'
         run: uv tool install cargo-zigbuild
+      # The keeper uses jemalloc on musl, which fixes the page size when it is built. ARM boards ship 4, 16
+      # (Raspberry Pi 5) and 64 KB kernels: built for 64 KB it runs on all of them. Set only here: an empty
+      # value would reach jemalloc's configure as `--with-lg-page=`.
+      - name: jemalloc page size (Linux ARM)
+        if: startsWith(matrix.target, 'aarch64')
+        run: echo "JEMALLOC_SYS_WITH_LG_PAGE=16" >> "$GITHUB_ENV"
       - name: Build (Linux, static musl)
         if: matrix.os == 'ubuntu-latest'
         run: cargo zigbuild --release -p keeper --target ${{ matrix.target }}

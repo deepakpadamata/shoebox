@@ -21,6 +21,9 @@ pub const OCR_ENGINE: ModelId = ModelId(*b"shoebox-ocr-any-engine-v1.......");
 pub trait Ocr: Send + Sync {
     /// Text in the image (`bytes`: JPEG, PNG, HEIC… as stored), lines separated by newlines.
     fn read_text(&self, bytes: &[u8]) -> Result<String, EncodeError>;
+    /// Free what the model holds in memory while it is not needed (the indexer calls this once
+    /// it has caught up); the next call loads it again. Does nothing by default.
+    fn release(&self) {}
 }
 
 /// Labels that say a photo probably holds text worth reading.

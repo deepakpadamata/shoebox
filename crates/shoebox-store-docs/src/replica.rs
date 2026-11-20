@@ -229,10 +229,18 @@ impl Replica {
         }
         if pending > 0 {
             self.fetch_missing(overdue);
-            // Keep looking until everything has arrived, even if no further event comes.
+            // Keep looking until everything has arrived, even if no further event comes: soon
+            // at first, then less often the longer content stays missing (nobody who has it may
+            // be online; arriving content wakes the scan by itself).
+            let oldest = self
+                .missing_since
+                .values()
+                .map(|t| t.elapsed())
+                .max()
+                .unwrap_or_default();
             let dirty = self.dirty.clone();
             tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                tokio::time::sleep(recheck_after(oldest)).await;
                 dirty.notify_one();
             });
         }
@@ -242,6 +250,15 @@ impl Replica {
         })
     }
 }
+
+/// How soon to scan again while content has been missing for `missing`: 500 ms at first,
+/// growing with the wait up to [`RECHECK_MAX`].
+fn recheck_after(missing: Duration) -> Duration {
+    (missing / 4).clamp(Duration::from_millis(500), RECHECK_MAX)
+}
+
+/// The longest wait between scans while content is missing.
+const RECHECK_MAX: Duration = Duration::from_secs(30);
 
 /// Result of [`Replica::scan`].
 pub struct Scan {
@@ -430,6 +447,18 @@ where
 mod tests {
     use super::*;
     use shoebox_node::NodeConfig;
+
+    #[test]
+    fn missing_content_is_looked_for_less_often_the_longer_it_is_missing() {
+        let ms = Duration::from_millis;
+        assert_eq!(recheck_after(Duration::ZERO), ms(500));
+        assert_eq!(recheck_after(ms(1500)), ms(500));
+        assert_eq!(
+            recheck_after(Duration::from_secs(20)),
+            Duration::from_secs(5)
+        );
+        assert_eq!(recheck_after(Duration::from_secs(3600)), RECHECK_MAX);
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_rescan_that_finds_nothing_leaves_blob_gc_free_to_run() {

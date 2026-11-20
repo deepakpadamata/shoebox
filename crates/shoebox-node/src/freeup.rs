@@ -21,7 +21,7 @@ use anyhow::{bail, ensure, Context, Result};
 use iroh::endpoint::Connection;
 use iroh::protocol::{AcceptError, ProtocolHandler};
 use shoebox_core::ids::{Blake3Hash, EndpointId};
-use shoebox_core::model::{BlobKind, PhotoId, Role};
+use shoebox_core::model::{BlobKind, PhotoId, PhotoRecord, Role};
 use shoebox_core::policy::shows_directly;
 use shoebox_core::store::{LibraryStore, Page, TimeRange};
 use std::collections::{HashMap, HashSet};
@@ -32,6 +32,9 @@ use std::time::Duration;
 pub const CONFIRMATION_TTL_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 const PROBE_BATCH: usize = 1024;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+/// A dry run (the "you can free…" estimate, asked whenever the Backup screen refreshes) does not
+/// ask a holder again about a blob it confirmed this recently; a real run always asks.
+const DRY_RUN_REPROBE_MS: u64 = 60 * 60 * 1000;
 const FILE: &str = "holder-confirmations.json";
 
 /// What a free-up run frees (or would free).
@@ -169,9 +172,13 @@ impl Confirmations {
     }
 
     fn fresh(&self, device: &EndpointId, hash: &Blake3Hash, now: u64) -> bool {
+        self.within(device, hash, now, CONFIRMATION_TTL_MS)
+    }
+
+    fn within(&self, device: &EndpointId, hash: &Blake3Hash, now: u64, ms: u64) -> bool {
         self.when
             .get(&(*device, *hash))
-            .is_some_and(|t| now.saturating_sub(*t) <= CONFIRMATION_TTL_MS)
+            .is_some_and(|t| now.saturating_sub(*t) <= ms)
     }
 }
 
@@ -348,6 +355,7 @@ impl<L: LibraryStore> LibraryNode<L> {
     async fn freeable(
         &self,
         chosen: Option<&HashSet<PhotoId>>,
+        dry_run: bool,
     ) -> Result<Vec<(PhotoId, u64, bool, bool)>> {
         let role = self.node().config().role;
         if role == Role::Keeper {
@@ -403,11 +411,19 @@ impl<L: LibraryStore> LibraryNode<L> {
             }
         }
 
-        // Confirm with each holder that it really has what it claims.
+        // Confirm with each holder that it really has what it claims. A dry run skips what a
+        // holder confirmed within the last hour: it is only an estimate, and it runs often.
         let mut by_holder: HashMap<EndpointId, Vec<Blake3Hash>> = HashMap::new();
-        for (id, _, others, _, _) in &candidates {
-            for d in others {
-                by_holder.entry(*d).or_default().push(*id);
+        {
+            let now = self.now_ms();
+            let confirmations = self.inner.confirmations.lock().unwrap();
+            for (id, _, others, _, _) in &candidates {
+                for d in others {
+                    if dry_run && confirmations.within(d, id, now, DRY_RUN_REPROBE_MS) {
+                        continue;
+                    }
+                    by_holder.entry(*d).or_default().push(*id);
+                }
             }
         }
         for (device, hashes) in by_holder {
@@ -432,6 +448,41 @@ impl<L: LibraryStore> LibraryNode<L> {
                 }
             })
             .collect())
+    }
+
+    /// Make sure this device keeps the preview of a photo whose original is about to go, since
+    /// the preview is what it shows from then on. A preview released here but not yet collected
+    /// is simply kept again (waiting for the collection, as a fetch does, takes up to minutes per
+    /// photo); else it is fetched, or made from the original while that is still here (a photo
+    /// added while this device was alone has no preview anywhere). `false`: none could be had,
+    /// and the original stays.
+    async fn keep_preview(&self, rec: &PhotoRecord) -> bool {
+        let preview = rec.preview.hash;
+        if preview == rec.original.hash {
+            return true;
+        }
+        let blobs = self.node().blobs();
+        if blobs.kept(&preview).await.unwrap_or(false) {
+            return true;
+        }
+        if blobs.has(&preview).await.unwrap_or(false) {
+            let _exclusive = self.inner.ingest.write().await;
+            let again = blobs.protect(&preview, Protection::Library).await.is_ok()
+                // Collected between the two calls: the tag is on nothing; fetch it after all.
+                && blobs.has(&preview).await.unwrap_or(false);
+            drop(_exclusive);
+            if again {
+                return self
+                    .publish_holdings(vec![(preview, BlobKind::Preview)])
+                    .await
+                    .is_ok();
+            }
+        }
+        if self.fetch_now(&rec.id, BlobKind::Preview).await.is_ok() {
+            return true;
+        }
+        !blobs.has(&preview).await.unwrap_or(true)
+            && self.ensure_preview(rec).await.unwrap_or(false)
     }
 
     /// The videos of Live Photos that go with these originals and are safe to drop with them: held
@@ -477,7 +528,16 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// collects the bytes shortly after) and retracts the holdings. Gallery files are reported in
     /// [`FreeReport::gallery`] and left for the app (see there).
     pub async fn free_up_space(&self, dry_run: bool) -> Result<FreeReport> {
-        self.free(None, dry_run).await
+        self.free(None, dry_run, &|_, _| {}).await
+    }
+
+    /// A real [`free_up_space`](Self::free_up_space) run that tells `progress` how many of the
+    /// photos it found safe to drop it has handled so far (`done`, `total`) as it goes.
+    pub async fn free_up_space_reporting(
+        &self,
+        progress: &(dyn Fn(usize, usize) + Send + Sync),
+    ) -> Result<FreeReport> {
+        self.free(None, false, progress).await
     }
 
     /// "Free up on this device" for chosen photos: as [`free_up_space`](Self::free_up_space),
@@ -485,8 +545,19 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// keep rules do not fetch them again. A photo not safe to drop (no confirmed copy elsewhere,
     /// or a shared album needs it here) is left out of the report.
     pub async fn free_photos(&self, ids: &[PhotoId], dry_run: bool) -> Result<FreeReport> {
+        self.free_photos_reporting(ids, dry_run, &|_, _| {}).await
+    }
+
+    /// [`free_photos`](Self::free_photos), telling `progress` how far a real run is (`done`,
+    /// `total`), as [`free_up_space_reporting`](Self::free_up_space_reporting) does.
+    pub async fn free_photos_reporting(
+        &self,
+        ids: &[PhotoId],
+        dry_run: bool,
+        progress: &(dyn Fn(usize, usize) + Send + Sync),
+    ) -> Result<FreeReport> {
         let chosen: HashSet<PhotoId> = ids.iter().copied().collect();
-        let report = self.free(Some(&chosen), dry_run).await?;
+        let report = self.free(Some(&chosen), dry_run, progress).await?;
         if !dry_run && !report.photos.is_empty() {
             let hexes: Vec<String> = report.photos.iter().map(|h| h.to_string()).collect();
             self.node().update_config(|c| {
@@ -500,29 +571,30 @@ impl<L: LibraryStore> LibraryNode<L> {
         Ok(report)
     }
 
-    async fn free(&self, chosen: Option<&HashSet<PhotoId>>, dry_run: bool) -> Result<FreeReport> {
-        let mut freeable = self.freeable(chosen).await?;
+    async fn free(
+        &self,
+        chosen: Option<&HashSet<PhotoId>>,
+        dry_run: bool,
+        progress: &(dyn Fn(usize, usize) + Send + Sync),
+    ) -> Result<FreeReport> {
+        let mut freeable = self.freeable(chosen, dry_run).await?;
         if !dry_run {
+            let total = freeable.len();
+            progress(0, total);
             let mut kept = Vec::with_capacity(freeable.len());
-            for (id, size, cloud, gallery) in freeable {
+            for (done, (id, size, cloud, gallery)) in freeable.into_iter().enumerate() {
+                if done > 0 {
+                    progress(done, total);
+                }
                 let Some(rec) = self.store().photo(&id).await? else {
                     continue;
                 };
-                let preview = rec.preview.hash;
-                let needed =
-                    preview != rec.original.hash && !self.node().blobs().kept(&preview).await?;
-                // Fetched, which also keeps one released here but not yet collected; else made
-                // from the original while it is still here (a photo added while this device was
-                // alone has no preview anywhere).
-                if needed
-                    && self.fetch_now(&id, BlobKind::Preview).await.is_err()
-                    && !(!self.node().blobs().has(&preview).await?
-                        && self.ensure_preview(&rec).await.unwrap_or(false))
-                {
+                if !self.keep_preview(&rec).await {
                     continue;
                 }
                 kept.push((id, size, cloud, gallery));
             }
+            progress(total, total);
             freeable = kept;
         }
         // A Live Photo's video goes with its original.

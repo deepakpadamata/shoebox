@@ -219,7 +219,29 @@ impl BlobStore {
     /// Stored, and something still keeps it: a blob whose protections were all dropped is only
     /// waiting for collection (a released gallery reference may not be readable any more).
     pub async fn kept(&self, hash: &Blake3Hash) -> Result<bool> {
-        Ok(self.has(hash).await? && !self.protections(hash).await?.is_empty())
+        if !self.has(hash).await? {
+            return Ok(false);
+        }
+        // Cheap lookups first: most kept blobs have a library tag. Only a blob held for an album
+        // alone needs the listing of every album tag (the hash is the last part of their names).
+        for p in [
+            Protection::Library,
+            Protection::Pin,
+            Protection::InPlace,
+            Protection::Index,
+        ] {
+            if self.store.tags().get(p.tag_name(hash)).await?.is_some() {
+                return Ok(true);
+            }
+        }
+        let suffix = format!("/{}", hex(hash));
+        let mut albums = self.store.tags().list_prefix("album/").await?;
+        while let Some(tag) = albums.next().await {
+            if tag?.name.as_ref().ends_with(suffix.as_bytes()) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Every blob that something keeps (any [`Protection`]), from one listing of the tags: what

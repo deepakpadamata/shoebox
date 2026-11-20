@@ -181,6 +181,10 @@ struct Entry {
     introduced: Mutex<Option<Instant>>,
     /// Blobs whose download failed recently: when to try again.
     cooling: Mutex<BTreeMap<Blake3Hash, Instant>>,
+    /// Blobs seen stored and protected for this album since it opened: `fetch_missing` skips
+    /// them instead of looking each one up and re-writing its tag every pass. Cleared whenever
+    /// this album's protections are dropped (`set_keep_originals(false)`).
+    held: Mutex<HashSet<Blake3Hash>>,
 }
 
 impl Entry {
@@ -384,6 +388,7 @@ impl SharedAlbums {
             due: std::sync::atomic::AtomicBool::new(true),
             introduced: Mutex::new(None),
             cooling: Mutex::new(BTreeMap::new()),
+            held: Mutex::new(HashSet::new()),
         });
         self.inner.entries.lock().unwrap().insert(id, entry);
         // Forward the album's changes (and wake the loop: there may be new photos to fetch).
@@ -736,6 +741,7 @@ impl SharedAlbums {
         if keep {
             self.inner.wake.notify_one();
         } else {
+            e.held.lock().unwrap().clear();
             for item in e.album.items(Page::all()).await? {
                 let h = item_blob(&item, BlobKind::Original);
                 let _ = self
@@ -1545,9 +1551,20 @@ impl Inner {
         let now = Instant::now();
         let mut missing = vec![];
         for h in want {
+            if e.held.lock().unwrap().contains(&h) {
+                continue;
+            }
             if self.node.blobs().has(&h).await? {
                 // Hold it for the album (a photo the library also has keeps both reasons).
-                let _ = self.node.blobs().protect(&h, Protection::Album(id)).await;
+                if self
+                    .node
+                    .blobs()
+                    .protect(&h, Protection::Album(id))
+                    .await
+                    .is_ok()
+                {
+                    e.held.lock().unwrap().insert(h);
+                }
                 continue;
             }
             let cooling = e.cooling.lock().unwrap().get(&h).is_some_and(|t| *t > now);

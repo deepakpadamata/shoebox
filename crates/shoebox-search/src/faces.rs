@@ -34,12 +34,18 @@ pub struct Detection {
 
 pub trait FaceDetector: Send + Sync {
     fn detect(&self, image: &Rgb) -> Result<Vec<Detection>, EncodeError>;
+    /// Free what the model holds in memory while it is not needed (the indexer calls this once
+    /// it has caught up); the next call loads it again. Does nothing by default.
+    fn release(&self) {}
 }
 
 pub trait FaceEmbedder: Send + Sync {
     fn dims(&self) -> usize;
     /// The embedding of the face at `landmarks` in `image` (aligned by the embedder).
     fn embed(&self, image: &Rgb, landmarks: &[[f32; 2]; 5]) -> Result<Vec<f32>, EncodeError>;
+    /// Free what the model holds in memory while it is not needed (the indexer calls this once
+    /// it has caught up); the next call loads it again. Does nothing by default.
+    fn release(&self) {}
 }
 
 /// Where a face is, on a 1/64 grid of the photo: (left, top, right, bottom).

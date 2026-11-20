@@ -26,7 +26,7 @@ use shoebox_core::ids::EndpointId;
 use shoebox_core::model::Role;
 use shoebox_core::store::{LibraryCapability, LibraryStore, SignedDeviceList};
 use std::collections::HashMap;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
@@ -456,6 +456,15 @@ async fn receive_loop<L: LibraryStore>(
     }
 }
 
+/// How long to leave a quiet peer after `failures` failed redials in a row: the usual redial
+/// interval (every third beat: 30 s by default) doubling, at most 90 beats (15 minutes).
+fn redial_backoff(heartbeat: Duration, failures: u32) -> Duration {
+    heartbeat
+        .saturating_mul(3)
+        .saturating_mul(2u32.saturating_pow(failures.saturating_sub(1).min(10)))
+        .min(heartbeat.saturating_mul(90))
+}
+
 async fn heartbeat_loop<L: LibraryStore>(
     weak: Weak<Inner<L>>,
     sender: GossipSender,
@@ -464,6 +473,9 @@ async fn heartbeat_loop<L: LibraryStore>(
     let mut ticker = tokio::time::interval(cfg.heartbeat);
     let mut beats = 0u32;
     let mut was_holding_back = false;
+    // Redials of quiet peers that failed: how many in a row, and when to try again. A peer that
+    // comes back connects to us too, so a device off for days is not dialled every 30 s.
+    let redials: Arc<Mutex<HashMap<iroh::EndpointId, (u32, Instant)>>> = Default::default();
     loop {
         ticker.tick().await;
         let Some(inner) = weak.upgrade() else { break };
@@ -497,11 +509,36 @@ async fn heartbeat_loop<L: LibraryStore>(
                     .filter_map(|id| crate::addr::to_iroh_id(id).ok())
                     .collect()
             };
+            let now = Instant::now();
+            {
+                let mut r = redials.lock().unwrap();
+                r.retain(|id, _| quiet.contains(id));
+            }
             for peer in quiet {
-                let (node, sender) = (inner.node.clone(), sender.clone());
+                if redials
+                    .lock()
+                    .unwrap()
+                    .get(&peer)
+                    .is_some_and(|(_, next)| *next > now)
+                {
+                    continue;
+                }
+                let (node, sender, redials) = (inner.node.clone(), sender.clone(), redials.clone());
+                let heartbeat = cfg.heartbeat;
                 tokio::spawn(async move {
                     if node.gossip_dial(peer).await.is_ok() {
+                        redials.lock().unwrap().remove(&peer);
                         let _ = sender.join_peers(vec![peer]).await;
+                    } else {
+                        let mut r = redials.lock().unwrap();
+                        let failures = r.get(&peer).map_or(0, |(n, _)| *n) + 1;
+                        r.insert(
+                            peer,
+                            (
+                                failures,
+                                Instant::now() + redial_backoff(heartbeat, failures),
+                            ),
+                        );
                     }
                 });
             }

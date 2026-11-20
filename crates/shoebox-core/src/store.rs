@@ -376,6 +376,33 @@ pub trait LibraryStore: Send + Sync + 'static {
     /// in id order after `page.after.id`.
     async fn at_risk(&self, min_copies: u8, page: Page) -> Result<Vec<PhotoId>>;
 
+    /// How many photos [`LibraryStore::at_risk`] lists over all pages. Stores that can count
+    /// without collecting the ids should override this: it is asked every few seconds.
+    async fn at_risk_count(&self, min_copies: u8) -> Result<usize> {
+        Ok(self.at_risk(min_copies, Page::all()).await?.len())
+    }
+
+    /// How many live photos there are ([`LibraryStore::photos_by_time`] over all time). Stores
+    /// that can count without building the records should override this.
+    async fn live_photo_count(&self) -> Result<usize> {
+        Ok(self
+            .photos_by_time(TimeRange::ALL, Page::all())
+            .await?
+            .len())
+    }
+
+    /// (live favorite photos, photos in Recently Deleted). Stores that can count without
+    /// building the records should override this.
+    async fn favorite_and_deleted_counts(&self) -> Result<(usize, usize)> {
+        let favorites = self
+            .photos_by_time(TimeRange::ALL, Page::all())
+            .await?
+            .iter()
+            .filter(|p| p.favorite.value)
+            .count();
+        Ok((favorites, self.deleted_photos().await?.len()))
+    }
+
     // ----- settings -----
 
     /// A library-wide setting (e.g. `redundancy.target`), or `None` if never written. Keys are

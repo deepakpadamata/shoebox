@@ -92,6 +92,8 @@ pub const COMMANDS: &[&str] = &[
     "health",
     "safety_status",
     "free_up_space",
+    "start_free_up",
+    "free_up_status",
     "free_photos",
     "settings",
     "set_redundancy_target",
@@ -374,6 +376,11 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
         "health" => out(core.health().await?),
         "safety_status" => out(core.safety_status().await?),
         "free_up_space" => out(core.free_up_space(arg(&args, "dry_run")?).await?),
+        "start_free_up" => {
+            let ids = opt::<Vec<String>>(&args, "ids")?;
+            out(core.start_free_up(ids.as_deref()).await?)
+        }
+        "free_up_status" => out(core.free_up_status()),
         "free_photos" => out(core
             .free_photos(&arg::<Vec<String>>(&args, "ids")?, arg(&args, "dry_run")?)
             .await?),

@@ -25,6 +25,8 @@ const MAX_PENDING: usize = 50_000;
 /// How long a replica must go without writes before it compacts (see
 /// [`LibraryShared::compact_when_idle`]): a sync in progress is left alone.
 const IDLE_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
+/// How long the flusher sleeps with nothing to do before looking again anyway.
+const SETTLED_WAKE: std::time::Duration = std::time::Duration::from_secs(60);
 /// Save the signature verdicts once this many are new, even without compacting.
 const SAVE_VERDICTS_AFTER: usize = 256;
 
@@ -58,6 +60,8 @@ pub(crate) struct Inner {
 pub(crate) struct LibraryShared {
     pub(crate) inner: Mutex<Inner>,
     subs: Mutex<Vec<UnboundedSender<Change>>>,
+    /// The thread that flushes and compacts the update log (none without one).
+    flusher: std::sync::OnceLock<std::thread::Thread>,
 }
 
 fn author_prefix(device: &EndpointId) -> String {
@@ -227,21 +231,39 @@ impl LibraryShared {
         let shared = Arc::new(Self {
             inner: Mutex::new(inner),
             subs: Mutex::new(vec![]),
+            flusher: std::sync::OnceLock::new(),
         });
         if has_log {
-            // Flush the update log periodically (see `Persist::append`) and compact once quiet;
-            // ends with the library.
+            // Flush the update log periodically (see `Persist::append`) and compact once quiet.
+            // With everything written and compacted it sleeps until the next append wakes it
+            // (or a minute passes, which is also when it notices the library is gone).
             let weak = Arc::downgrade(&shared);
-            std::thread::spawn(move || {
+            let flusher = std::thread::spawn(move || {
                 while let Some(shared) = weak.upgrade() {
                     if let Some(p) = shared.inner.lock().unwrap().persist.as_mut() {
                         let _ = p.flush();
                     }
                     shared.compact_when_idle(IDLE_AFTER);
+                    let settled = shared
+                        .inner
+                        .lock()
+                        .unwrap()
+                        .persist
+                        .as_ref()
+                        .is_none_or(|p| p.synced() && p.idle_for() >= IDLE_AFTER);
                     drop(shared);
-                    std::thread::sleep(crate::persist::FLUSH_INTERVAL);
+                    if settled {
+                        std::thread::park_timeout(SETTLED_WAKE);
+                    } else {
+                        std::thread::sleep(crate::persist::FLUSH_INTERVAL);
+                    }
                 }
             });
+            let thread = flusher.thread().clone();
+            if let Some(p) = shared.inner.lock().unwrap().persist.as_mut() {
+                p.set_waker(thread.clone());
+            }
+            let _ = shared.flusher.set(thread);
         }
         Ok(shared)
     }
@@ -285,6 +307,9 @@ impl LibraryShared {
             let _ = p.flush();
         }
         let old_dir = inner.base_dir.as_ref().map(|b| b.join(hex::encode(old.0)));
+        if let (Some(p), Some(t)) = (fresh.persist.as_mut(), self.flusher.get()) {
+            p.set_waker(t.clone());
+        }
         *inner = fresh;
         drop(inner);
         if let Some(dir) = old_dir {
@@ -974,6 +999,15 @@ impl LibraryStore for LoroLibrary {
     }
     async fn at_risk(&self, min_copies: u8, page: Page) -> Result<Vec<PhotoId>> {
         Ok(self.read(|s| s.at_risk(min_copies, page)))
+    }
+    async fn at_risk_count(&self, min_copies: u8) -> Result<usize> {
+        Ok(self.read(|s| s.at_risk_count(min_copies)))
+    }
+    async fn live_photo_count(&self) -> Result<usize> {
+        Ok(self.read(|s| s.live_photo_count()))
+    }
+    async fn favorite_and_deleted_counts(&self) -> Result<(usize, usize)> {
+        Ok(self.read(|s| s.favorite_and_deleted_counts()))
     }
     async fn setting(&self, key: &str) -> Result<Option<Vec<u8>>> {
         Ok(self.read(|s| s.setting(key)))

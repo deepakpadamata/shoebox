@@ -1103,3 +1103,71 @@ async fn freeing_a_gallery_photo_deletes_its_file_and_keeps_the_photo() {
     keeper.shutdown().await.unwrap();
     r.core.shutdown().await.unwrap();
 }
+
+/// Free up runs in the background: `start_free_up` returns at once, progress and the result come
+/// as `FreeUp` events, and the run does what the blocking call would.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn free_up_runs_in_the_background_and_reports_by_events() {
+    let r = rig().await;
+    for (i, f) in r.files.iter().take(3).enumerate() {
+        r.source.put(&format!("a{i}"), f, 1);
+    }
+    r.core.backup_configure(policy(false, false)).await.unwrap();
+    assert_eq!(r.core.backup_run(true).await.unwrap().imported, 3);
+    let first = r.core.library_page(None, 10).await.unwrap().items[0]
+        .id
+        .clone();
+    let kd = tempfile::tempdir().unwrap();
+    let keeper = AppCore::open(kd.path(), AppOptions::local_only())
+        .await
+        .unwrap();
+    pair(&r.core, &keeper, "keeper", "Pi").await;
+    let mut held = false;
+    for _ in 0..120 {
+        if r.core
+            .photo_detail(&first)
+            .await
+            .map(|d| d.copies >= 2)
+            .unwrap_or(false)
+        {
+            held = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    assert!(held, "the keeper took the original");
+    assert_eq!(r.core.free_up_status().state, "idle");
+
+    let mut ev = r.core.events();
+    let started = r
+        .core
+        .start_free_up(Some(std::slice::from_ref(&first)))
+        .await
+        .unwrap();
+    assert!(
+        ["running", "done"].contains(&started.state.as_str()),
+        "{started:?}"
+    );
+    let end = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            if let Ok(AppEvent::FreeUp { status }) = ev.recv().await {
+                if status.state != "running" {
+                    return status;
+                }
+            }
+        }
+    })
+    .await
+    .expect("the run ends");
+    assert_eq!(end.state, "done", "{end:?}");
+    let report = end.report.clone().unwrap();
+    assert_eq!(
+        (report.photos, report.gallery, report.kept),
+        (1, 1, 0),
+        "{report:?}"
+    );
+    assert_eq!(r.core.free_up_status(), end);
+    assert_eq!(r.source.delete_requests().len(), 1);
+    keeper.shutdown().await.unwrap();
+    r.core.shutdown().await.unwrap();
+}

@@ -85,6 +85,14 @@ opt-level = 2
 [profile.dev.package.shoebox-media]
 opt-level = 2
 
+# Cloud encryption streams and label scoring are hot loops in our own code: unoptimised, the 64 MiB
+# cloud round trip took 18.8 s on a Ryzen 5 3600 and 6.5 s on an M4 (0.4 s on both optimised).
+[profile.dev.package.shoebox-core]
+opt-level = 2
+
+[profile.dev.package.shoebox-search]
+opt-level = 2
+
 # Smaller downloads: the keeper went from 47.6 MB to 27.7 MB (macOS arm64). Fat LTO failed to link and took longer.
 # Panics still unwind: media import and the Android JNI bridge catch them.
 [profile.release]

@@ -111,7 +111,29 @@ pub(crate) struct BackupState {
     pub last_permission: Option<Permission>,
     pub last_scan_ms: u64,
     pub last_error: Option<String>,
+    /// When `merge_scan` last wrote this file (not saved): a scan that found nothing new only
+    /// rewrites it, for `last_scan_ms`, once this is [`QUIET_SAVE_EVERY_MS`] old.
+    #[serde(skip)]
+    scan_saved_ms: u64,
+    /// A scan found something since the gallery files were last looked at (not saved).
+    #[serde(skip)]
+    scan_changed: bool,
+    /// When the background loop last looked at every tracked gallery file (not saved).
+    #[serde(skip)]
+    swept_ms: u64,
+    /// Photos (original hashes) whose poster frame needs nothing more this session: not a
+    /// video, already has one, or the system had none to give (not saved).
+    #[serde(skip)]
+    posters_settled: HashSet<Blake3Hash>,
 }
+
+/// How often the background loop looks at every tracked gallery file for deletions when no scan
+/// reported a change: one file-system lookup per photo, tens of thousands on a big gallery.
+const SWEEP_EVERY_MS: u64 = 5 * 60 * 1000;
+
+/// How often a scan that found nothing still saves `backup.json` (for `last_scan_ms`). The file
+/// holds every tracked photo, so rewriting it each [`TICK`] was megabytes of writes for nothing.
+const QUIET_SAVE_EVERY_MS: u64 = 60 * 60 * 1000;
 
 impl BackupState {
     pub(crate) fn load(dir: &std::path::Path) -> Self {
@@ -168,10 +190,10 @@ impl AppCore {
                 tokio::time::sleep(TICK).await;
                 let Some(core) = weak.upgrade() else { break };
                 if core.backup.lock().await.policy.enabled {
-                    let _ = core.backup_run(true).await;
+                    let _ = core.backup_pass(true, true).await;
                 } else {
                     // Photos added before backup was turned off still follow the gallery.
-                    let _ = core.gallery_check().await;
+                    let _ = core.gallery_check_from(true).await;
                 }
             }
         });
@@ -322,6 +344,12 @@ impl AppCore {
 
     /// Look for new photos and (when the conditions allow and `import`) import what is waiting.
     pub async fn backup_run(self: &Arc<Self>, import: bool) -> Result<BackupReport> {
+        self.backup_pass(import, false).await
+    }
+
+    /// [`AppCore::backup_run`]; `background`: the periodic loop, which looks at every gallery
+    /// file only every [`SWEEP_EVERY_MS`] unless a scan found something.
+    async fn backup_pass(self: &Arc<Self>, import: bool, background: bool) -> Result<BackupReport> {
         // One scan/import at a time (the background loop and a manual run can overlap).
         let _running = self.backup_running.lock().await;
         let source = self.source()?;
@@ -353,7 +381,7 @@ impl AppCore {
         self.merge_scan(&*source).await?;
         // 2. What the gallery deleted, and copies still waiting to become references. Local work:
         // no conditions apply.
-        self.check_gallery(&*source, &ln, true).await?;
+        self.check_gallery(&*source, &ln, true, background).await?;
         self.continue_moves(&ln).await?;
         self.make_posters(&*source, &ln).await;
 
@@ -393,8 +421,9 @@ impl AppCore {
             }
             st.token.clone()
         };
-        let scan = source.scan(token).await?;
+        let scan = source.scan(token.clone()).await?;
         let mut st = self.backup.lock().await;
+        let mut changed = token.as_deref() != Some(scan.token.as_str());
         for a in scan.assets {
             // A photo already in the library keeps following its edits whatever the scope.
             let tracked = st.tracked.get(&a.id).map(|t| t.modified_ms);
@@ -402,19 +431,27 @@ impl AppCore {
                 continue;
             }
             if tracked != Some(a.modified_ms) {
+                changed |= st.pending.get(&a.id) != Some(&a);
                 st.pending.insert(a.id.clone(), a);
             }
         }
         for id in scan.removed {
-            st.pending.remove(&id);
+            changed |= st.pending.remove(&id).is_some();
             if st.tracked.get(&id).is_some_and(Tracked::in_library)
                 && !st.removed_from_library.contains(&id)
             {
                 st.removed_from_library.push(id);
+                changed = true;
             }
         }
         st.token = Some(scan.token);
-        st.last_scan_ms = now_ms();
+        let now = now_ms();
+        st.last_scan_ms = now;
+        st.scan_changed |= changed;
+        if !changed && now.saturating_sub(st.scan_saved_ms) < QUIET_SAVE_EVERY_MS {
+            return Ok(());
+        }
+        st.scan_saved_ms = now;
         st.save(self.data_dir())
     }
 
@@ -569,14 +606,20 @@ impl AppCore {
     /// thumbnailer, so no device has to decode them to show a tile. At most [`POSTERS_PER_RUN`]
     /// tries a run; the rest follow on later runs. Never fails the backup.
     async fn make_posters(&self, source: &dyn PhotoSource, ln: &LibraryNode<Library>) {
+        // Only photos not yet settled this session: each run used to look up every tracked
+        // photo in the library, twice a run.
         let tracked: Vec<(String, String, Option<String>)> = {
             let st = self.backup.lock().await;
             st.tracked
                 .iter()
+                .filter(|(_, t)| {
+                    crate::core::parse_hash(&t.hash).is_ok_and(|h| !st.posters_settled.contains(&h))
+                })
                 .map(|(asset, t)| (asset.clone(), t.hash.clone(), t.path.clone()))
                 .collect()
         };
         let (mut tried, mut made) = (0usize, 0usize);
+        let mut settled = vec![];
         for (asset, hash, path) in tracked {
             if tried >= POSTERS_PER_RUN {
                 break;
@@ -584,22 +627,28 @@ impl AppCore {
             let Ok(id) = crate::core::parse_hash(&hash) else {
                 continue;
             };
+            // Not in the library (yet): looked at again next run.
             let Ok(Some(rec)) = ln.store().photo(&id).await else {
                 continue;
             };
             if !rec.original.mime.starts_with("video/") || rec.thumb.hash != rec.original.hash {
+                settled.push(id);
                 continue;
             }
             tried += 1;
             match source.video_frame(&asset, path.as_deref()).await {
                 Ok(Some(jpeg)) => match ln.set_video_poster(&id, jpeg).await {
-                    Ok(_) => made += 1,
+                    Ok(_) => {
+                        made += 1;
+                        settled.push(id);
+                    }
                     Err(e) => tracing::debug!("poster for {asset}: {e:#}"),
                 },
-                Ok(None) => {}
+                Ok(None) => settled.push(id),
                 Err(e) => tracing::debug!("poster frame of {asset}: {e:#}"),
             }
         }
+        self.backup.lock().await.posters_settled.extend(settled);
         if made > 0 {
             tracing::info!(made, "poster frames made from the gallery");
             self.emit(AppEvent::LibraryChanged);
@@ -639,13 +688,17 @@ impl AppCore {
     /// A Mac's Photos library is not looked at while its backup is off: what was imported stays,
     /// and Photos is not scanned (P1-04). A phone's gallery still is: it owns those photos (A-092).
     pub async fn gallery_check(&self) -> Result<()> {
+        self.gallery_check_from(false).await
+    }
+
+    async fn gallery_check_from(&self, background: bool) -> Result<()> {
         let _running = self.backup_running.lock().await;
         let source = self.source()?;
         if source.kind() == "photos_library" && !self.backup.lock().await.policy.enabled {
             return Ok(());
         }
         let ln = self.ln().await?;
-        self.check_gallery(&*source, &ln, false).await
+        self.check_gallery(&*source, &ln, false, background).await
     }
 
     /// Photos whose gallery file is gone, or whose library asset the scan reported removed, are
@@ -665,6 +718,7 @@ impl AppCore {
         source: &dyn PhotoSource,
         ln: &LibraryNode<Library>,
         scanned: bool,
+        background: bool,
     ) -> Result<()> {
         let permission = source.permission().await?;
         if permission == Permission::Denied {
@@ -691,6 +745,20 @@ impl AppCore {
         };
         if narrowed {
             return self.release_unshared(source, ln).await;
+        }
+        let sweep = {
+            let mut st = self.backup.lock().await;
+            let now = now_ms();
+            let due =
+                !background || st.scan_changed || now.saturating_sub(st.swept_ms) >= SWEEP_EVERY_MS;
+            if due {
+                st.scan_changed = false;
+                st.swept_ms = now;
+            }
+            due
+        };
+        if !sweep {
+            return Ok(());
         }
         let (gone, total) = {
             let mut st = self.backup.lock().await;
@@ -948,7 +1016,7 @@ impl AppCore {
         let before = source.permission().await?;
         if !files && before != Permission::Granted {
             // Deletions so far count as deletions; what vanishes across the prompt was unshared.
-            let _ = self.check_gallery(&*source, &ln, false).await;
+            let _ = self.check_gallery(&*source, &ln, false, false).await;
             let answer = if before == Permission::Limited {
                 // Asked already: the system prompt does not come again. Share more through the
                 // platform's own picker, then look at what is shared now.

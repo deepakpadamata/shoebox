@@ -150,6 +150,7 @@ impl Shared {
         // The keeper takes part in the shared albums its person's other devices are in (A-097).
         let node = self.node.clone();
         shoebox_store::library_link::follow(albums.clone(), ln.clone(), move || node.config().name);
+        let lib = ln.clone();
         *self.library.lock().await = Some(ln);
         *self.albums.lock().await = Some(albums);
         // A rotation replaces the capability: remember the new one so a restart rejoins it.
@@ -158,7 +159,33 @@ impl Shared {
         let node = self.node.clone();
         let peers = ticket.peers.clone();
         tokio::spawn(async move {
-            while let Ok(ev) = events.recv().await {
+            let save = |cap| {
+                let ticket = LibraryTicket {
+                    cap,
+                    peers: peers.clone(),
+                };
+                let state = KeeperState {
+                    name: node.config().name,
+                    ticket: ticket.to_string(),
+                };
+                if let Ok(bytes) = serde_json::to_vec_pretty(&state) {
+                    let _ = std::fs::write(state_path(&storage), bytes);
+                }
+            };
+            loop {
+                let ev = match events.recv().await {
+                    Ok(ev) => ev,
+                    // Fell behind (a burst of transfer events): keep going, and save the current
+                    // capability in case a rotation was among the events dropped.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("the keeper's event loop skipped {n} events");
+                        if let Ok(t) = lib.ticket() {
+                            save(t.cap);
+                        }
+                        continue;
+                    }
+                    Err(_) => break,
+                };
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis() as u64)
@@ -185,17 +212,7 @@ impl Shared {
                     _ => {}
                 }
                 if let shoebox_node::NodeEvent::LibraryRotated { cap } = ev {
-                    let ticket = LibraryTicket {
-                        cap,
-                        peers: peers.clone(),
-                    };
-                    let state = KeeperState {
-                        name: node.config().name,
-                        ticket: ticket.to_string(),
-                    };
-                    if let Ok(bytes) = serde_json::to_vec_pretty(&state) {
-                        let _ = std::fs::write(state_path(&storage), bytes);
-                    }
+                    save(cap);
                 }
             }
         });

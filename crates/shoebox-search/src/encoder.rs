@@ -43,6 +43,9 @@ pub trait ImageEncoder: Send + Sync {
     fn model(&self) -> ModelId;
     fn dims(&self) -> usize;
     fn encode_image(&self, image: &Rgb) -> Result<Vec<f32>, EncodeError>;
+    /// Free what the model holds in memory while it is not needed (the indexer calls this once
+    /// it has caught up); the next call loads it again. Does nothing by default.
+    fn release(&self) {}
 }
 
 pub fn normalize(v: &mut [f32]) {

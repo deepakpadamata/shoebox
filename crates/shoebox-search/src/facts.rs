@@ -692,6 +692,48 @@ pub fn encode(s: &Snapshot) -> Vec<u8> {
     out
 }
 
+/// [`encode`] of `ix`'s snapshot, without copying it first: the same bytes, made from references
+/// into the index, in one buffer.
+pub fn encode_index(ix: &FactsIndex) -> Vec<u8> {
+    #[derive(Serialize)]
+    struct SnapshotRef<'a> {
+        photos: Vec<&'a PhotoFacts>,
+        extra: Vec<(PhotoId, &'a Extra)>,
+        albums: Vec<(AlbumId, &'a str, Vec<PhotoId>)>,
+    }
+    let mut photos: Vec<&PhotoFacts> = ix
+        .by_id
+        .values()
+        .map(|&r| &ix.rows[r as usize].facts)
+        .collect();
+    photos.sort_by_key(|p| p.id);
+    let mut extra: Vec<(PhotoId, &Extra)> = ix.extra.iter().map(|(k, v)| (*k, v)).collect();
+    extra.sort_by_key(|e| e.0);
+    let mut albums: Vec<(AlbumId, &str, Vec<PhotoId>)> = ix
+        .albums
+        .iter()
+        .map(|(id, a)| {
+            let mut m: Vec<PhotoId> = a.members.iter().copied().collect();
+            m.sort();
+            (*id, a.name.as_str(), m)
+        })
+        .collect();
+    albums.sort_by_key(|a| a.0);
+    let s = SnapshotRef {
+        photos,
+        extra,
+        albums,
+    };
+    let mut out = Vec::with_capacity(37);
+    out.extend_from_slice(MAGIC);
+    out.push(FACTS_VERSION);
+    out.extend_from_slice(&[0; 32]);
+    let mut out = postcard::to_extend(&s, out).expect("snapshot encodes");
+    let sum = *blake3::hash(&out[37..]).as_bytes();
+    out[5..37].copy_from_slice(&sum);
+    out
+}
+
 /// `None` when the file is of another version, truncated or corrupt (then rebuild).
 pub fn decode(bytes: &[u8]) -> Option<Snapshot> {
     if bytes.len() < 37 || &bytes[..4] != MAGIC || bytes[4] != FACTS_VERSION {

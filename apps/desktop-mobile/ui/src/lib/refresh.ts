@@ -9,6 +9,8 @@ export async function refreshEverything(): Promise<void> {
     await api.syncBurst(8).catch(() => {});
     await refreshState();
     app.version++;
+    app.albumsVersion++;
+    app.holdingsVersion++;
     app.sharedVersion++;
     app.devicesVersion++;
   } catch {

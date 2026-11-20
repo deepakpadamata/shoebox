@@ -66,8 +66,10 @@ impl Default for AppOptions {
             background: true,
             update_feed: default_update_feed(),
             // Released blobs (a deleted gallery photo's reference, a copy turned into a
-            // reference) are collected on the next pass: keep the wait short.
-            gc_interval: Some(Duration::from_secs(20)),
+            // reference) are collected on the next pass. Each pass lists every blob in the
+            // store, so this is a balance between freeing room soon and idle CPU: iroh-blobs
+            // has no public way to run one pass on demand right after a release.
+            gc_interval: Some(Duration::from_secs(120)),
             model_dirs: vec![],
             search_models: true,
         }
@@ -279,6 +281,17 @@ pub struct AppCore {
     /// was asked for while it ran.
     pub(crate) auto_save: tokio::sync::Mutex<()>,
     pub(crate) auto_save_again: std::sync::atomic::AtomicBool,
+    /// The Free up space run going on in the background, and how the last one ended.
+    free_up: Mutex<FreeUpRun>,
+}
+
+#[derive(Default)]
+struct FreeUpRun {
+    task: Option<tokio::task::JoinHandle<()>>,
+    done: u32,
+    total: u32,
+    report: Option<FreeUpReport>,
+    error: Option<String>,
 }
 
 #[derive(Default)]
@@ -294,17 +307,29 @@ struct ArchiveRun {
     report: Option<crate::types::ArchiveReportInfo>,
 }
 
+/// Store changes closer together than this reach the UI as one event (see `forward_library_changes`).
+const CHANGE_COALESCE: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// Rebuilt at most this often: the Devices screen asks every second or two.
 const TRANSFER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[derive(Default)]
 struct TransferCache {
-    blobs: HashMap<Blake3Hash, (Blake3Hash, BlobKind)>,
+    /// Blobs that were moving when last asked → their photo and kind (none: not a photo's).
+    /// Only those: a map of every blob in the library was tens of MB kept for good.
+    blobs: HashMap<Blake3Hash, Option<(Blake3Hash, BlobKind)>>,
     blobs_at: Option<std::time::Instant>,
     /// The fetch queue: blob, kind and size.
     waiting: Vec<(Blake3Hash, BlobKind, u64)>,
     waiting_at: Option<std::time::Instant>,
+    /// When the Devices screen last asked; the cache is emptied once it stops.
+    used_at: Option<std::time::Instant>,
+    /// A task is waiting to empty the cache.
+    sweeping: bool,
 }
+
+/// The transfer cache is emptied when nothing asked for this long.
+const TRANSFER_CACHE_IDLE: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl AppCore {
     /// Open (creating on first use) the app's data directory and start the node. If this device
@@ -381,6 +406,7 @@ impl AppCore {
             backup_running: tokio::sync::Mutex::new(()),
             transfer_cache: tokio::sync::Mutex::new(TransferCache::default()),
             archive_import: Mutex::new(ArchiveRun::default()),
+            free_up: Mutex::new(FreeUpRun::default()),
             seen: Mutex::new(SeenBook::default()),
             safety_sent: Mutex::new(None),
             auto_save: tokio::sync::Mutex::new(()),
@@ -674,14 +700,63 @@ impl AppCore {
     fn forward_library_changes(self: &Arc<Self>, ln: &LibraryNode<Library>) {
         let weak = Arc::downgrade(self);
         let mut changes = ln.store().subscribe();
+        // A run that touches many photos (free up, a fetch, a sync) changes the store many times a
+        // second, and screens refetch on each event: the first change of each kind goes out at
+        // once, the rest of a burst as one more at its end ([`CHANGE_COALESCE`]). Screens are told
+        // what kind changed, so a fetch that only moves holdings does not reload the photo list;
+        // index, people and sync-progress changes have their own status calls and send nothing.
         tokio::spawn(async move {
+            use futures::StreamExt;
             use shoebox_core::store::Change;
-            while let Some(change) = futures::StreamExt::next(&mut changes).await {
+            const KINDS: [AppEvent; 4] = [
+                AppEvent::LibraryChanged,
+                AppEvent::AlbumsChanged,
+                AppEvent::HoldingsChanged,
+                AppEvent::DevicesChanged,
+            ];
+            let kind = |c: &Change| match c {
+                Change::PhotoUpserted(_)
+                | Change::PhotoDeleted(_)
+                | Change::MotionChanged(_)
+                | Change::SettingChanged(_) => Some(0),
+                Change::AlbumChanged(_) => Some(1),
+                Change::HoldingsChanged { .. } => Some(2),
+                Change::DeviceListChanged => Some(3),
+                Change::IndexChanged
+                | Change::PeopleChanged
+                | Change::RemoteSyncProgress { .. } => None,
+            };
+            while let Some(first) = changes.next().await {
+                let Some(k) = kind(&first) else { continue };
                 let Some(core) = weak.upgrade() else { break };
-                core.emit(match change {
-                    Change::DeviceListChanged => AppEvent::DevicesChanged,
-                    _ => AppEvent::LibraryChanged,
-                });
+                core.emit(KINDS[k].clone());
+                drop(core);
+                let mut pending = [false; 4];
+                let deadline = tokio::time::Instant::now() + CHANGE_COALESCE;
+                let mut ended = false;
+                loop {
+                    match tokio::time::timeout_at(deadline, changes.next()).await {
+                        Ok(Some(c)) => {
+                            if let Some(k) = kind(&c) {
+                                pending[k] = true;
+                            }
+                        }
+                        Ok(None) => {
+                            ended = true;
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                let Some(core) = weak.upgrade() else { break };
+                for (k, p) in pending.iter().enumerate() {
+                    if *p {
+                        core.emit(KINDS[k].clone());
+                    }
+                }
+                if ended {
+                    break;
+                }
             }
         });
     }
@@ -696,11 +771,18 @@ impl AppCore {
             loop {
                 tokio::select! {
                     notice = notices.recv() => {
-                        let Ok(shoebox_store::AlbumNotice(id)) = notice else { break };
+                        use tokio::sync::broadcast::error::RecvError;
                         let Some(core) = weak.upgrade() else { break };
-                        core.emit(AppEvent::SharedChanged {
-                            album: hex::encode(id.0),
-                        });
+                        match notice {
+                            Ok(shoebox_store::AlbumNotice(id)) => core.emit(AppEvent::SharedChanged {
+                                album: hex::encode(id.0),
+                            }),
+                            // Fell behind: which albums changed is lost, so every one may have.
+                            Err(RecvError::Lagged(_)) => core.emit(AppEvent::SharedChanged {
+                                album: String::new(),
+                            }),
+                            Err(RecvError::Closed) => break,
+                        }
                         core.kick_auto_save();
                     }
                     _ = retry.tick() => {
@@ -763,9 +845,41 @@ impl AppCore {
                     weak.upgrade().map(|c| c.device_name()).unwrap_or_default()
                 });
             let weak = Arc::downgrade(self);
+            let mut changes = ln.store().subscribe();
+            let mut notices = shared.subscribe();
             let linked = tokio::spawn(async move {
+                use futures::{FutureExt, StreamExt};
+                use shoebox_core::store::Change;
+                use tokio::sync::broadcast::error::RecvError;
+                // Photos added to a shared personal album (here or on another device) are shared
+                // when an album, the list of shared albums (a setting) or a shared album changes.
+                // The slow timer retries what could not be shared then.
+                const FALLBACK: std::time::Duration = std::time::Duration::from_secs(600);
+                const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
                 loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    let woken = tokio::select! {
+                        c = changes.next() => match c {
+                            None => break,
+                            Some(c) => matches!(
+                                c,
+                                Change::AlbumChanged(_)
+                                    | Change::SettingChanged(_)
+                                    | Change::PhotoUpserted(_)
+                            ),
+                        },
+                        n = notices.recv() => match n {
+                            Err(RecvError::Closed) => break,
+                            Ok(_) | Err(RecvError::Lagged(_)) => true,
+                        },
+                        _ = tokio::time::sleep(FALLBACK) => true,
+                    };
+                    if !woken {
+                        continue;
+                    }
+                    // Let a burst (an import, a sync) land before looking.
+                    tokio::time::sleep(SETTLE).await;
+                    while let Some(Some(_)) = changes.next().now_or_never() {}
+                    while notices.try_recv().is_ok() {}
                     let Some(core) = weak.upgrade() else { break };
                     if let Err(e) = core.sync_linked_albums().await {
                         tracing::debug!("sharing new photos of shared albums: {e:#}");
@@ -1284,16 +1398,13 @@ impl AppCore {
 
     pub async fn counts(&self) -> Result<LibraryCounts> {
         let ln = self.ln().await?;
-        let photos = ln
-            .store()
-            .photos_by_time(TimeRange::ALL, Page::all())
-            .await?;
-        let deleted = ln.store().deleted_photos().await?.len();
+        let photos = ln.store().live_photo_count().await?;
+        let (favorites, deleted) = ln.store().favorite_and_deleted_counts().await?;
         Ok(LibraryCounts {
-            photos: photos.len() as u32,
-            favorites: photos.iter().filter(|p| p.favorite.value).count() as u32,
+            photos: photos as u32,
+            favorites: favorites as u32,
             deleted: deleted as u32,
-            at_risk: ln.at_risk(Page::all()).await?.len() as u32,
+            at_risk: ln.at_risk_count().await? as u32,
             redundancy_target: ln.redundancy_target().await? as u32,
         })
     }
@@ -1817,31 +1928,59 @@ impl AppCore {
     }
 
     /// What is moving right now and what this device still has to fetch (Devices screen).
-    pub async fn transfers(&self) -> Result<crate::types::Transfers> {
+    pub async fn transfers(self: &Arc<Self>) -> Result<crate::types::Transfers> {
         use crate::types::{TransferItem, Transfers};
         let ln = self.ln().await?;
         let snap = self.node.transfers();
         let mut cache = self.transfer_cache.lock().await;
         let stale =
             |at: Option<std::time::Instant>| at.is_none_or(|t| t.elapsed() > TRANSFER_CACHE_TTL);
-        let unknown = snap
+        cache.used_at = Some(std::time::Instant::now());
+        if !cache.sweeping {
+            cache.sweeping = true;
+            let weak = Arc::downgrade(self);
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(TRANSFER_CACHE_IDLE).await;
+                    let Some(core) = weak.upgrade() else { break };
+                    let mut cache = core.transfer_cache.lock().await;
+                    if cache
+                        .used_at
+                        .is_none_or(|t| t.elapsed() >= TRANSFER_CACHE_IDLE)
+                    {
+                        *cache = TransferCache::default();
+                        break;
+                    }
+                }
+            });
+        }
+        let moving: HashSet<Blake3Hash> = snap
             .downloads
             .iter()
             .chain(&snap.uploads)
-            .any(|t| !cache.blobs.contains_key(&t.hash));
-        if stale(cache.blobs_at)
+            .map(|t| t.hash)
+            .collect();
+        let unknown = moving.iter().any(|h| !cache.blobs.contains_key(h));
+        if (stale(cache.blobs_at) && !moving.is_empty())
             || (unknown && cache.blobs_at.is_none_or(|t| t.elapsed().as_secs() >= 1))
         {
-            let mut blobs = HashMap::new();
+            let mut blobs: HashMap<Blake3Hash, Option<(Blake3Hash, BlobKind)>> =
+                moving.iter().map(|h| (*h, None)).collect();
             for rec in ln
                 .store()
                 .photos_by_time(TimeRange::ALL, Page::all())
                 .await?
             {
-                blobs.insert(rec.thumb.hash, (rec.id, BlobKind::Thumb));
-                blobs.insert(rec.preview.hash, (rec.id, BlobKind::Preview));
                 // Last: a video's thumbnail and preview are its original.
-                blobs.insert(rec.original.hash, (rec.id, BlobKind::Original));
+                for (h, kind) in [
+                    (rec.thumb.hash, BlobKind::Thumb),
+                    (rec.preview.hash, BlobKind::Preview),
+                    (rec.original.hash, BlobKind::Original),
+                ] {
+                    if let Some(slot) = blobs.get_mut(&h) {
+                        *slot = Some((rec.id, kind));
+                    }
+                }
             }
             cache.blobs = blobs;
             cache.blobs_at = Some(std::time::Instant::now());
@@ -1856,10 +1995,10 @@ impl AppCore {
             cache.waiting_at = Some(std::time::Instant::now());
         }
         let item = |t: &shoebox_node::Transfer| {
-            let known = cache.blobs.get(&t.hash);
+            let known = cache.blobs.get(&t.hash).copied().flatten();
             TransferItem {
                 photo: known.map(|(p, _)| p.to_string()),
-                kind: known.map_or("other", |(_, k)| kind_name(*k)).into(),
+                kind: known.map_or("other", |(_, k)| kind_name(k)).into(),
                 peer: t.peer.map(|p| hex::encode(p.0)),
                 size: t.size.map(|s| s as f64),
                 done: t.done as f64,
@@ -2034,12 +2173,9 @@ impl AppCore {
     pub async fn safety_status(&self) -> Result<crate::types::SafetyStatus> {
         use crate::safety::{compute, DeviceFact, Inputs};
         let ln = self.ln().await?;
-        let photos = ln
-            .store()
-            .photos_by_time(TimeRange::ALL, Page::all())
-            .await?
-            .len() as u32;
-        let not_safe = ln.at_risk(Page::all()).await?.len() as u32;
+        // Counted, not listed: this runs every few seconds.
+        let photos = ln.store().live_photo_count().await? as u32;
+        let not_safe = ln.at_risk_count().await? as u32;
         let devices = self.devices().await?;
         let snap = self.node.transfers();
         let transferring = !snap.downloads.is_empty() || !snap.uploads.is_empty();
@@ -2154,6 +2290,96 @@ impl AppCore {
         let ln = self.ln().await?;
         let r = ln.free_up_space(dry_run).await?;
         self.finish_free(r, 0, dry_run).await
+    }
+
+    /// Start a real Free up space run in the background and return at once: it can take a
+    /// while (each photo's preview is made sure of first), and the person should be free to go
+    /// on using the app. Progress and the result come as [`AppEvent::FreeUp`]; the state is also
+    /// in [`AppCore::free_up_status`].
+    ///
+    /// With `ids`, only those photos ("Free up on this device", as [`AppCore::free_photos`]).
+    pub async fn start_free_up(self: &Arc<Self>, ids: Option<&[String]>) -> Result<FreeUpStatus> {
+        let ln = self.ln().await?;
+        let chosen: Option<Vec<Blake3Hash>> = ids
+            .map(|ids| ids.iter().map(|s| parse_hash(s)).collect::<Result<_>>())
+            .transpose()?;
+        let weak = Arc::downgrade(self);
+        {
+            // Held across the spawn so a run that ends at once cannot be overwritten below.
+            let mut run = self.free_up.lock().unwrap();
+            if run.task.as_ref().is_some_and(|t| !t.is_finished()) {
+                return Ok(Self::free_up_info(&run));
+            }
+            *run = FreeUpRun::default();
+            let task = tokio::spawn(async move {
+                let progress_core = weak.clone();
+                let progress = move |done: usize, total: usize| {
+                    let Some(core) = progress_core.upgrade() else {
+                        return;
+                    };
+                    let status = {
+                        let mut run = core.free_up.lock().unwrap();
+                        run.done = done as u32;
+                        run.total = total as u32;
+                        Self::free_up_info(&run)
+                    };
+                    core.emit(AppEvent::FreeUp { status });
+                };
+                let (result, asked) = match &chosen {
+                    Some(ids) => (
+                        ln.free_photos_reporting(ids, false, &progress).await,
+                        ids.len(),
+                    ),
+                    None => (ln.free_up_space_reporting(&progress).await, 0),
+                };
+                let Some(core) = weak.upgrade() else { return };
+                let result = match result {
+                    Ok(r) => {
+                        let kept = asked.saturating_sub(r.photos.len()) as u32;
+                        core.finish_free(r, kept, false).await
+                    }
+                    Err(e) => Err(e),
+                };
+                let status = {
+                    let mut run = core.free_up.lock().unwrap();
+                    run.task = None;
+                    match result {
+                        Ok(r) => run.report = Some(r),
+                        Err(e) => run.error = Some(crate::commands::user_message(&e)),
+                    }
+                    Self::free_up_info(&run)
+                };
+                core.emit(AppEvent::FreeUp { status });
+                core.emit(AppEvent::LibraryChanged);
+            });
+            run.task = Some(task);
+        }
+        Ok(self.free_up_status())
+    }
+
+    /// Whether a Free up space run is going on, and how the last one ended.
+    pub fn free_up_status(&self) -> FreeUpStatus {
+        Self::free_up_info(&self.free_up.lock().unwrap())
+    }
+
+    fn free_up_info(run: &FreeUpRun) -> FreeUpStatus {
+        let running = run.task.as_ref().is_some_and(|t| !t.is_finished());
+        let state = if running {
+            "running"
+        } else if run.error.is_some() {
+            "failed"
+        } else if run.report.is_some() {
+            "done"
+        } else {
+            "idle"
+        };
+        FreeUpStatus {
+            state: state.into(),
+            done: run.done,
+            total: run.total,
+            report: run.report.clone(),
+            error: run.error.clone(),
+        }
     }
 
     /// "Free up on this device" for chosen photos (the opposite of Keep on this device): as Free

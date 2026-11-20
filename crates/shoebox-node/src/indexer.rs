@@ -68,6 +68,13 @@ pub struct IndexerConfig {
     pub status_every: Duration,
     /// Compact shards (an always-on indexer only) at most this often (S1-15).
     pub compact_every: Duration,
+    /// Once a pass found nothing to do, look again after this long (or on a relevant library
+    /// change) instead of every `tick`: what becomes due by time alone (another device's photos
+    /// past `grace`, a buffer past `shard_after`) does not need a 30 s poll.
+    pub idle_tick: Duration,
+    /// How long the gate stays closed (the computer in use, on battery) before the indexer lets
+    /// go of its models; a gate that closes for a moment keeps them.
+    pub release_closed_after: Duration,
 }
 
 impl Default for IndexerConfig {
@@ -83,6 +90,8 @@ impl Default for IndexerConfig {
             rate_override: None,
             status_every: Duration::from_secs(600),
             compact_every: Duration::from_secs(3600),
+            idle_tick: Duration::from_secs(600),
+            release_closed_after: Duration::from_secs(120),
         }
     }
 }
@@ -120,6 +129,8 @@ pub struct IndexProgress {
 #[derive(Default)]
 pub(crate) struct IndexerState {
     running: AtomicBool,
+    /// Bumped by every start and stop: a loop (and its change watcher) from an older start ends.
+    generation: std::sync::atomic::AtomicU64,
     paused: AtomicBool,
     wake: Notify,
     buffer: Mutex<Buffer>,
@@ -144,6 +155,25 @@ pub struct FaceModels {
     pub detector: Arc<dyn FaceDetector>,
     pub embedder: Arc<dyn FaceEmbedder>,
     pub model: ModelId,
+}
+
+/// Whether a library change can give the indexer something to do: photos, shards and indexer
+/// statuses, settings (people on or off), and blobs arriving here. Albums, people, sync progress
+/// and other devices' holdings cannot.
+fn wakes_indexer(change: &shoebox_core::store::Change, me: &EndpointId) -> bool {
+    use shoebox_core::store::Change;
+    match change {
+        Change::PhotoUpserted(_)
+        | Change::PhotoDeleted(_)
+        | Change::MotionChanged(_)
+        | Change::IndexChanged
+        | Change::SettingChanged(_) => true,
+        Change::HoldingsChanged { device } => device == me,
+        Change::AlbumChanged(_)
+        | Change::DeviceListChanged
+        | Change::PeopleChanged
+        | Change::RemoteSyncProgress { .. } => false,
+    }
 }
 
 /// How often the grouping device looks at whether faces should be grouped again.
@@ -185,17 +215,43 @@ impl<L: LibraryStore> LibraryNode<L> {
         if self.inner.indexer.running.swap(true, Ordering::SeqCst) {
             return;
         }
+        let generation = self.inner.indexer.generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.inner.indexer.progress.lock().unwrap().running = true;
         let weak = Arc::downgrade(&self.inner);
-        tokio::spawn(index_loop(weak, cfg, encoder, gate));
+        tokio::spawn(index_loop(weak, cfg, encoder, gate, generation));
         let weak = Arc::downgrade(&self.inner);
         let mut changes = self.inner.store.subscribe();
+        let me = self.device();
         tokio::spawn(async move {
-            while futures::StreamExt::next(&mut changes).await.is_some() {
+            while let Some(change) = futures::StreamExt::next(&mut changes).await {
                 let Some(inner) = weak.upgrade() else { break };
-                inner.indexer.wake.notify_one();
+                if inner.indexer.generation.load(Ordering::SeqCst) != generation {
+                    break;
+                }
+                if wakes_indexer(&change, &me) {
+                    inner.indexer.wake.notify_one();
+                }
             }
         });
+    }
+
+    /// End the indexer and drop its models: the image encoder, the text reader and the face
+    /// models. For a device that indexes in bounded runs (the Android job), which loads them again
+    /// for the next run, so nothing stays in memory in between. Waiting results stay buffered for
+    /// [`LibraryNode::flush_index`]; [`LibraryNode::start_indexer`] starts it again.
+    pub fn stop_indexer(&self) {
+        let st = &self.inner.indexer;
+        st.generation.fetch_add(1, Ordering::SeqCst);
+        st.running.store(false, Ordering::SeqCst);
+        st.progress.lock().unwrap().running = false;
+        st.ocr.lock().unwrap().take();
+        st.faces.lock().unwrap().take();
+        st.wake.notify_one();
+    }
+
+    /// Whether [`LibraryNode::start_indexer`] has started the indexer (paused or not).
+    pub fn indexer_running(&self) -> bool {
+        self.inner.indexer.running.load(Ordering::SeqCst)
     }
 
     /// Find and describe faces with these models (S1-17), as part of indexing, while the
@@ -348,8 +404,8 @@ impl<L: LibraryStore> LibraryNode<L> {
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?;
         let mut done: HashSet<PhotoId> = HashSet::new();
-        for (_, s) in self.live_shards_of(model, ShardKind::Vec8).await? {
-            done.extend(s.ids.iter().copied());
+        for ids in self.live_shard_ids_of(model, ShardKind::Vec8).await? {
+            done.extend(ids.iter().copied());
         }
         done.extend(
             self.inner
@@ -558,8 +614,8 @@ impl<L: LibraryStore> LibraryNode<L> {
         since_ms: u64,
     ) -> Result<Vec<(PhotoId, Vec<Blake3Hash>)>> {
         let mut done: HashSet<PhotoId> = HashSet::new();
-        for (_, s) in self.live_shards_of(model, ShardKind::Faces).await? {
-            done.extend(s.ids.iter().copied());
+        for ids in self.live_shard_ids_of(model, ShardKind::Faces).await? {
+            done.extend(ids.iter().copied());
         }
         done.extend(
             self.inner
@@ -769,6 +825,7 @@ async fn index_loop<L: LibraryStore>(
     cfg: IndexerConfig,
     encoder: Arc<dyn ImageEncoder>,
     gate: Arc<dyn IndexGate>,
+    generation: u64,
 ) {
     let model = encoder.model();
     let dims = encoder.dims() as u16;
@@ -780,6 +837,10 @@ async fn index_loop<L: LibraryStore>(
     // The first round waits a full interval: at start other devices' shards are still arriving.
     let mut compacted: Option<Instant> = Some(Instant::now());
     let mut rate: u32 = cfg.rate_override.unwrap_or(30);
+    // The models were let go since they were last used (they load again on the next use).
+    let mut released = false;
+    // Since when the gate has been closed (the computer in use, on battery…).
+    let mut closed_since: Option<Instant> = None;
     // Labels only when the list's vectors were made with this encoder's model.
     let (labels, since) = {
         let Some(inner) = weak.upgrade() else { return };
@@ -789,6 +850,10 @@ async fn index_loop<L: LibraryStore>(
     };
     loop {
         let Some(inner) = weak.upgrade() else { break };
+        if inner.indexer.generation.load(Ordering::SeqCst) != generation {
+            debug!("indexer stopped");
+            break;
+        }
         let ln = LibraryNode { inner };
         let st = &ln.inner.indexer;
         {
@@ -993,11 +1058,50 @@ async fn index_loop<L: LibraryStore>(
                 p.stage = "";
             }
         }
+        // Paused: only a resume (or a change) wakes it. Caught up with nothing buffered: a
+        // relevant change wakes it, and a slow tick covers what becomes due by time alone. The
+        // gate closed or work left: the normal tick, to look at the gate and continue.
+        let buffered = !st.buffer.lock().unwrap().rows.is_empty()
+            || !st.ocr_rows.lock().unwrap().0.is_empty()
+            || !st.face_rows.lock().unwrap().0.is_empty();
+        let tick = if ln.indexer_paused() {
+            None
+        } else if open && !busy && !buffered {
+            Some(cfg.idle_tick.max(cfg.tick))
+        } else {
+            Some(cfg.tick)
+        };
+        // Going quiet (caught up, paused, or the gate closed for a while): free the models' memory
+        // until there is work again. A gate that closes for a moment (a key pressed) keeps them.
+        closed_since = if open {
+            None
+        } else {
+            closed_since.or(Some(Instant::now()))
+        };
+        let quiet = tick.is_none()
+            || (open && !busy)
+            || closed_since.is_some_and(|t| t.elapsed() >= cfg.release_closed_after);
+        if quiet && !released {
+            encoder.release();
+            if let Some(o) = st.ocr.lock().unwrap().as_ref() {
+                o.release();
+            }
+            if let Some(f) = st.faces.lock().unwrap().as_ref() {
+                f.detector.release();
+                f.embedder.release();
+            }
+            debug!("indexer caught up: released its models");
+        }
+        released = quiet;
         let wait = {
             let inner = ln.inner.clone();
-            let tick = cfg.tick;
             async move {
-                let _ = tokio::time::timeout(tick, inner.indexer.wake.notified()).await;
+                match tick {
+                    Some(tick) => {
+                        let _ = tokio::time::timeout(tick, inner.indexer.wake.notified()).await;
+                    }
+                    None => inner.indexer.wake.notified().await,
+                }
             }
         };
         drop(ln);

@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 /// The most a JSON file (a sidecar, an album's metadata) may be: real ones are about 1 KB.
 pub const MAX_JSON_BYTES: u64 = 4 << 20;
 
+/// The most a list of files may be (iCloud's `Photo Details.csv`: about 150 bytes a photo).
+pub const MAX_LIST_BYTES: u64 = 256 << 20;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Zip,
@@ -309,18 +312,20 @@ impl ArchiveSet {
         Ok(())
     }
 
-    /// The bytes of small entries (JSON files), each at most [`MAX_JSON_BYTES`]; one pass per
-    /// part. Entries that could not be read are missing from the result.
+    /// The bytes of small entries (JSON and CSV files), each at most `max` bytes (see
+    /// [`MAX_JSON_BYTES`], [`MAX_LIST_BYTES`]); one pass per part. Entries that could not be read,
+    /// or are larger, are missing from the result.
     pub fn read_small(
         &self,
         wanted: &BTreeSet<usize>,
+        max: u64,
     ) -> std::collections::HashMap<usize, Vec<u8>> {
         let mut out = std::collections::HashMap::new();
         for part in 0..self.parts.len() {
             let _ = self.visit(part, wanted, |i, r| {
-                if self.entries[i].entry.size <= MAX_JSON_BYTES {
+                if self.entries[i].entry.size <= max {
                     let mut bytes = vec![];
-                    if r.take(MAX_JSON_BYTES + 1).read_to_end(&mut bytes).is_ok() {
+                    if r.take(max + 1).read_to_end(&mut bytes).is_ok() {
                         out.insert(i, bytes);
                     }
                 }

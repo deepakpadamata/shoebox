@@ -1,0 +1,32 @@
+{
+  "title": "Screenshot_20230615-101700.png",
+  "description": "",
+  "imageViews": "4",
+  "creationTime": {
+    "timestamp": "1686890820",
+    "formatted": "16 Jun 2023, 04:47:00 UTC"
+  },
+  "photoTakenTime": {
+    "timestamp": "1686804420",
+    "formatted": "15 Jun 2023, 04:47:00 UTC"
+  },
+  "geoData": {
+    "latitude": 12.9716,
+    "longitude": 77.5946,
+    "altitude": 920.4,
+    "latitudeSpan": 0.0,
+    "longitudeSpan": 0.0
+  },
+  "url": "https://photos.google.com/photo/AF1QipFixture",
+  "googlePhotosOrigin": {
+    "mobileUpload": {
+      "deviceFolder": {
+        "localFolderName": ""
+      },
+      "deviceType": "ANDROID_PHONE"
+    }
+  },
+  "appSource": {
+    "androidPackageName": "com.example.app"
+  }
+}

@@ -2,7 +2,8 @@
 import type { ArchiveAlbumInfo } from "./ArchiveAlbumInfo";
 
 /**
- * What importing a Google Takeout would do (`plan_archive_import`): nothing is written.
+ * What importing a Google Takeout or an iCloud export would do (`plan_archive_import`):
+ * nothing is written.
  */
 export type ArchivePlanInfo = { 
 /**
@@ -24,4 +25,13 @@ with_export_data: number, unmatched: number, ambiguous: number,
 /**
  * Files that could not be opened, each `name: reason`.
  */
-part_errors: Array<string>, needed_bytes: number, free_bytes: number | null, is_takeout: boolean, };
+part_errors: Array<string>, needed_bytes: number, free_bytes: number | null, 
+/**
+ * `google` (a Takeout), `icloud` (an iCloud Photos export) or `files` (neither: the
+ * photos and videos import as plain files).
+ */
+source: string, 
+/**
+ * Files the export lists that are not in the files chosen (iCloud), by name.
+ */
+missing: Array<string>, };

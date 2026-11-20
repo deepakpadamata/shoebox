@@ -10,6 +10,7 @@
 pub mod archive;
 mod detect;
 mod exif_data;
+pub mod icloud;
 mod motion;
 mod raw;
 mod render;

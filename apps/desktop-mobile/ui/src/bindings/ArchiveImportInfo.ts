@@ -2,7 +2,7 @@
 import type { ArchiveReportInfo } from "./ArchiveReportInfo";
 
 /**
- * How far a Google Photos import is (`archive_import_status`).
+ * How far an import from Google Photos or iCloud is (`archive_import_status`).
  */
 export type ArchiveImportInfo = { 
 /**

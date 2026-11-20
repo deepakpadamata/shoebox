@@ -6,8 +6,9 @@
 //! `docs/notes/takeout-format.md`, each with the sample it was seen in.
 //!
 //! - **Folders** are classified by what they hold, not by their (localised) names: a folder with
-//!   an album metadata file (`metadata.json`, `métadonnées.json`, …: any JSON with a `title` and
-//!   no `photoTakenTime`) is an album; the others hold the library by year. Trash and Archive are
+//!   an album metadata file (`metadata.json`, `métadonnées.json`, …: a JSON object with only an
+//!   album's keys, `{}` and a missing `title` included, beside the folders that hold sidecars) is
+//!   an album; the others hold the library by year. Trash and Archive are
 //!   recognised by name in the languages we know of and by the sidecars' `trashed` / `archived`.
 //! - **Sidecars** are matched in the media file's own folder, strongest rule first, each rule over
 //!   every file before the next is tried, so a weaker rule never takes a sidecar a stronger one
@@ -115,6 +116,9 @@ pub enum Rule {
     MovedNumber,
     /// A Pixel `.MP` file → `name.MP.jpg.json`.
     PixelMp,
+    /// A file with no extension (a video Takeout exported without one) → the sidecar whose `title`
+    /// is the name plus an extension.
+    NoExtension,
     /// No name rule matched, but exactly one unclaimed sidecar in the folder has this `title`.
     Title,
     /// As `Exact`, ignoring case.
@@ -123,12 +127,42 @@ pub enum Rule {
     EditOf,
     /// The video half of a Live Photo: its picture's sidecar.
     LivePhoto,
+    /// A row of an export's list of files, by name (iCloud's `Photo Details.csv`, whose dates are
+    /// cut to the minute).
+    Listed,
 }
 
 impl Rule {
     /// Whether the sidecar describes this very file (its date and place can be trusted for it).
     pub fn is_own(self) -> bool {
         !matches!(self, Rule::EditOf | Rule::LivePhoto)
+    }
+
+    /// How finely the export's dates are given: whole seconds in a sidecar, whole minutes in
+    /// iCloud's list.
+    pub fn date_cut_ms(self) -> i64 {
+        match self {
+            Rule::Listed => 60_000,
+            _ => 1000,
+        }
+    }
+}
+
+/// Which kind of export a plan was read from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Source {
+    #[default]
+    GoogleTakeout,
+    Icloud,
+}
+
+impl Source {
+    /// The name its albums' ids are made with (see `imported_album_id` in the node).
+    pub fn album_kind(self) -> &'static str {
+        match self {
+            Source::GoogleTakeout => "google-takeout",
+            Source::Icloud => "icloud",
+        }
     }
 }
 
@@ -187,8 +221,11 @@ pub enum Left {
     UnusedSidecar,
 }
 
+/// The plan of an export: a Google Takeout (from [`plan`]) or an iCloud Photos export (from
+/// [`crate::icloud::plan`]).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TakeoutPlan {
+    pub source: Source,
     pub items: Vec<PlanItem>,
     pub albums: Vec<PlanAlbum>,
     /// Media entries no rule gave a sidecar (they import with their own metadata only).
@@ -198,6 +235,8 @@ pub struct TakeoutPlan {
     pub ambiguous: Vec<(usize, usize)>,
     /// Entries that are in no item, and why.
     pub left: Vec<(usize, Left)>,
+    /// Files the export lists that are in none of its parts (iCloud), by name.
+    pub missing: Vec<String>,
 }
 
 impl TakeoutPlan {
@@ -212,12 +251,25 @@ impl TakeoutPlan {
 /// differ by something other than whole hours (a time zone), the user corrected it in Google
 /// Photos and the export's wins.
 pub fn resolve_taken_at(file_ms: Option<i64>, export_ms: Option<i64>) -> Option<i64> {
+    resolve_taken_at_cut(file_ms, export_ms, 1000)
+}
+
+/// [`resolve_taken_at`] for an export whose dates are cut to `cut_ms` (1000: whole seconds, as a
+/// sidecar gives them; 60 000: whole minutes, as iCloud's list does). The export's date is then
+/// anywhere in `[e, e + cut)`, and a zone apart is any time zone away from some instant in it.
+pub fn resolve_taken_at_cut(
+    file_ms: Option<i64>,
+    export_ms: Option<i64>,
+    cut_ms: i64,
+) -> Option<i64> {
     match (file_ms, export_ms) {
         (Some(f), Some(e)) => {
-            // The sidecar has whole seconds; EXIF may have sub-seconds. A zone is a multiple of
-            // 15 minutes (India +5:30, Nepal +5:45), at most 14 hours.
-            let diff = (e - f.div_euclid(1000) * 1000).abs();
-            let zone = diff % (15 * 60 * 1000) == 0 && diff <= 14 * 3600 * 1000;
+            // EXIF may have sub-seconds; neither export has. A zone is a multiple of 15 minutes
+            // (India +5:30, Nepal +5:45), at most 14 hours.
+            let f_s = f.div_euclid(1000) * 1000;
+            let quarter = 15 * 60 * 1000;
+            let zone = (f_s - e).rem_euclid(quarter) < cut_ms.max(1)
+                && (f_s - e).abs() <= 14 * 3600 * 1000 + cut_ms;
             Some(if zone { f } else { e })
         }
         (Some(f), None) => Some(f),
@@ -311,6 +363,18 @@ fn edited_original(name: &str) -> Option<String> {
 const STILLS: &[&str] = &["heic", "heif", "jpg", "jpeg"];
 const LIVE_VIDEOS: &[&str] = &["mov", "mp4"];
 
+/// The keys an album's metadata file has been seen with (any subset of them, none included).
+const ALBUM_KEYS: &[&str] = &[
+    "title",
+    "description",
+    "access",
+    "date",
+    "location",
+    "geoData",
+    "enrichments",
+    "sharedAlbumComments",
+];
+
 fn ext_lower(name: &str) -> String {
     name.rsplit_once('.')
         .map(|(_, e)| e.to_lowercase())
@@ -392,7 +456,13 @@ fn parse_json(bytes: &[u8]) -> Result<Json, String> {
             description: text(&v, "description"),
         }));
     }
-    if v.get("title").is_some() {
+    // An album's metadata: seen with every key, with `title` alone, with comments alone, and as
+    // `{}`. Whether it really is one depends on where it lies, which `plan` checks.
+    let album_keys = v
+        .as_object()
+        .is_some_and(|o| o.keys().all(|k| ALBUM_KEYS.contains(&k.as_str())));
+    let title_ok = matches!(v.get("title"), None | Some(Value::Null | Value::String(_)));
+    if album_keys && title_ok {
         return Ok(Json::Album {
             title: text(&v, "title"),
             description: text(&v, "description"),
@@ -421,6 +491,7 @@ pub fn plan(entries: &[Entry], mut read_json: impl FnMut(usize) -> Option<Vec<u8
 
     // 1. Read every JSON file; sort entries into folders.
     let mut media_candidates = vec![];
+    let mut album_candidates: Vec<(usize, &str, Option<String>, Option<String>)> = vec![];
     for (i, e) in entries.iter().enumerate() {
         let (dir, name) = split_dir(&e.path);
         if name.is_empty() {
@@ -437,20 +508,7 @@ pub fn plan(entries: &[Entry], mut read_json: impl FnMut(usize) -> Option<Vec<u8
                         .insert(name.to_owned(), i);
                 }
                 Some(Ok(Json::Album { title, description })) => {
-                    let folder = folders.entry(dir).or_default();
-                    if folder.album.is_none() {
-                        folder.album = Some(out.albums.len());
-                        out.albums.push(PlanAlbum {
-                            title: title.unwrap_or_else(|| last_component(dir).to_owned()),
-                            description,
-                            folder: dir.to_owned(),
-                        });
-                    } else {
-                        out.left.push((
-                            i,
-                            Left::UnreadableJson("a second album metadata file".into()),
-                        ));
-                    }
+                    album_candidates.push((i, dir, title, description));
                 }
                 Some(Err(why)) => out.left.push((i, Left::UnreadableJson(why))),
                 None => out
@@ -461,12 +519,44 @@ pub fn plan(entries: &[Entry], mut read_json: impl FnMut(usize) -> Option<Vec<u8
             media_candidates.push(i);
         }
     }
-    // Google Photos' folders are the siblings of folders that hold its JSON files.
-    let photo_roots: BTreeSet<&str> = folders
+    // Google Photos' folders are the siblings of folders that hold sidecars (of album folders,
+    // in an export with no sidecar at all).
+    let mut photo_roots: BTreeSet<&str> = folders
         .iter()
-        .filter(|(_, f)| !f.sidecars.is_empty() || f.album.is_some())
+        .filter(|(_, f)| !f.sidecars.is_empty())
         .map(|(dir, _)| split_dir(dir).0)
         .collect();
+    if photo_roots.is_empty() {
+        photo_roots = album_candidates
+            .iter()
+            .map(|(_, dir, _, _)| split_dir(dir).0)
+            .collect();
+    }
+    // An album's metadata lies in one of those folders; a JSON file of the same shape elsewhere
+    // (the root's `user-generated-memory-titles.json`, say) is something else.
+    for (i, dir, title, description) in album_candidates {
+        if !photo_roots.contains(split_dir(dir).0) {
+            out.left.push((
+                i,
+                Left::UnreadableJson("neither a sidecar nor an album's metadata".into()),
+            ));
+            continue;
+        }
+        let folder = folders.entry(dir).or_default();
+        if folder.album.is_none() {
+            folder.album = Some(out.albums.len());
+            out.albums.push(PlanAlbum {
+                title: title.unwrap_or_else(|| last_component(dir).to_owned()),
+                description,
+                folder: dir.to_owned(),
+            });
+        } else {
+            out.left.push((
+                i,
+                Left::UnreadableJson("a second album metadata file".into()),
+            ));
+        }
+    }
     // No sidecar and no album anywhere: not a Takeout but a plain archive of files; all of them.
     let plain = photo_roots.is_empty();
     for i in media_candidates {
@@ -492,7 +582,7 @@ pub fn plan(entries: &[Entry], mut read_json: impl FnMut(usize) -> Option<Vec<u8
                     m
                 });
         let name_of = |i: usize| split_dir(&entries[i].path).1;
-        let rules: [(Rule, Finder); 5] = [
+        let rules: [(Rule, Finder); 6] = [
             (Rule::Exact, &|name: &str| {
                 sidecar_names(name, None)
                     .iter()
@@ -519,6 +609,23 @@ pub fn plan(entries: &[Entry], mut read_json: impl FnMut(usize) -> Option<Vec<u8
                     .iter()
                     .find_map(|s| folder.sidecars.get(s).copied())
                     .into_iter()
+                    .collect()
+            }),
+            (Rule::NoExtension, &|name: &str| {
+                if name.contains('.') {
+                    return vec![];
+                }
+                folder
+                    .sidecars
+                    .values()
+                    .copied()
+                    .filter(|s| {
+                        sidecars[s]
+                            .title
+                            .as_deref()
+                            .and_then(|t| t.rsplit_once('.'))
+                            .is_some_and(|(stem, _)| stem == name)
+                    })
                     .collect()
             }),
             (Rule::Title, &|name: &str| {
@@ -613,22 +720,33 @@ pub fn plan(entries: &[Entry], mut read_json: impl FnMut(usize) -> Option<Vec<u8
                     continue;
                 }
             }
-            if LIVE_VIDEOS.contains(&ext_lower(name).as_str()) {
+            let ext = ext_lower(name);
+            let still = if ext == "mp" {
+                // A Pixel motion photo's video: `name.MP` beside `name.MP.jpg`.
+                let still = format!("{name}.jpg").to_lowercase();
+                folder
+                    .media
+                    .iter()
+                    .copied()
+                    .find(|&o| split_dir(&entries[o].path).1.to_lowercase() == still)
+            } else if LIVE_VIDEOS.contains(&ext.as_str()) {
                 let stem = stem_lower(name);
-                let still = STILLS.iter().find_map(|ext| {
+                STILLS.iter().find_map(|ext| {
                     folder.media.iter().copied().find(|&o| {
                         let n = split_dir(&entries[o].path).1;
                         stem_lower(n) == stem && ext_lower(n) == *ext
                     })
-                });
-                if let Some(still) = still {
-                    // Whether it really is a Live Photo's video (a few seconds) is the import's
-                    // call, once it has read it.
-                    live_of_entry.insert(m, still);
-                    if !matched.contains_key(&m) && !ambiguous.contains_key(&m) {
-                        if let Some(&(s, _)) = matched.get(&still) {
-                            matched.insert(m, (s, Rule::LivePhoto));
-                        }
+                })
+            } else {
+                None
+            };
+            if let Some(still) = still {
+                // Whether it really is a Live Photo's video (a few seconds) is the import's
+                // call, once it has read it.
+                live_of_entry.insert(m, still);
+                if !matched.contains_key(&m) && !ambiguous.contains_key(&m) {
+                    if let Some(&(s, _)) = matched.get(&still) {
+                        matched.insert(m, (s, Rule::LivePhoto));
                     }
                 }
             }
@@ -722,9 +840,10 @@ pub fn plan(entries: &[Entry], mut read_json: impl FnMut(usize) -> Option<Vec<u8
             .and_then(|o| item_of_entry.get(o))
             .copied();
     }
-    // An edited copy is in the albums its original is in (owner's decision).
+    // An edited copy is in the albums its original is in (owner's decision), and a Live Photo's
+    // video in its picture's.
     for i in 0..out.items.len() {
-        if let Some(o) = out.items[i].edit_of {
+        if let Some(o) = out.items[i].edit_of.or(out.items[i].live_photo_of) {
             let more = out.items[o].albums.clone();
             let albums = &mut out.items[i].albums;
             albums.extend(more);

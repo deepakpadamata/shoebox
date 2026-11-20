@@ -1,0 +1,19 @@
+{
+  "title": "Beach Day",
+  "description": "",
+  "access": "protected",
+  "date": {
+    "timestamp": "1686811200",
+    "formatted": "15 Jun 2023, 06:40:00 UTC"
+  },
+  "enrichments": [{
+    "locationEnrichment": {
+      "location": [{
+        "name": "Mysuru",
+        "description": "Karnataka",
+        "latitudeE7": 122958000,
+        "longitudeE7": 766394000
+      }]
+    }
+  }]
+}

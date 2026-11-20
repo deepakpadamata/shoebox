@@ -1,0 +1,36 @@
+{
+  "title": "PXL_20230615_101000123.jpg",
+  "description": "",
+  "imageViews": "4",
+  "creationTime": {
+    "timestamp": "1686890400",
+    "formatted": "16 Jun 2023, 04:40:00 UTC"
+  },
+  "photoTakenTime": {
+    "timestamp": "1686804000",
+    "formatted": "15 Jun 2023, 04:40:00 UTC"
+  },
+  "geoData": {
+    "latitude": 12.2958,
+    "longitude": 76.6394,
+    "altitude": 920.4,
+    "latitudeSpan": 0.0,
+    "longitudeSpan": 0.0
+  },
+  "geoDataExif": {
+    "latitude": 12.2958,
+    "longitude": 76.6394,
+    "altitude": 920.4,
+    "latitudeSpan": 0.0,
+    "longitudeSpan": 0.0
+  },
+  "url": "https://photos.google.com/photo/AF1QipFixture",
+  "googlePhotosOrigin": {
+    "mobileUpload": {
+      "deviceFolder": {
+        "localFolderName": ""
+      },
+      "deviceType": "ANDROID_PHONE"
+    }
+  }
+}

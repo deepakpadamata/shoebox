@@ -49,6 +49,26 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Command::Exports { out } => {
+            let samples =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/samples");
+            match xtask::exports::generate(&out, &samples) {
+                Ok(s) => {
+                    println!(
+                        "Google Takeout: {} files, iCloud: {} files, {} bytes, written to {}",
+                        s.google_files,
+                        s.icloud_files,
+                        s.bytes,
+                        out.display()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Command::Gazetteer { input, out } => match xtask::gazetteer::write(&input, &out) {
             Ok(s) => {
                 println!(

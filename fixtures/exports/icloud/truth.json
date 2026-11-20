@@ -1,0 +1,168 @@
+[
+  {
+    "path": "iCloud Photos/Photos/IMG_0001.JPG",
+    "missing": false,
+    "favorite": false,
+    "hidden": false,
+    "deleted": false,
+    "albums": [],
+    "live_photo_of": null,
+    "taken_at_ms": 1422296617000,
+    "blake3": "7069dc3357aa4fcc5bc9cf4af3ad443b0f392a8597e842116a56131f0a637e53",
+    "case": "camera photo: EXIF in local time with no zone, the CSV in GMT cut to the minute (5:30 and 37 s apart: a zone, so the file's date stays)",
+    "seen": true
+  },
+  {
+    "path": "iCloud Photos/Photos/IMG_0002.JPG",
+    "missing": false,
+    "favorite": true,
+    "hidden": false,
+    "deleted": false,
+    "albums": [],
+    "live_photo_of": null,
+    "taken_at_ms": 1422296677000,
+    "blake3": "3f35744c6607177dea1daa2f901be0d4e6a222e4b699ac227bf4d3d91742d8d7",
+    "case": "`favorite` = `yes` (every row of the real export said `no`)",
+    "seen": false
+  },
+  {
+    "path": "iCloud Photos/Photos/IMG_0003.JPG",
+    "missing": false,
+    "favorite": false,
+    "hidden": false,
+    "deleted": false,
+    "albums": [],
+    "live_photo_of": null,
+    "taken_at_ms": 1422276900000,
+    "blake3": "66c02aff49245b741013078fd643c971310c7e3add5766eb0130c5730aee85e0",
+    "case": "JPEG with no EXIF (50 of 365 in the real export): the CSV's date",
+    "seen": true
+  },
+  {
+    "path": "iCloud Photos/Photos/IMG_0004.PNG",
+    "missing": false,
+    "favorite": false,
+    "hidden": false,
+    "deleted": false,
+    "albums": [],
+    "live_photo_of": null,
+    "taken_at_ms": 1422276960000,
+    "blake3": "3be589673630156264e27e1026c92eef52e5dae7bd6e0cea3b77ad3ca6e0492a",
+    "case": "screenshot (PNG, no EXIF): the CSV's date",
+    "seen": true
+  },
+  {
+    "path": "iCloud Photos/Photos/IMG_0005.MOV",
+    "missing": false,
+    "favorite": false,
+    "hidden": false,
+    "deleted": false,
+    "albums": [],
+    "live_photo_of": null,
+    "taken_at_ms": null,
+    "blake3": "42342bc75a05cf1154820d8a902dd9c31bbd797df110d5528dc48518a1b17a0b",
+    "case": "a video on its own",
+    "seen": true
+  },
+  {
+    "path": "iCloud Photos/Photos/IMG_0006.HEIC",
+    "missing": false,
+    "favorite": false,
+    "hidden": false,
+    "deleted": false,
+    "albums": [
+      "Trip 2015"
+    ],
+    "live_photo_of": null,
+    "taken_at_ms": null,
+    "blake3": "c9c95886881b6a117fce539c4e62497a6beac5a717867830983a3c4ae2970d23",
+    "case": "Live Photo: the HEIC (the real export, from an iPad of 2015, had no HEIC or Live Photo)",
+    "seen": false
+  },
+  {
+    "path": "iCloud Photos/Photos/IMG_0006.MOV",
+    "missing": false,
+    "favorite": false,
+    "hidden": false,
+    "deleted": false,
+    "albums": [
+      "Trip 2015"
+    ],
+    "live_photo_of": "iCloud Photos/Photos/IMG_0006.HEIC",
+    "taken_at_ms": null,
+    "blake3": "8c5c0c588ad61f632d3ebbc8b4a98e7140b27d847433bc39a522dcb30ebc8c2e",
+    "case": "Live Photo: the MOV with the same name; joins the HEIC's albums",
+    "seen": false
+  },
+  {
+    "path": "iCloud Photos/Photos/IMG_0007.JPG",
+    "missing": false,
+    "favorite": false,
+    "hidden": true,
+    "deleted": false,
+    "albums": [
+      "Hidden (from iCloud)"
+    ],
+    "live_photo_of": null,
+    "taken_at_ms": 1422296977000,
+    "blake3": "bd2205d0ac941dfcf752b06d4568e46f866ca81f2060524450b7fbc674fd5e46",
+    "case": "`hidden` = `yes`: imported into \"Hidden (from iCloud)\"",
+    "seen": false
+  },
+  {
+    "path": "iCloud Photos/Photos/IMG_0008.JPG",
+    "missing": false,
+    "favorite": false,
+    "hidden": false,
+    "deleted": true,
+    "albums": [],
+    "live_photo_of": null,
+    "taken_at_ms": 1422297037000,
+    "blake3": "a955660f5d5966fc64bc6e0747613c922ae0f639d13d87e794a5b260e4fc8a49",
+    "case": "`deleted` = `yes` (Recently Deleted): not imported",
+    "seen": false
+  },
+  {
+    "path": "iCloud Photos/Photos/IMG_0009.JPG",
+    "missing": false,
+    "favorite": false,
+    "hidden": false,
+    "deleted": false,
+    "albums": [
+      "Trip 2015"
+    ],
+    "live_photo_of": null,
+    "taken_at_ms": 1422297097000,
+    "blake3": "aea914ada144489305c17786aa67697f4df54f01a708b0cd760bbeabd7a81432",
+    "case": "in `Albums/Trip 2015.csv` (Apple's guides; the real export had no albums) and in a Memory (ignored)",
+    "seen": false
+  },
+  {
+    "path": "iCloud Photos/Photos/IMG_0010.JPG",
+    "missing": false,
+    "favorite": false,
+    "hidden": false,
+    "deleted": false,
+    "albums": [
+      "Trip 2015"
+    ],
+    "live_photo_of": null,
+    "taken_at_ms": 1422297157000,
+    "blake3": "46e62d88f06a33f05dd055a62970f46dc8c73b8d887ff4843e90c656a9ba52ec",
+    "case": "in `Albums/Trip 2015.csv` (Apple's guides; the real export had no albums) and in a Memory (ignored)",
+    "seen": false
+  },
+  {
+    "path": "iCloud Photos/Photos/IMG_0011.JPG",
+    "missing": true,
+    "favorite": false,
+    "hidden": false,
+    "deleted": false,
+    "albums": [],
+    "live_photo_of": null,
+    "taken_at_ms": null,
+    "blake3": "",
+    "case": "a CSV row whose file is in no part: reported, not fatal",
+    "seen": false
+  }
+]

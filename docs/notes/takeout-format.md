@@ -1,9 +1,8 @@
 # Google Takeout: what a Google Photos export holds
 
-Written for I1-01 (Google half) on 2026-11-07 from the public samples. **No current export has been
-checked yet**: every sample predates the `.supplemental-metadata.json` names, so the rules for those
-come from other tools' reports and are marked *(reported)*. Check this page against a current export
-from the owner before I1 closes.
+Written for I1-01 (Google half) on 2026-11-07 from the public samples, and checked on 2026-11-20 against
+a real, current export (see [A current export](#a-current-export-june-2026)). Rules still marked
+*(reported)* were in neither.
 
 The reader that implements it is `shoebox_media::takeout` (I1-05); its tests in
 `crates/shoebox-media/tests/takeout.rs` have one case per rule below.
@@ -125,10 +124,97 @@ Google Photos and the export's wins (`takeout::resolve_taken_at`, owner's decisi
 **Not yet measured** (needs the owner's export and the S25): whether Takeout files are byte-identical to
 the phone's originals, and how many sidecar dates differ from the file's, and by how much.
 
-## Still to check against a current export
+## A current export (June 2026)
 
-- `.supplemental-metadata.json` names and their cuts.
-- Trash, Archive and their names; `favorited`, `archived`, `trashed`; `people`.
-- An edited copy with a moved number (`IMG-edited(1).jpg`).
-- Whether long media file names are cut too.
-- A Live Photo and a motion photo uploaded from an iPhone and a Pixel.
+The owner's Takeout of 2026-06-01: seven `.tgz` parts (four of ~50 GB from one job, three smaller ones
+from others), 373 GB unpacked, 59,588 files, English. Surveyed in place on `nest` with scripts that
+print structure only (key names, value types, name patterns with letters and digits masked, counts);
+nothing was copied off the machine. `fixtures/exports/google-takeout` (`cargo xtask exports`) has one
+anonymised case per finding below, and `checked_in_export_matches_its_truth` runs the reader over it.
+
+**Layout**
+- `Takeout/Google Photos/` with a **plain space** this time, beside `Drive/` and
+  `YouTube and YouTube Music/`; no `archive_browser.html` in the unpacked folder.
+- 14 `Photos from YYYY`, 118 album folders, `Archive`, `Trash`, and Google's own `Failed Videos`
+  (videos with sidecars, no metadata file).
+- Two JSON files at the root of Google Photos that are neither sidecars nor album metadata:
+  `shared_album_comments.json` (`{"sharedAlbumComments": [{text, creationTime, contentUrl}]}`) and
+  `user-generated-memory-titles.json` (`{"title": ["…"]}`).
+- 8,510 album files are also in a year folder, 1,119 are in no year folder (shared albums mostly).
+  Items in `Archive` and `Trash` are in no year folder.
+- **Same name, other bytes:** 18 album files share a name with a year-folder file but not its bytes.
+  Their twin is the year folder's `NAME(1).EXT`: Takeout numbers names within a folder, so the album and
+  the year folder can disagree.
+
+**Album metadata** is `metadata.json` in 116 of 118 albums. Its shapes:
+
+| Shape | Albums |
+|---|---|
+| `{"title"}` | 54 |
+| **`{}`** | 29 |
+| `{title, description, access, date}` (+ `enrichments`: `locationEnrichment` or `mapEnrichment`, `latitudeE7`/`longitudeE7`) | 17 |
+| `{"title": ""}` | 5 |
+| `{"sharedAlbumComments": [{contentOwnerName, creationTime, text \| liked}]}`, with or without `title` | 10 |
+
+So 33 albums have **no `title` key**. The folder name is then the title, as for `""`. Ten titles differ from
+their folder name only by escaping: `'`, `:`, `?` → `_`; `/` → `-`.
+
+**Sidecars**: 27,127, all with `title`, `description`, `imageViews`, `creationTime`, `photoTakenTime`,
+`geoData`, `url`. Some keys appear only on some sidecars:
+- `googlePhotosOrigin` (25,577): `mobileUpload {deviceFolder, deviceType}`, `webUpload {computerUpload}`,
+  `fromSharedAlbum {}` or `composition {type: AUTO | MANUAL}`
+- `geoDataExif` (11,780: the key is absent otherwise)
+- `people` (9,845, `[{name}]`)
+- `appSource {androidPackageName}` (2,887)
+- `favorited` (387), `archived` (21) and `trashed` (4). These are only ever `true`; the key is absent otherwise.
+
+`geoData` is 0,0 on 15,585.
+
+**Sidecar names**:
+- 20,386 are the full `<name>.supplemental-metadata.json`; 51 are the old `<name>.json`.
+- Every longer one is **cut at 46 characters** before `.json` (6,447 at exactly 46), which leaves
+  `.supplemental-met`, `-metada`, `.supp`, `.s`, … and, for names of 46 or more, no suffix at all.
+- **`(n)` goes after the cut suffix**: `DSC_0238(1).JPG` → `DSC_0238.JPG.supplemental-metadata(1).json`
+  (216), which makes 49 characters when the suffix was cut. Camera names that already end in `(1)`
+  (`20190207_101800(1).jpg`, 56) keep it in the stem, and their title has it too.
+- **Media names are cut too**: a name longer than 51 becomes its first 47 characters plus the extension
+  (`….x.jpg`, `…_I(1).jpg`). Only the sidecar's `title` keeps the whole name, and the sidecar is the
+  title cut at 46.
+- `:` in a title is `_` in the file and sidecar names (`IMG_…:xxxx:.jpg` → `IMG_…_xxxx_.jpg`).
+- **Videos with no extension**: 16 MP4 files are exported as `20190207_101900` (and `MVIMG_…`); their
+  sidecar and title still say `….mp4`.
+
+**Files with no sidecar of their own**:
+- 3,476 Pixel **`.MP`** files: the motion photo's video as an MP4 (`ftypisom`), next to a `.MP.jpg` that has the
+  sidecar and MotionPhoto XMP.
+- 1,236 `.MP4`: Live Photo videos next to a `.JPG` (1,027) or `.HEIC` (195), plus 14 alone.
+- 843 `-edited` copies (`-edited.JPG` 732, `.jpg` 88, `.dng` 4, `-EFFECTS-edited.jpg`, `-edited(1).jpg`).
+- 235 `(n)` JPEGs.
+
+**Google's creations** have sidecars with `composition`: `-EFFECTS.jpg`, `-COLLAGE.jpg`, `-ANIMATION.gif`,
+`…MOVIE.mp4`. Pixel suffixes seen: `.PORTRAIT.jpg`, `.PORTRAIT.ORIGINAL.jpg`, `.NIGHT.jpg`, `.TS.mp4`,
+`-CINEMATIC_MOMENT_VIDEO.mp4`. Other media: `.NEF` (1,023), `.HEIC`, `.MOV`, `.MTS`, `.DNG`.
+
+### What the reader had to learn (fixed 2026-11-20)
+
+`checked_in_export_matches_its_truth` first failed on four things the real export has. The reader now
+handles them:
+1. **Albums whose metadata has no `title` key** (`{}`, comments only: 33 of 118). An album's metadata is
+   now any JSON object whose keys are all album keys (`title`, `description`, `access`, `date`,
+   `location`, `geoData`, `enrichments`, `sharedAlbumComments`; none at all included), with `title`, if
+   present, a string. The folder name is the title when there is none.
+2. **The root's two JSON files made "Google Photos" an album.** Such a file only makes an album when its
+   folder is a sibling of the folders holding sidecars (of the album folders, in an export with no
+   sidecars), and `user-generated-memory-titles.json`'s `title` is an array.
+3. **A video with no extension** takes the sidecar whose `title` is its name plus an extension
+   (`Rule::NoExtension`, unique match only).
+4. **A Pixel `.MP`** beside its `.MP.jpg` is that photo's video (`live_photo_of`, `Rule::LivePhoto`),
+   in its albums. `Rule::PixelMp` still matches an `.MP` whose `.MP.jpg` did not come. Live Photo
+   videos now join their picture's albums, like edited copies.
+
+## Still to check
+
+- Whether Takeout files are byte-identical to the phone's originals (needs the S25).
+- How the seven parts split files from their sidecars (the parts were unpacked into one folder; listing
+  the `.tgz` parts takes hours).
+- Localised exports: names other than `metadata.json` and `Photos from`, in a current export.

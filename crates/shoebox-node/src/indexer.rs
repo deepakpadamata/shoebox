@@ -15,7 +15,7 @@ use crate::library_node::LibraryNode;
 use anyhow::{Context, Result};
 use shoebox_core::ids::{Blake3Hash, EndpointId};
 use shoebox_core::model::{IndexerStatus, ModelId, PhotoId, PhotoRecord, Role, ShardKind};
-use shoebox_core::policy::{index_owner, share_candidates};
+use shoebox_core::policy::{index_owner, share_candidates, IndexCandidate};
 use shoebox_core::store::{LibraryStore, Page, TimeRange};
 use shoebox_search::encoder::{ImageEncoder, Rgb};
 use shoebox_search::faces::{FaceDetector, FaceEmbedder, MIN_FACE_PX};
@@ -437,13 +437,13 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 
     /// Photos this device should read text in now (S1-14): labelled as likely to hold text (or
-    /// screenshots), not read by anyone yet, and held here as a preview or original. Returns
-    /// each photo with the blob to read.
+    /// screenshots), not read by anyone yet, and held here as an original or preview. Returns
+    /// each photo with the blobs to read, best first ([`Self::index_sources`]).
     async fn ocr_work(
         &self,
         cfg: &IndexerConfig,
         since_ms: u64,
-    ) -> Result<Vec<(PhotoId, Blake3Hash)>> {
+    ) -> Result<Vec<(PhotoId, Vec<Blake3Hash>)>> {
         let view = self.shard_view().await?;
         let labels = self.labels();
         let mut labelled: HashMap<PhotoId, Vec<(u16, u8)>> = HashMap::new();
@@ -480,7 +480,6 @@ impl<L: LibraryStore> LibraryNode<L> {
         );
         let statuses = self.store().indexer_statuses().await?;
         let candidates = share_candidates(&statuses, |s| s.models.contains(&OCR_ENGINE));
-        let me = self.device();
         let now = self.inner.clock.now_ms();
         let grace = cfg.grace.as_millis() as u64;
         let mut out = vec![];
@@ -507,17 +506,9 @@ impl<L: LibraryStore> LibraryNode<L> {
             }
             let imported_ms = p.favorite.hlc.physical_ms.min(p.deleted_at.hlc.physical_ms);
             let due = now.saturating_sub(imported_ms.max(since_ms)) >= grace;
-            let mine = p.imported_by == me
-                || due
-                || index_owner(&p.id, ShardKind::Text, &candidates) == Some(me);
-            if !mine {
-                continue;
-            }
-            for blob in [p.preview.hash, p.original.hash] {
-                if self.node().blobs().kept(&blob).await? {
-                    out.push((p.id, blob));
-                    break;
-                }
+            let sources = self.index_sources(&p).await?;
+            if self.takes_index_work(&p, &sources, ShardKind::Text, &candidates, due) {
+                out.push((p.id, sources));
             }
         }
         Ok(out)
@@ -534,11 +525,15 @@ impl<L: LibraryStore> LibraryNode<L> {
         if work.is_empty() {
             return Ok(false);
         }
-        for (id, blob) in work.into_iter().take(cfg.batch.max(1)) {
-            let bytes = self.node().blobs().get(&blob).await?;
+        for (id, sources) in work.into_iter().take(cfg.batch.max(1)) {
             let e = engine.clone();
             // The text is never logged (diagnostics must not hold what is in people's photos).
-            match tokio::task::spawn_blocking(move || e.read_text(&bytes)).await? {
+            let read = self
+                .read_first(&sources, move |bytes| {
+                    e.read_text(bytes).map_err(|e| anyhow::anyhow!("{e}"))
+                })
+                .await?;
+            match read {
                 Ok(text) => {
                     let mut o = self.inner.indexer.ocr_rows.lock().unwrap();
                     o.1.get_or_insert_with(Instant::now);
@@ -554,13 +549,14 @@ impl<L: LibraryStore> LibraryNode<L> {
     }
 
     /// Photos this device should look for faces in now (S1-17): not done by anyone yet, held
-    /// here as a preview or original. Returns each photo with the blob to read.
+    /// here as an original or preview. Returns each photo with the blobs to read, best first
+    /// ([`Self::index_sources`]).
     async fn face_work(
         &self,
         model: ModelId,
         cfg: &IndexerConfig,
         since_ms: u64,
-    ) -> Result<Vec<(PhotoId, Blake3Hash)>> {
+    ) -> Result<Vec<(PhotoId, Vec<Blake3Hash>)>> {
         let mut done: HashSet<PhotoId> = HashSet::new();
         for (_, s) in self.live_shards_of(model, ShardKind::Faces).await? {
             done.extend(s.ids.iter().copied());
@@ -577,7 +573,6 @@ impl<L: LibraryStore> LibraryNode<L> {
         );
         let statuses = self.store().indexer_statuses().await?;
         let candidates = share_candidates(&statuses, |s| s.models.contains(&model));
-        let me = self.device();
         let now = self.inner.clock.now_ms();
         let grace = cfg.grace.as_millis() as u64;
         let mut out = vec![];
@@ -600,17 +595,9 @@ impl<L: LibraryStore> LibraryNode<L> {
             }
             let imported_ms = p.favorite.hlc.physical_ms.min(p.deleted_at.hlc.physical_ms);
             let due = now.saturating_sub(imported_ms.max(since_ms)) >= grace;
-            let mine = p.imported_by == me
-                || due
-                || index_owner(&p.id, ShardKind::Faces, &candidates) == Some(me);
-            if !mine {
-                continue;
-            }
-            for blob in [p.preview.hash, p.original.hash] {
-                if self.node().blobs().kept(&blob).await? {
-                    out.push((p.id, blob));
-                    break;
-                }
+            let sources = self.index_sources(&p).await?;
+            if self.takes_index_work(&p, &sources, ShardKind::Faces, &candidates, due) {
+                out.push((p.id, sources));
             }
         }
         Ok(out)
@@ -630,10 +617,11 @@ impl<L: LibraryStore> LibraryNode<L> {
         if work.is_empty() {
             return Ok(false);
         }
-        for (id, blob) in work.into_iter().take(cfg.batch.max(1)) {
-            let bytes = self.node().blobs().get(&blob).await?;
+        for (id, sources) in work.into_iter().take(cfg.batch.max(1)) {
             let m = models.clone();
-            let found = tokio::task::spawn_blocking(move || describe_faces(&bytes, &m)).await?;
+            let found = self
+                .read_first(&sources, move |bytes| describe_faces(bytes, &m))
+                .await?;
             match found {
                 Ok(faces) => {
                     let mut f = self.inner.indexer.face_rows.lock().unwrap();
@@ -647,6 +635,60 @@ impl<L: LibraryStore> LibraryNode<L> {
             }
         }
         Ok(true)
+    }
+
+    /// The blobs this device holds that faces and text can be read from, best first: the
+    /// original (full detail, brought down to 2048 px), then the preview (1280 px, or 2048 px for
+    /// one made before previews were AVIF), which misses small faces and small print.
+    async fn index_sources(&self, p: &PhotoRecord) -> Result<Vec<Blake3Hash>> {
+        let blobs = self.node().blobs();
+        let mut out = vec![];
+        for blob in [p.original.hash, p.preview.hash] {
+            if !out.contains(&blob) && blobs.kept(&blob).await? {
+                out.push(blob);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Whether this device reads faces or text in `p` now. The importer does, from the original
+    /// it imported. Another device does when the work is shared to it and it holds the original
+    /// too, or, with only a preview, once the grace period is over and nobody did it better.
+    fn takes_index_work(
+        &self,
+        p: &PhotoRecord,
+        sources: &[Blake3Hash],
+        kind: ShardKind,
+        candidates: &[IndexCandidate],
+        due: bool,
+    ) -> bool {
+        if sources.is_empty() {
+            return false;
+        }
+        let me = self.device();
+        let has_original = sources[0] == p.original.hash;
+        p.imported_by == me
+            || due
+            || (has_original && index_owner(&p.id, kind, candidates) == Some(me))
+    }
+
+    /// Run `read` on the first of `sources` it succeeds on (an original this build cannot decode,
+    /// such as an AVIF on a keeper without an AV1 decoder, falls back to the preview).
+    async fn read_first<T: Send + 'static>(
+        &self,
+        sources: &[Blake3Hash],
+        read: impl Fn(&[u8]) -> Result<T> + Clone + Send + 'static,
+    ) -> Result<Result<T>> {
+        let mut last = anyhow::anyhow!("no picture held here");
+        for blob in sources {
+            let bytes = self.node().blobs().get(blob).await?;
+            let r = read.clone();
+            match tokio::task::spawn_blocking(move || r(&bytes)).await? {
+                Ok(v) => return Ok(Ok(v)),
+                Err(e) => last = e,
+            }
+        }
+        Ok(Err(last))
     }
 
     /// When this device first started indexing (the 48-hour grace counts from it at the earliest,
@@ -673,9 +715,10 @@ impl<L: LibraryStore> LibraryNode<L> {
 
 /// The faces in a photo's preview (or original), as stored in a faces shard.
 fn describe_faces(bytes: &[u8], m: &FaceModels) -> Result<Vec<Face>> {
-    // Previews are at most 2048 px and already upright (`render.rs`); originals are brought down
-    // and turned upright too, so face boxes are where a viewer shows the face.
-    let img = shoebox_media::decode_upright(bytes, 2048).context("decoding a preview")?;
+    // Originals are brought down to 2048 px and turned upright, so face boxes are where a viewer
+    // shows the face; previews are smaller and already upright (`render.rs`).
+    let img = shoebox_media::decode_upright(bytes, shoebox_media::INDEX_LONG_EDGE)
+        .context("decoding a photo")?;
     let rgb = img.to_rgb8();
     let (w, h) = (rgb.width() as f32, rgb.height() as f32);
     let image = Rgb {

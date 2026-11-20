@@ -26,7 +26,9 @@ use std::path::Path;
 
 pub use image::{DynamicImage, RgbImage};
 pub use motion::{find_embedded as find_embedded_video, EmbeddedVideo};
-pub use render::{set_platform_decoder, PlatformDecoder, PREVIEW_LONG_EDGE, THUMB_SIZE};
+pub use render::{
+    set_platform_decoder, PlatformDecoder, INDEX_LONG_EDGE, PREVIEW_LONG_EDGE, THUMB_SIZE,
+};
 pub use strip::{strip_location, StripError, Stripped};
 
 /// The picture in an image file (a preview, or an original shown as it is), at most `max_edge`
@@ -44,12 +46,12 @@ pub fn face_crop(bytes: &[u8], rect: [f32; 4], size: u32) -> Result<Rendition, A
     render::face_crop(image, orientation, rect, size)
 }
 
-/// The preview of a still picture, made again from its original: the same bytes the import made
-/// (same decoder, same resize, same encoder), so the preview's hash in the library still matches.
-pub fn preview_jpeg(bytes: &[u8]) -> Result<Vec<u8>, AnalyzeError> {
+/// The preview of a still picture, made again from its original in the format its record names
+/// (`mime`: AVIF now, JPEG for photos imported before): the same bytes the import made (same
+/// decoder, same resize, same encoder), so the preview's hash in the library still matches.
+pub fn remake_preview(bytes: &[u8], mime: &str) -> Result<Vec<u8>, AnalyzeError> {
     let (image, orientation) = decode_with_orientation(bytes)?;
-    let (_, preview, _) = render::renditions(image, orientation)?;
-    Ok(preview.bytes)
+    Ok(render::preview_as(image, orientation, mime)?.bytes)
 }
 
 fn decode_with_orientation(bytes: &[u8]) -> Result<(image::DynamicImage, u16), AnalyzeError> {
@@ -98,7 +100,7 @@ pub enum TakenAtSource {
     FileMtime,
 }
 
-/// A generated JPEG thumbnail or preview.
+/// A generated thumbnail (JPEG) or preview (AVIF).
 #[derive(Clone, Debug)]
 pub struct Rendition {
     pub bytes: Vec<u8>,

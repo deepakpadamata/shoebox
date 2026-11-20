@@ -3,8 +3,9 @@
 //! Only metadata bytes change: pixel data (JPEG scans, PNG image chunks, video samples) is
 //! copied untouched. Removed regions are zeroed or dropped, so the coordinates are gone from the
 //! bytes, not just hidden. Supported: JPEG (EXIF GPS IFD, XMP `exif:GPS*`), PNG (`eXIf`, XMP),
-//! MP4/MOV (`©xyz`, `loci`, QuickTime location keys). HEIC and anything else is refused rather
-//! than shared with its location.
+//! MP4/MOV (`©xyz`, `loci`, QuickTime location keys). A HEIC or AVIF file with no Exif or XMP
+//! item (Shoebox's own AVIF previews) has nowhere to keep a location and is returned unchanged;
+//! one with such an item, and anything else, is refused rather than shared with its location.
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum StripError {
@@ -29,7 +30,16 @@ pub fn strip_location(data: &[u8]) -> Result<Stripped, StripError> {
     } else if data.len() >= 12 && &data[4..8] == b"ftyp" {
         match &data[8..12] {
             b"heic" | b"heix" | b"hevc" | b"hevx" | b"mif1" | b"msf1" | b"heim" | b"heis"
-            | b"avif" => Err(StripError::Unsupported("HEIC/HEIF/AVIF".into())),
+            | b"avif" => {
+                if heif_has_metadata_item(data)? {
+                    Err(StripError::Unsupported("HEIC/HEIF/AVIF".into()))
+                } else {
+                    Ok(Stripped {
+                        bytes: data.to_vec(),
+                        changed: false,
+                    })
+                }
+            }
             _ => mp4(data),
         }
     } else {
@@ -39,6 +49,62 @@ pub fn strip_location(data: &[u8]) -> Result<Stripped, StripError> {
 
 fn bad(what: &str) -> StripError {
     StripError::Malformed(what.into())
+}
+
+// ---------- HEIF / AVIF ----------
+
+/// Whether a HEIF file (HEIC, AVIF) lists an Exif or XMP (`mime`) item: the only places it can
+/// keep a location. Reads the top-level `meta` box's item list (`iinf`, its `infe` entries).
+fn heif_has_metadata_item(d: &[u8]) -> Result<bool, StripError> {
+    // (type, body start, end) of each box in d[from..to].
+    let boxes = |from: usize, to: usize| -> Result<Vec<([u8; 4], usize, usize)>, StripError> {
+        let mut out = vec![];
+        let mut pos = from;
+        while pos + 8 <= to {
+            let size = u32::from_be_bytes(d[pos..pos + 4].try_into().expect("4 bytes")) as usize;
+            let kind: [u8; 4] = d[pos + 4..pos + 8].try_into().expect("4 bytes");
+            let (head, end) = match size {
+                0 => (8, to),
+                1 => {
+                    let big = d.get(pos + 8..pos + 16).ok_or_else(|| bad("box size"))?;
+                    let big = u64::from_be_bytes(big.try_into().expect("8 bytes"));
+                    (16, pos.saturating_add(usize::try_from(big).map_err(|_| bad("box size"))?))
+                }
+                n => (8, pos.saturating_add(n)),
+            };
+            if end > to || end < pos + head {
+                return Err(bad("a box runs past its parent"));
+            }
+            out.push((kind, pos + head, end));
+            pos = end;
+        }
+        Ok(out)
+    };
+    let Some(&(_, meta, meta_end)) = boxes(0, d.len())?.iter().find(|b| &b.0 == b"meta") else {
+        return Ok(false);
+    };
+    // `meta` and `iinf` are full boxes (version and flags first).
+    let Some(&(_, iinf, iinf_end)) = boxes(meta + 4, meta_end)?.iter().find(|b| &b.0 == b"iinf")
+    else {
+        return Ok(false);
+    };
+    let version = *d.get(iinf).ok_or_else(|| bad("iinf"))?;
+    let entries = iinf + 4 + if version == 0 { 2 } else { 4 };
+    for (kind, body, end) in boxes(entries.min(iinf_end), iinf_end)? {
+        if &kind != b"infe" {
+            continue;
+        }
+        // Version 2 and 3 entries name the item's type after its id and protection index.
+        let at = match d.get(body).copied() {
+            Some(2) => body + 4 + 2 + 2,
+            Some(3) => body + 4 + 4 + 2,
+            _ => continue,
+        };
+        if at + 4 <= end && matches!(&d[at..at + 4], b"Exif" | b"mime") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 // ---------- TIFF / EXIF ----------

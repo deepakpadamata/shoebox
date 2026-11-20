@@ -1,10 +1,12 @@
 //! Previews that are not kept next to an original (`NodeConfig::drop_previews`).
 //!
 //! A device that holds a JPEG or PNG original shows and indexes the original, so a stored preview
-//! (about 0.45 MB a photo, four fifths of what the library takes on a phone that references its
-//! gallery) is only needed by another device that has no original. The record keeps the preview's
-//! hash. When another device needs it, the preview is made again from the original: the same
-//! decoder, resize and encoder give the same bytes, so the hash still matches.
+//! is only needed by another device that has no original. (A 1280 px AVIF preview is about 0.05
+//! MB a photo; the 2048 px JPEG previews of photos imported before were about 0.45 MB, four fifths
+//! of what the library took on a phone that references its gallery.) The record keeps the
+//! preview's hash. When another device needs it, the preview is made again from the original in
+//! the format the record names: the same decoder, resize and encoder give the same bytes, so the
+//! hash still matches.
 
 use crate::blobs::Protection;
 use crate::LibraryNode;
@@ -50,8 +52,11 @@ impl<L: LibraryStore> LibraryNode<L> {
             return Ok(false);
         }
         let original = blobs.get(&rec.original.hash).await?;
-        let made =
-            tokio::task::spawn_blocking(move || shoebox_media::preview_jpeg(&original)).await?;
+        let mime = rec.preview.mime.clone();
+        let made = tokio::task::spawn_blocking(move || {
+            shoebox_media::remake_preview(&original, &mime)
+        })
+        .await?;
         let bytes = match made {
             Ok(b) => b,
             Err(e) => {

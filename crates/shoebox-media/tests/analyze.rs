@@ -15,6 +15,17 @@ fn decode(bytes: &[u8]) -> image::DynamicImage {
     image::load_from_memory(bytes).expect("rendition is a decodable image")
 }
 
+/// The size of an AVIF preview, from its `ispe` box (the `image` crate here cannot decode AVIF).
+fn avif_size(bytes: &[u8]) -> (u32, u32) {
+    assert_eq!(&bytes[4..12], b"ftypavif", "the preview is an AVIF file");
+    let at = bytes
+        .windows(4)
+        .position(|w| w == b"ispe")
+        .expect("an ispe box");
+    let n = |i: usize| u32::from_be_bytes(bytes[i..i + 4].try_into().unwrap());
+    (n(at + 8), n(at + 12))
+}
+
 fn spec(width: u32, height: u32, orientation: u16) -> ExifSpec {
     ExifSpec {
         make: "Shoebox".into(),
@@ -65,21 +76,22 @@ fn jpeg_sample_yields_hash_exif_and_renditions() {
     assert_eq!(img.dimensions(), (256, 256), "square crop");
     assert_eq!(thumb.mime, "image/jpeg");
     let preview = r.preview.expect("preview");
+    assert_eq!(preview.mime, "image/avif");
     assert_eq!(
-        decode(&preview.bytes).dimensions(),
+        avif_size(&preview.bytes),
         (640, 480),
         "small images are not upscaled"
     );
 }
 
 #[test]
-fn large_images_get_a_2048_long_edge_preview() {
+fn large_images_get_a_1280_long_edge_preview() {
     let dir = tempfile::tempdir().unwrap();
     let path = write(dir.path(), "big.jpg", &render_jpeg(&spec(4000, 3000, 1), 5));
     let r = analyze(&path).unwrap();
     let preview = r.preview.unwrap();
-    assert_eq!(decode(&preview.bytes).dimensions(), (2048, 1536));
-    assert_eq!((preview.width, preview.height), (2048, 1536));
+    assert_eq!(avif_size(&preview.bytes), (1280, 960));
+    assert_eq!((preview.width, preview.height), (1280, 960));
     assert_eq!((r.exif.width, r.exif.height), (4000, 3000));
 
     // Turned a quarter (EXIF 6): the preview and the size are upright.
@@ -90,7 +102,7 @@ fn large_images_get_a_2048_long_edge_preview() {
     );
     let r = analyze(&path).unwrap();
     let preview = r.preview.unwrap();
-    assert_eq!(decode(&preview.bytes).dimensions(), (1536, 2048));
+    assert_eq!(avif_size(&preview.bytes), (960, 1280));
     assert_eq!((r.exif.width, r.exif.height), (3000, 4000));
 }
 
@@ -118,10 +130,10 @@ fn thumbnails_and_previews_respect_exif_orientation() {
         (40, 80),
         "reported dimensions are as displayed"
     );
-    let up = decode(&upright.preview.unwrap().bytes);
-    let rot = decode(&rotated.preview.unwrap().bytes);
-    assert_eq!(up.dimensions(), (80, 40));
-    assert_eq!(rot.dimensions(), (40, 80));
+    assert_eq!(avif_size(&upright.preview.unwrap().bytes), (80, 40));
+    assert_eq!(avif_size(&rotated.preview.unwrap().bytes), (40, 80));
+    // The pixels are checked on the thumbnails (JPEG), cut from the same upright picture.
+    let up = decode(&upright.thumb.unwrap().bytes);
 
     let red = |img: &image::DynamicImage, x0: u32, y0: u32, w: u32, h: u32| -> f64 {
         let rgb = img.to_rgb8();
@@ -134,13 +146,11 @@ fn thumbnails_and_previews_respect_exif_orientation() {
         sum as f64 / (w * h) as f64
     };
     // Upright: right side redder than left side.
-    assert!(red(&up, 60, 0, 20, 40) > red(&up, 0, 0, 20, 40) + 80.0);
+    assert!(red(&up, 200, 0, 56, 256) > red(&up, 0, 0, 56, 256) + 60.0);
     // Rotated: bottom redder than top, and left/right roughly equal.
-    assert!(red(&rot, 0, 60, 40, 20) > red(&rot, 0, 0, 40, 20) + 80.0);
-    assert!((red(&rot, 0, 0, 10, 80) - red(&rot, 30, 0, 10, 80)).abs() < 40.0);
-    // Thumbnails are oriented too (checked via the same gradient direction).
     let t = decode(&rotated.thumb.unwrap().bytes);
     assert!(red(&t, 0, 200, 256, 56) > red(&t, 0, 0, 256, 56) + 60.0);
+    assert!((red(&t, 0, 0, 40, 256) - red(&t, 216, 0, 40, 256)).abs() < 40.0);
 }
 
 #[test]
@@ -163,7 +173,7 @@ fn file_mtime_is_the_fallback_when_there_is_no_exif() {
     assert_eq!((r.exif.width, r.exif.height), (390, 844));
     assert!(r.exif.camera_make.is_none() && r.exif.gps.is_none());
     assert_eq!(decode(&r.thumb.unwrap().bytes).dimensions(), (256, 256));
-    assert_eq!(decode(&r.preview.unwrap().bytes).dimensions(), (390, 844));
+    assert_eq!(avif_size(&r.preview.unwrap().bytes), (390, 844));
 }
 
 #[test]
@@ -182,7 +192,7 @@ fn raw_files_use_the_embedded_jpeg_preview() {
     );
     assert_eq!(r.mime, "image/x-adobe-dng");
     assert_eq!(r.exif.camera_make.as_deref(), Some("Shoebox"));
-    assert_eq!(decode(&r.preview.unwrap().bytes).dimensions(), (320, 240));
+    assert_eq!(avif_size(&r.preview.unwrap().bytes), (320, 240));
     assert_eq!(decode(&r.thumb.unwrap().bytes).dimensions(), (256, 256));
 
     // A RAW without any embedded preview is reported, not guessed at.
@@ -335,11 +345,7 @@ fn other_still_formats_yield_renditions() {
         assert_eq!((r.exif.width, r.exif.height), size, "{name}");
         let thumb = r.thumb.expect("thumb");
         assert_eq!(decode(&thumb.bytes).dimensions(), (256, 256), "{name}");
-        assert_eq!(
-            decode(&r.preview.unwrap().bytes).dimensions(),
-            size,
-            "{name}"
-        );
+        assert_eq!(avif_size(&r.preview.unwrap().bytes), size, "{name}");
     }
     // cwebp carries the EXIF over, so the WebP keeps its date and place.
     let webp = analyze(&samples().join("photo.webp")).unwrap();
@@ -497,4 +503,27 @@ fn avif_is_skipped_by_a_build_without_an_av1_decoder() {
         Err(AnalyzeError::Unsupported(why)) => assert!(why.contains("cannot decode"), "{why}"),
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn previews_are_made_again_byte_for_byte_in_either_format() {
+    // A device that let a preview go makes it again from the original, and the record's hash
+    // must match: AVIF for photos imported now, JPEG (2048 px, quality 85) for those before.
+    let dir = tempfile::tempdir().unwrap();
+    let original = render_jpeg(&spec(3000, 2000, 6), 7);
+    let r = analyze(&write(dir.path(), "p.jpg", &original)).unwrap();
+    let preview = r.preview.unwrap();
+    let again = shoebox_media::remake_preview(&original, "image/avif").unwrap();
+    assert_eq!(again, preview.bytes, "the same AVIF bytes");
+
+    let jpeg = shoebox_media::remake_preview(&original, "image/jpeg").unwrap();
+    assert_eq!(decode(&jpeg).dimensions(), (1365, 2048), "the old JPEG preview, upright");
+    assert_eq!(
+        shoebox_media::remake_preview(&original, "image/jpeg").unwrap(),
+        jpeg
+    );
+    assert!(matches!(
+        shoebox_media::remake_preview(&original, "image/webp"),
+        Err(AnalyzeError::Unsupported(_))
+    ));
 }

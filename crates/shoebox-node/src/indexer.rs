@@ -72,6 +72,9 @@ pub struct IndexerConfig {
     /// change) instead of every `tick`: what becomes due by time alone (another device's photos
     /// past `grace`, a buffer past `shard_after`) does not need a 30 s poll.
     pub idle_tick: Duration,
+    /// How long the gate stays closed (the computer in use, on battery) before the indexer lets
+    /// go of its models; a gate that closes for a moment keeps them.
+    pub release_closed_after: Duration,
 }
 
 impl Default for IndexerConfig {
@@ -88,6 +91,7 @@ impl Default for IndexerConfig {
             status_every: Duration::from_secs(600),
             compact_every: Duration::from_secs(3600),
             idle_tick: Duration::from_secs(600),
+            release_closed_after: Duration::from_secs(120),
         }
     }
 }
@@ -125,6 +129,8 @@ pub struct IndexProgress {
 #[derive(Default)]
 pub(crate) struct IndexerState {
     running: AtomicBool,
+    /// Bumped by every start and stop: a loop (and its change watcher) from an older start ends.
+    generation: std::sync::atomic::AtomicU64,
     paused: AtomicBool,
     wake: Notify,
     buffer: Mutex<Buffer>,
@@ -209,20 +215,38 @@ impl<L: LibraryStore> LibraryNode<L> {
         if self.inner.indexer.running.swap(true, Ordering::SeqCst) {
             return;
         }
+        let generation = self.inner.indexer.generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.inner.indexer.progress.lock().unwrap().running = true;
         let weak = Arc::downgrade(&self.inner);
-        tokio::spawn(index_loop(weak, cfg, encoder, gate));
+        tokio::spawn(index_loop(weak, cfg, encoder, gate, generation));
         let weak = Arc::downgrade(&self.inner);
         let mut changes = self.inner.store.subscribe();
         let me = self.device();
         tokio::spawn(async move {
             while let Some(change) = futures::StreamExt::next(&mut changes).await {
                 let Some(inner) = weak.upgrade() else { break };
+                if inner.indexer.generation.load(Ordering::SeqCst) != generation {
+                    break;
+                }
                 if wakes_indexer(&change, &me) {
                     inner.indexer.wake.notify_one();
                 }
             }
         });
+    }
+
+    /// End the indexer and drop its models: the image encoder, the text reader and the face
+    /// models. For a device that indexes in bounded runs (the Android job), which loads them again
+    /// for the next run, so nothing stays in memory in between. Waiting results stay buffered for
+    /// [`LibraryNode::flush_index`]; [`LibraryNode::start_indexer`] starts it again.
+    pub fn stop_indexer(&self) {
+        let st = &self.inner.indexer;
+        st.generation.fetch_add(1, Ordering::SeqCst);
+        st.running.store(false, Ordering::SeqCst);
+        st.progress.lock().unwrap().running = false;
+        st.ocr.lock().unwrap().take();
+        st.faces.lock().unwrap().take();
+        st.wake.notify_one();
     }
 
     /// Whether [`LibraryNode::start_indexer`] has started the indexer (paused or not).
@@ -801,6 +825,7 @@ async fn index_loop<L: LibraryStore>(
     cfg: IndexerConfig,
     encoder: Arc<dyn ImageEncoder>,
     gate: Arc<dyn IndexGate>,
+    generation: u64,
 ) {
     let model = encoder.model();
     let dims = encoder.dims() as u16;
@@ -814,6 +839,8 @@ async fn index_loop<L: LibraryStore>(
     let mut rate: u32 = cfg.rate_override.unwrap_or(30);
     // The models were let go since they were last used (they load again on the next use).
     let mut released = false;
+    // Since when the gate has been closed (the computer in use, on battery…).
+    let mut closed_since: Option<Instant> = None;
     // Labels only when the list's vectors were made with this encoder's model.
     let (labels, since) = {
         let Some(inner) = weak.upgrade() else { return };
@@ -823,6 +850,10 @@ async fn index_loop<L: LibraryStore>(
     };
     loop {
         let Some(inner) = weak.upgrade() else { break };
+        if inner.indexer.generation.load(Ordering::SeqCst) != generation {
+            debug!("indexer stopped");
+            break;
+        }
         let ln = LibraryNode { inner };
         let st = &ln.inner.indexer;
         {
@@ -1040,8 +1071,16 @@ async fn index_loop<L: LibraryStore>(
         } else {
             Some(cfg.tick)
         };
-        // Going quiet (caught up, or paused): free the models' memory until there is work again.
-        let quiet = tick.is_none() || (open && !busy && !buffered);
+        // Going quiet (caught up, paused, or the gate closed for a while): free the models' memory
+        // until there is work again. A gate that closes for a moment (a key pressed) keeps them.
+        closed_since = if open {
+            None
+        } else {
+            closed_since.or(Some(Instant::now()))
+        };
+        let quiet = tick.is_none()
+            || (open && !busy)
+            || closed_since.is_some_and(|t| t.elapsed() >= cfg.release_closed_after);
         if quiet && !released {
             encoder.release();
             if let Some(o) = st.ocr.lock().unwrap().as_ref() {

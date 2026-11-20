@@ -315,6 +315,7 @@ impl AppCore {
                 Err(e) => tracing::warn!("could not load the text models: {e:#}"),
             }
         }
+        let started_here = encoder.is_some();
         if let Some(encoder) = encoder {
             ln.start_indexer(
                 IndexerConfig {
@@ -326,8 +327,9 @@ impl AppCore {
                 Arc::new(shoebox_node::Always),
             );
         }
-        // On a core that has run before (the app's own, borrowed by the job) the indexer is
-        // already running, paused since the last run.
+        // An indexer that was already running (a desktop's own) may have been paused by its owner:
+        // it is put back as it was when the run ends.
+        let was_paused = !started_here && ln.indexer_paused();
         ln.resume_indexer();
         // Run until this device has nothing left to do (pictures, text, faces), the budget is
         // spent, or the Android side asks it to stop (too hot, unplugged): `index-stop`.
@@ -369,6 +371,15 @@ impl AppCore {
         let _ = self.sync_burst(Duration::from_secs(20)).await;
         let p = ln.index_progress();
         write_index_progress(self.data_dir(), &p, caught_up);
+        // An indexer this run started has models loaded from bytes, which cannot load again on
+        // their own: drop them (hundreds of MB) rather than keep them until the app is closed. The
+        // next run loads them again. An indexer that was already running (a desktop's own, whose
+        // models reload) is left as it was.
+        if started_here {
+            ln.stop_indexer();
+        } else if !was_paused {
+            ln.resume_indexer();
+        }
         Ok(serde_json::json!({
             "indexed": published,
             "caught_up": caught_up,

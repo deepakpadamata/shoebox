@@ -722,9 +722,9 @@ impl AppCore {
                 Change::AlbumChanged(_) => Some(1),
                 Change::HoldingsChanged { .. } => Some(2),
                 Change::DeviceListChanged => Some(3),
-                Change::IndexChanged | Change::PeopleChanged | Change::RemoteSyncProgress { .. } => {
-                    None
-                }
+                Change::IndexChanged
+                | Change::PeopleChanged
+                | Change::RemoteSyncProgress { .. } => None,
             };
             while let Some(first) = changes.next().await {
                 let Some(k) = kind(&first) else { continue };

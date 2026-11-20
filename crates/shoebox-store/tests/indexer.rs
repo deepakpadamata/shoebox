@@ -769,3 +769,118 @@ async fn a_paused_indexer_resumes_for_the_next_run_on_the_same_node() {
     );
     c.shutdown().await;
 }
+
+/// An encoder that counts how often the indexer lets go of it.
+struct Counting {
+    released: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl shoebox_search::encoder::ImageEncoder for Counting {
+    fn model(&self) -> shoebox_core::model::ModelId {
+        ENC.model()
+    }
+    fn dims(&self) -> usize {
+        ENC.dims()
+    }
+    fn encode_image(
+        &self,
+        image: &shoebox_search::encoder::Rgb,
+    ) -> Result<Vec<f32>, shoebox_search::encoder::EncodeError> {
+        ENC.encode_image(image)
+    }
+    fn release(&self) {
+        self.released.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// A text reader that reads nothing.
+struct NoText;
+
+impl shoebox_search::ocr::Ocr for NoText {
+    fn read_text(&self, _: &[u8]) -> Result<String, shoebox_search::encoder::EncodeError> {
+        Ok(String::new())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_indexer_whose_gate_stays_closed_lets_go_of_its_models() {
+    // A desktop in use: work is waiting, but the gate stays closed. The models are let go once
+    // it has been closed for a while, not kept for as long as the computer is in use.
+    let c = Cluster::with_roles(&[Role::Companion]).await.unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    photos(&nodes, &[0], EndpointId([77; 32]), 0..10).await;
+    let released = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let gate = Arc::new(Charging(AtomicBool::new(false)));
+    nodes[0].start_indexer(
+        IndexerConfig {
+            release_closed_after: Duration::from_millis(500),
+            ..phone(20)
+        },
+        Arc::new(Counting {
+            released: released.clone(),
+        }),
+        gate.clone(),
+    );
+    wait_until(Duration::from_secs(10), || async {
+        released.load(Ordering::SeqCst) == 1
+    })
+    .await
+    .expect("released while the gate stays closed");
+    assert!(
+        !nodes[0].index_progress().caught_up,
+        "work is still waiting"
+    );
+    // Let go once, not on every look at the gate.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(released.load(Ordering::SeqCst), 1);
+    // The gate opens: the work is done (the model loads again on use), then let go again.
+    gate.0.store(true, Ordering::SeqCst);
+    wait_until(Duration::from_secs(60), || async {
+        nodes[0].index_progress().caught_up && released.load(Ordering::SeqCst) == 2
+    })
+    .await
+    .expect("indexed once the gate opened, then released again");
+    c.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stopped_indexer_drops_its_models_and_a_new_run_starts_it_again() {
+    // The Android job: models loaded from bytes for one run, dropped after it, loaded again for
+    // the next run on the same node.
+    let c = Cluster::with_roles(&[Role::Companion]).await.unwrap();
+    let nodes = library_nodes_auto(&c).await;
+    photos(&nodes, &[0], EndpointId([77; 32]), 0..20).await;
+    let encoder: Arc<dyn shoebox_search::encoder::ImageEncoder> = Arc::new(ENC);
+    let ocr: Arc<dyn shoebox_search::ocr::Ocr> = Arc::new(NoText);
+    let (encoder_left, ocr_left) = (Arc::downgrade(&encoder), Arc::downgrade(&ocr));
+    nodes[0].set_ocr(ocr);
+    nodes[0].start_indexer(phone(20), encoder, Arc::new(Always));
+    wait_until(Duration::from_secs(60), || async {
+        nodes[0].index_progress().caught_up
+    })
+    .await
+    .expect("the first run catches up");
+    nodes[0].pause_indexer();
+    nodes[0].stop_indexer();
+    assert!(!nodes[0].indexer_running());
+    assert!(!nodes[0].index_progress().running);
+    wait_until(Duration::from_secs(10), || async {
+        encoder_left.upgrade().is_none() && ocr_left.upgrade().is_none()
+    })
+    .await
+    .expect("nothing holds the models once stopped");
+    nodes[0].flush_index().await.unwrap();
+    assert_eq!(coverage(&nodes[0]).await.len(), 20);
+
+    photos(&nodes, &[0], EndpointId([77; 32]), 20..40).await;
+    nodes[0].start_indexer(phone(20), Arc::new(ENC), Arc::new(Always));
+    nodes[0].resume_indexer();
+    assert!(nodes[0].indexer_running());
+    wait_until(Duration::from_secs(60), || async {
+        nodes[0].flush_index().await.unwrap();
+        coverage(&nodes[0]).await.len() == 40 && nodes[0].index_progress().caught_up
+    })
+    .await
+    .expect("the next run indexes the photos added since");
+    c.shutdown().await;
+}

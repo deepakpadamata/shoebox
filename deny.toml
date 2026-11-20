@@ -31,6 +31,12 @@ unused-allowed-license = "allow"
 crate = "jpeg-encoder"
 allow = ["IJG"]
 
+# rav1e (the AVIF encoder, via ravif) depends on libfuzzer-sys only under `cfg(fuzzing)`, so it is
+# never built into Shoebox; cargo-deny checks every cfg. NCSA is permissive (OSI, FSF).
+[[licenses.exceptions]]
+crate = "libfuzzer-sys"
+allow = ["NCSA"]
+
 [licenses.private]
 # Our own workspace crates (publish = false) are not license-checked here; apps/* are AGPL by design.
 ignore = true

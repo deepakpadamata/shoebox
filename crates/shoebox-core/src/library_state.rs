@@ -1132,6 +1132,11 @@ impl LibraryState {
             .collect()
     }
 
+    /// (live favorite photos, photos in Recently Deleted), counted without building records.
+    pub fn favorite_and_deleted_counts(&self) -> (usize, usize) {
+        self.photos.favorite_and_deleted()
+    }
+
     pub fn deleted_photos(&self) -> Vec<PhotoRecord> {
         let mut out: Vec<PhotoRecord> = self.photos.values().filter(|p| p.is_deleted()).collect();
         out.sort_by_key(|p| (Reverse(p.deleted_at.value), p.id));

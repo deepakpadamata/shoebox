@@ -391,6 +391,18 @@ pub trait LibraryStore: Send + Sync + 'static {
             .len())
     }
 
+    /// (live favorite photos, photos in Recently Deleted). Stores that can count without
+    /// building the records should override this.
+    async fn favorite_and_deleted_counts(&self) -> Result<(usize, usize)> {
+        let favorites = self
+            .photos_by_time(TimeRange::ALL, Page::all())
+            .await?
+            .iter()
+            .filter(|p| p.favorite.value)
+            .count();
+        Ok((favorites, self.deleted_photos().await?.len()))
+    }
+
     // ----- settings -----
 
     /// A library-wide setting (e.g. `redundancy.target`), or `None` if never written. Keys are

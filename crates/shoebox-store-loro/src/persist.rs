@@ -36,6 +36,8 @@ pub(crate) struct Persist {
     last_sync: std::time::Instant,
     /// When an update was last appended (or the store opened).
     last_append: std::time::Instant,
+    /// The flusher thread, woken by an append (it sleeps while there is nothing to write).
+    waker: Option<std::thread::Thread>,
 }
 
 fn frame_sum(bytes: &[u8]) -> [u8; 8] {
@@ -87,6 +89,7 @@ impl Persist {
                 unsynced: false,
                 last_sync: std::time::Instant::now(),
                 last_append: std::time::Instant::now(),
+                waker: None,
             },
             snapshot,
             updates,
@@ -102,6 +105,9 @@ impl Persist {
         self.log_len += frame.len() as u64;
         self.unsynced = true;
         self.last_append = std::time::Instant::now();
+        if let Some(w) = &self.waker {
+            w.unpark();
+        }
         // Group commit: a burst of writes shares one fsync. The library's flusher thread syncs
         // what is left within `FLUSH_INTERVAL`, so a crash loses at most that much local work.
         if self.last_sync.elapsed() >= FLUSH_INTERVAL {
@@ -122,6 +128,16 @@ impl Persist {
 
     pub(crate) fn should_compact(&self) -> bool {
         self.log_len > COMPACT_MIN_LOG && self.log_len > self.snapshot_len
+    }
+
+    /// Wake `thread` on every append.
+    pub(crate) fn set_waker(&mut self, thread: std::thread::Thread) {
+        self.waker = Some(thread);
+    }
+
+    /// Everything appended is durable.
+    pub(crate) fn synced(&self) -> bool {
+        !self.unsynced
     }
 
     /// Time since the last append.

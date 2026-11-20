@@ -780,15 +780,15 @@ impl AppCore {
             }
             use shoebox_core::store::AlbumStore;
             let items = album.items(Page::all()).await?;
+            let ids: std::collections::HashSet<_> = items.iter().map(|i| i.id).collect();
+            let previews: std::collections::HashSet<_> =
+                items.iter().map(|i| i.preview.hash).collect();
             let mut missing = vec![];
             for p in ln.store().album_items(&personal, Page::all()).await? {
                 let Some(rec) = ln.store().photo(&p).await? else {
                     continue;
                 };
-                if rec.is_deleted()
-                    || items
-                        .iter()
-                        .any(|i| i.id == rec.id || i.preview.hash == rec.preview.hash)
+                if rec.is_deleted() || ids.contains(&rec.id) || previews.contains(&rec.preview.hash)
                 {
                     continue;
                 }

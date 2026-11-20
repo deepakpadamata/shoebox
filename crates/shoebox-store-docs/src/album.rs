@@ -485,13 +485,15 @@ fn spawn_watcher<S>(
                 }
                 _ => {}
             }
+            // A failed sync (every few seconds while a member is unreachable) brought nothing:
+            // whatever it did insert was announced as `InsertRemote`.
             if matches!(
                 event,
                 Ok(LiveEvent::InsertRemote { .. }
                     | LiveEvent::ContentReady { .. }
-                    | LiveEvent::PendingContentReady
-                    | LiveEvent::SyncFinished(_))
-            ) {
+                    | LiveEvent::PendingContentReady)
+            ) || matches!(&event, Ok(LiveEvent::SyncFinished(ev)) if ev.result.is_ok())
+            {
                 signal.notify_one();
             }
         }

@@ -195,6 +195,10 @@ impl LibraryStore for MemLibrary {
         Ok(self.read(|s| s.live_photo_count()))
     }
 
+    async fn favorite_and_deleted_counts(&self) -> Result<(usize, usize)> {
+        Ok(self.read(|s| s.favorite_and_deleted_counts()))
+    }
+
     async fn setting(&self, key: &str) -> Result<Option<Vec<u8>>> {
         Ok(self.read(|s| s.setting(key)))
     }

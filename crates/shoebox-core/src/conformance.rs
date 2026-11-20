@@ -567,6 +567,11 @@ async fn holdings_single_writer_and_at_risk<H: Harness>(h: &H) {
     );
     assert_eq!(a.store.at_risk_count(5).await.unwrap(), 1);
     assert_eq!(a.store.live_photo_count().await.unwrap(), 1);
+    assert_eq!(a.store.favorite_and_deleted_counts().await.unwrap(), (0, 1));
+    // A deleted favorite counts as deleted only.
+    a.store.set_favorite(&hash(1), true).await.unwrap();
+    a.store.set_favorite(&hash(2), true).await.unwrap();
+    assert_eq!(a.store.favorite_and_deleted_counts().await.unwrap(), (1, 1));
 }
 
 /// Wait for the next change, skipping nothing: the suite asserts the exact sequence.

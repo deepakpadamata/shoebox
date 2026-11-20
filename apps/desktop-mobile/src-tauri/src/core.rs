@@ -698,11 +698,18 @@ impl AppCore {
             loop {
                 tokio::select! {
                     notice = notices.recv() => {
-                        let Ok(shoebox_store::AlbumNotice(id)) = notice else { break };
+                        use tokio::sync::broadcast::error::RecvError;
                         let Some(core) = weak.upgrade() else { break };
-                        core.emit(AppEvent::SharedChanged {
-                            album: hex::encode(id.0),
-                        });
+                        match notice {
+                            Ok(shoebox_store::AlbumNotice(id)) => core.emit(AppEvent::SharedChanged {
+                                album: hex::encode(id.0),
+                            }),
+                            // Fell behind: which albums changed is lost, so every one may have.
+                            Err(RecvError::Lagged(_)) => core.emit(AppEvent::SharedChanged {
+                                album: String::new(),
+                            }),
+                            Err(RecvError::Closed) => break,
+                        }
                         core.kick_auto_save();
                     }
                     _ = retry.tick() => {
@@ -765,9 +772,41 @@ impl AppCore {
                     weak.upgrade().map(|c| c.device_name()).unwrap_or_default()
                 });
             let weak = Arc::downgrade(self);
+            let mut changes = ln.store().subscribe();
+            let mut notices = shared.subscribe();
             let linked = tokio::spawn(async move {
+                use futures::{FutureExt, StreamExt};
+                use shoebox_core::store::Change;
+                use tokio::sync::broadcast::error::RecvError;
+                // Photos added to a shared personal album (here or on another device) are shared
+                // when an album, the list of shared albums (a setting) or a shared album changes.
+                // The slow timer retries what could not be shared then.
+                const FALLBACK: std::time::Duration = std::time::Duration::from_secs(600);
+                const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
                 loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    let woken = tokio::select! {
+                        c = changes.next() => match c {
+                            None => break,
+                            Some(c) => matches!(
+                                c,
+                                Change::AlbumChanged(_)
+                                    | Change::SettingChanged(_)
+                                    | Change::PhotoUpserted(_)
+                            ),
+                        },
+                        n = notices.recv() => match n {
+                            Err(RecvError::Closed) => break,
+                            Ok(_) | Err(RecvError::Lagged(_)) => true,
+                        },
+                        _ = tokio::time::sleep(FALLBACK) => true,
+                    };
+                    if !woken {
+                        continue;
+                    }
+                    // Let a burst (an import, a sync) land before looking.
+                    tokio::time::sleep(SETTLE).await;
+                    while let Some(Some(_)) = changes.next().now_or_never() {}
+                    while notices.try_recv().is_ok() {}
                     let Some(core) = weak.upgrade() else { break };
                     if let Err(e) = core.sync_linked_albums().await {
                         tracing::debug!("sharing new photos of shared albums: {e:#}");
@@ -1286,16 +1325,13 @@ impl AppCore {
 
     pub async fn counts(&self) -> Result<LibraryCounts> {
         let ln = self.ln().await?;
-        let photos = ln
-            .store()
-            .photos_by_time(TimeRange::ALL, Page::all())
-            .await?;
-        let deleted = ln.store().deleted_photos().await?.len();
+        let photos = ln.store().live_photo_count().await?;
+        let (favorites, deleted) = ln.store().favorite_and_deleted_counts().await?;
         Ok(LibraryCounts {
-            photos: photos.len() as u32,
-            favorites: photos.iter().filter(|p| p.favorite.value).count() as u32,
+            photos: photos as u32,
+            favorites: favorites as u32,
             deleted: deleted as u32,
-            at_risk: ln.at_risk(Page::all()).await?.len() as u32,
+            at_risk: ln.at_risk_count().await? as u32,
             redundancy_target: ln.redundancy_target().await? as u32,
         })
     }

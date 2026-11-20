@@ -196,6 +196,16 @@ impl PhotoTable {
         self.photos.iter().map(|(id, p)| self.unpack(id, p))
     }
 
+    /// (live favorites, photos in Recently Deleted), without unpacking any record.
+    pub(crate) fn favorite_and_deleted(&self) -> (usize, usize) {
+        self.photos
+            .values()
+            .fold((0, 0), |(fav, del), p| match p.deleted_at {
+                Some(_) => (fav, del + 1),
+                None => (fav + p.favorite as usize, del),
+            })
+    }
+
     /// Ids with their original's hash and whether they are deleted, in id order (for `at_risk`).
     pub(crate) fn range(
         &self,

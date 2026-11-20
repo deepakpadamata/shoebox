@@ -700,7 +700,8 @@ ts_type! {
         BackupPaused { reason: Option<String> },
         /// Many photos left the gallery at once; `count` wait for an answer (0: answered).
         GalleryDeletionsHeld { count: u32 },
-        /// Something changed in a shared album (new photos, members, downloads).
+        /// Something changed in a shared album (new photos, members, downloads). `album` is empty
+        /// when which one is not known (events were missed), so any of them may have.
         SharedChanged { album: String },
         /// The answer to "are my photos safe?" changed.
         Safety { status: SafetyStatus },

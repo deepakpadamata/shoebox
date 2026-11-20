@@ -626,6 +626,21 @@ ts_type! {
 }
 
 ts_type! {
+    /// A Free up space run going on in the background (`free_up_status`).
+    pub struct FreeUpStatus {
+        /// `idle`, `running`, `done` or `failed`.
+        pub state: String,
+        /// `running`: photos handled so far, of `total`.
+        pub done: u32,
+        pub total: u32,
+        /// `done`: what the run freed.
+        pub report: Option<FreeUpReport>,
+        /// `failed`: why.
+        pub error: Option<String>,
+    }
+}
+
+ts_type! {
     /// The one answer to "are my photos safe?" (U1-07), the same words on every screen.
     pub struct SafetyStatus {
         /// `safe`, `single_device`, `busy`, `waiting` or `at_risk`.
@@ -709,6 +724,8 @@ ts_type! {
         SharedChanged { album: String },
         /// The answer to "are my photos safe?" changed.
         Safety { status: SafetyStatus },
+        /// A background Free up space run moved on, finished or failed: `status` says which.
+        FreeUp { status: FreeUpStatus },
     }
 }
 

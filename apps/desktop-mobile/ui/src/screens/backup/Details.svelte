@@ -13,12 +13,37 @@
   let confirm = $state(false);
   let busy = $state(false);
 
-  async function load() { health = await api.health(); }
+  // `health` is heavy (it walks the whole library and asks other devices what they hold), and
+  // the library changes many times a second while photos are freed or fetched: one call at a
+  // time, with at most one more queued, and none while a Free up run is going on (it ends with
+  // a refresh of its own).
+  let loading: Promise<void> | null = null;
+  let again = false;
+  function load(): Promise<void> {
+    if (loading) { again = true; return loading; }
+    loading = (async () => {
+      try {
+        do { again = false; health = await api.health(); } while (again);
+      } finally {
+        loading = null;
+      }
+    })();
+    return loading;
+  }
+  const freeing = $derived(app.freeUp?.state === 'running');
   onMount(() => { load().catch(fail); });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let mounted = false;
   $effect(() => {
     app.version;
     app.holdingsVersion;
-    untrack(() => { load().catch(() => {}); });
+    if (freeing) return;
+    if (!mounted) { mounted = true; return; } // onMount loads the first time
+    untrack(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => load().catch(() => {}), 300);
+    });
+    return () => clearTimeout(timer);
   });
 
   // Photos below the target are listed by their copies; every photo that is safe under the rule
@@ -43,17 +68,19 @@
     api.freeUpSpace(true).then((r) => { if (confirm) plan = r; }).catch(() => {});
   });
 
+  // The run goes on in the background: the sheet closes at once and the app stays usable. Its
+  // progress shows here and its result as a toast, whichever screen is open by then.
   async function free() {
     busy = true;
+    const before = app.freeUp;
+    app.freeUp = { state: 'running', done: 0, total: plan?.photos ?? 0, report: null, error: null };
     try {
-      const asked = plan?.gallery ?? 0;
-      const r = await api.freeUpSpace(false);
-      let msg = `Freed ${bytes(r.bytes)} from ${plural(r.photos, 'photo')}`;
-      if (asked > r.gallery) msg += `; ${plural(asked - r.gallery, 'photo')} stayed in the gallery`;
-      toast(msg);
+      const s = await api.startFreeUp();
+      if (s.state !== 'running') app.freeUp = s;
       confirm = false;
-      await load();
+      toast('Freeing up space in the background');
     } catch (e) {
+      app.freeUp = before;
       fail(e);
     } finally {
       busy = false;
@@ -80,7 +107,14 @@
       {/each}
     </div>
 
-    {#if health.can_free_photos > 0}
+    {#if freeing && app.freeUp}
+      <div class="section">Free up space</div>
+      <div class="card pad">
+        <p class="small">Freeing up space… {#if app.freeUp.total > 0}{app.freeUp.done.toLocaleString('en')} of {plural(app.freeUp.total, 'photo')}{/if}</p>
+        <ProgressBar total={Math.max(1, app.freeUp.total)} segments={[{ value: app.freeUp.done, tone: 'ok' }]} label={`${app.freeUp.done} of ${app.freeUp.total} photos`} />
+        <p class="small muted">This goes on in the background: you can keep using Shoebox.</p>
+      </div>
+    {:else if health.can_free_photos > 0}
       <div class="section">Free up space</div>
       <div class="card pad">
         <p class="small">You can free <b>{bytes(health.can_free_bytes)}</b> by removing the originals of {plural(health.can_free_photos, 'photo')} from this device. Each one is safe on other devices that confirmed they have it; previews stay here.</p>
@@ -99,7 +133,7 @@
       {#if plan && plan.gallery > 0}
         <p class="small"><b>{plural(plan.gallery, 'photo')} {plan.gallery === 1 ? 'is' : 'are'} also deleted from this phone's gallery</b> (they stay in your library). Android asks you to allow it next.</p>
       {/if}
-      <Button kind="primary" block disabled={busy} onclick={free}>{busy ? 'Freeing…' : 'Free up space'}</Button>
+      <Button kind="primary" block disabled={busy || freeing} onclick={free}>Free up space</Button>
       <Button block onclick={() => (confirm = false)}>Cancel</Button>
     </div>
   {/if}

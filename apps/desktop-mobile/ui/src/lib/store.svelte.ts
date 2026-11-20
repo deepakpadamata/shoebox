@@ -1,7 +1,8 @@
 // App-wide reactive state: what the shell needs everywhere. Screens keep their own data and
 // refetch when `app.version` changes (the app core says something changed).
 import { mergeAlbums, type AlbumEntry } from './albumlist';
-import { api, loadNativeVideo, onAppEvent, type AppEvent, type AppState, type LibraryCounts, type SafetyStatus } from './api';
+import { api, loadNativeVideo, onAppEvent, type AppEvent, type AppState, type FreeUpStatus, type LibraryCounts, type SafetyStatus } from './api';
+import { bytes, plural } from './format';
 
 /** Small UI signals between screens: the phone's Albums header asks the Albums screen to open its ＋ menu. */
 export const ui = $state({ albumsMenu: 0 });
@@ -48,6 +49,8 @@ export const app = $state({
   syncing: [] as string[],
   syncError: '',
   online: 0,
+  /** The Free up space run going on in the background (it goes on whichever screen is open). */
+  freeUp: null as FreeUpStatus | null,
   toast: '',
 });
 
@@ -98,6 +101,7 @@ export async function refreshState() {
     app.backup_status = await api.safetyStatus().catch(() => null);
     refreshAlbums().catch(() => {});
     app.archive = await api.archiveImportStatus().catch(() => null);
+    app.freeUp = await api.freeUpStatus().catch(() => null);
   }
 }
 
@@ -196,6 +200,16 @@ function handle(e: AppEvent) {
       const { done, total } = e.ImportProgress;
       // The photos it brings in send their own LibraryChanged.
       app.importProgress = done >= total ? null : { done, total };
+    } else if ('FreeUp' in e) {
+      const s = e.FreeUp.status;
+      const was = app.freeUp?.state;
+      app.freeUp = s;
+      if (was === 'running' && s.state === 'done' && s.report) {
+        const r = s.report;
+        toast(r.photos ? `Freed ${bytes(r.bytes)} from ${plural(r.photos, 'photo')}` : 'Nothing was freed');
+      } else if (was === 'running' && s.state === 'failed') {
+        toast(s.error ?? 'Free up space stopped');
+      }
     } else if ('Safety' in e) {
       app.backup_status = e.Safety.status;
     } else if ('SharedChanged' in e) {

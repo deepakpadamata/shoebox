@@ -23,6 +23,7 @@ import type { DeviceInfo } from '../bindings/DeviceInfo';
 import type { DeviceStorageInfo } from '../bindings/DeviceStorageInfo';
 import type { ExportReport } from '../bindings/ExportReport';
 import type { FreeUpReport } from '../bindings/FreeUpReport';
+import type { FreeUpStatus } from '../bindings/FreeUpStatus';
 import type { Health } from '../bindings/Health';
 import type { SafetyStatus } from '../bindings/SafetyStatus';
 import type { ImportSummary } from '../bindings/ImportSummary';
@@ -54,7 +55,7 @@ import type { WebLinksInfo } from '../bindings/WebLinksInfo';
 
 export type {
   AboutInfo, AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
-  AlbumInfo, AppEvent, BackupFolder, BackupPolicy, BackupPreview, BackupScope, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, Health, SafetyStatus, ImportSummary, ArchiveImportInfo, ArchivePlanInfo,
+  AlbumInfo, AppEvent, BackupFolder, BackupPolicy, BackupPreview, BackupScope, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, FreeUpStatus, Health, SafetyStatus, ImportSummary, ArchiveImportInfo, ArchivePlanInfo,
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, FaceOut, PeopleList, PersonCard, SearchChip, SearchIndexer, SearchPage, SearchStatus, SearchSuggestion, Settings, TransferItem, Transfers, WebLinkCheck, WebLinkInfo, WebLinksInfo,
 };
 
@@ -230,6 +231,9 @@ export const api = {
   health: () => call<Health>('health'),
   safetyStatus: () => call<SafetyStatus>('safety_status'),
   freeUpSpace: (dry_run: boolean) => call<FreeUpReport>('free_up_space', { dry_run }),
+  /** Start a real Free up run in the background (all it can, or only `ids`); progress comes as `FreeUp` events. */
+  startFreeUp: (ids?: string[]) => call<FreeUpStatus>('start_free_up', ids ? { ids } : {}),
+  freeUpStatus: () => call<FreeUpStatus>('free_up_status'),
   freePhotos: (ids: string[], dry_run: boolean) => call<FreeUpReport>('free_photos', { ids, dry_run }),
   settings: () => call<Settings>('settings'),
   setKeepRules: (recent_days: number, favorites: boolean) => call<{}>('set_keep_rules', { recent_days, favorites }),

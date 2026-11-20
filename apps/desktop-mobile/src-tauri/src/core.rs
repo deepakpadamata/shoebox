@@ -281,6 +281,17 @@ pub struct AppCore {
     /// was asked for while it ran.
     pub(crate) auto_save: tokio::sync::Mutex<()>,
     pub(crate) auto_save_again: std::sync::atomic::AtomicBool,
+    /// The Free up space run going on in the background, and how the last one ended.
+    free_up: Mutex<FreeUpRun>,
+}
+
+#[derive(Default)]
+struct FreeUpRun {
+    task: Option<tokio::task::JoinHandle<()>>,
+    done: u32,
+    total: u32,
+    report: Option<FreeUpReport>,
+    error: Option<String>,
 }
 
 #[derive(Default)]
@@ -295,6 +306,9 @@ struct ArchiveRun {
     error: Option<String>,
     report: Option<crate::types::ArchiveReportInfo>,
 }
+
+/// Store changes closer together than this reach the UI as one event (see `forward_library_changes`).
+const CHANGE_COALESCE: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// Rebuilt at most this often: the Devices screen asks every second or two.
 const TRANSFER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
@@ -392,6 +406,7 @@ impl AppCore {
             backup_running: tokio::sync::Mutex::new(()),
             transfer_cache: tokio::sync::Mutex::new(TransferCache::default()),
             archive_import: Mutex::new(ArchiveRun::default()),
+            free_up: Mutex::new(FreeUpRun::default()),
             seen: Mutex::new(SeenBook::default()),
             safety_sent: Mutex::new(None),
             auto_save: tokio::sync::Mutex::new(()),
@@ -685,26 +700,63 @@ impl AppCore {
     fn forward_library_changes(self: &Arc<Self>, ln: &LibraryNode<Library>) {
         let weak = Arc::downgrade(self);
         let mut changes = ln.store().subscribe();
-        // Screens are told what kind changed, so a fetch that only moves holdings does not reload
-        // the photo list; index, people and sync-progress changes have their own status calls and
-        // send nothing.
+        // A run that touches many photos (free up, a fetch, a sync) changes the store many times a
+        // second, and screens refetch on each event: the first change of each kind goes out at
+        // once, the rest of a burst as one more at its end ([`CHANGE_COALESCE`]). Screens are told
+        // what kind changed, so a fetch that only moves holdings does not reload the photo list;
+        // index, people and sync-progress changes have their own status calls and send nothing.
         tokio::spawn(async move {
+            use futures::StreamExt;
             use shoebox_core::store::Change;
-            while let Some(change) = futures::StreamExt::next(&mut changes).await {
-                let event = match change {
-                    Change::PhotoUpserted(_)
-                    | Change::PhotoDeleted(_)
-                    | Change::MotionChanged(_)
-                    | Change::SettingChanged(_) => AppEvent::LibraryChanged,
-                    Change::AlbumChanged(_) => AppEvent::AlbumsChanged,
-                    Change::HoldingsChanged { .. } => AppEvent::HoldingsChanged,
-                    Change::DeviceListChanged => AppEvent::DevicesChanged,
-                    Change::IndexChanged
-                    | Change::PeopleChanged
-                    | Change::RemoteSyncProgress { .. } => continue,
-                };
+            const KINDS: [AppEvent; 4] = [
+                AppEvent::LibraryChanged,
+                AppEvent::AlbumsChanged,
+                AppEvent::HoldingsChanged,
+                AppEvent::DevicesChanged,
+            ];
+            let kind = |c: &Change| match c {
+                Change::PhotoUpserted(_)
+                | Change::PhotoDeleted(_)
+                | Change::MotionChanged(_)
+                | Change::SettingChanged(_) => Some(0),
+                Change::AlbumChanged(_) => Some(1),
+                Change::HoldingsChanged { .. } => Some(2),
+                Change::DeviceListChanged => Some(3),
+                Change::IndexChanged | Change::PeopleChanged | Change::RemoteSyncProgress { .. } => {
+                    None
+                }
+            };
+            while let Some(first) = changes.next().await {
+                let Some(k) = kind(&first) else { continue };
                 let Some(core) = weak.upgrade() else { break };
-                core.emit(event);
+                core.emit(KINDS[k].clone());
+                drop(core);
+                let mut pending = [false; 4];
+                let deadline = tokio::time::Instant::now() + CHANGE_COALESCE;
+                let mut ended = false;
+                loop {
+                    match tokio::time::timeout_at(deadline, changes.next()).await {
+                        Ok(Some(c)) => {
+                            if let Some(k) = kind(&c) {
+                                pending[k] = true;
+                            }
+                        }
+                        Ok(None) => {
+                            ended = true;
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                let Some(core) = weak.upgrade() else { break };
+                for (k, p) in pending.iter().enumerate() {
+                    if *p {
+                        core.emit(KINDS[k].clone());
+                    }
+                }
+                if ended {
+                    break;
+                }
             }
         });
     }
@@ -2238,6 +2290,96 @@ impl AppCore {
         let ln = self.ln().await?;
         let r = ln.free_up_space(dry_run).await?;
         self.finish_free(r, 0, dry_run).await
+    }
+
+    /// Start a real Free up space run in the background and return at once: it can take a
+    /// while (each photo's preview is made sure of first), and the person should be free to go
+    /// on using the app. Progress and the result come as [`AppEvent::FreeUp`]; the state is also
+    /// in [`AppCore::free_up_status`].
+    ///
+    /// With `ids`, only those photos ("Free up on this device", as [`AppCore::free_photos`]).
+    pub async fn start_free_up(self: &Arc<Self>, ids: Option<&[String]>) -> Result<FreeUpStatus> {
+        let ln = self.ln().await?;
+        let chosen: Option<Vec<Blake3Hash>> = ids
+            .map(|ids| ids.iter().map(|s| parse_hash(s)).collect::<Result<_>>())
+            .transpose()?;
+        let weak = Arc::downgrade(self);
+        {
+            // Held across the spawn so a run that ends at once cannot be overwritten below.
+            let mut run = self.free_up.lock().unwrap();
+            if run.task.as_ref().is_some_and(|t| !t.is_finished()) {
+                return Ok(Self::free_up_info(&run));
+            }
+            *run = FreeUpRun::default();
+            let task = tokio::spawn(async move {
+                let progress_core = weak.clone();
+                let progress = move |done: usize, total: usize| {
+                    let Some(core) = progress_core.upgrade() else {
+                        return;
+                    };
+                    let status = {
+                        let mut run = core.free_up.lock().unwrap();
+                        run.done = done as u32;
+                        run.total = total as u32;
+                        Self::free_up_info(&run)
+                    };
+                    core.emit(AppEvent::FreeUp { status });
+                };
+                let (result, asked) = match &chosen {
+                    Some(ids) => (
+                        ln.free_photos_reporting(ids, false, &progress).await,
+                        ids.len(),
+                    ),
+                    None => (ln.free_up_space_reporting(&progress).await, 0),
+                };
+                let Some(core) = weak.upgrade() else { return };
+                let result = match result {
+                    Ok(r) => {
+                        let kept = asked.saturating_sub(r.photos.len()) as u32;
+                        core.finish_free(r, kept, false).await
+                    }
+                    Err(e) => Err(e),
+                };
+                let status = {
+                    let mut run = core.free_up.lock().unwrap();
+                    run.task = None;
+                    match result {
+                        Ok(r) => run.report = Some(r),
+                        Err(e) => run.error = Some(crate::commands::user_message(&e)),
+                    }
+                    Self::free_up_info(&run)
+                };
+                core.emit(AppEvent::FreeUp { status });
+                core.emit(AppEvent::LibraryChanged);
+            });
+            run.task = Some(task);
+        }
+        Ok(self.free_up_status())
+    }
+
+    /// Whether a Free up space run is going on, and how the last one ended.
+    pub fn free_up_status(&self) -> FreeUpStatus {
+        Self::free_up_info(&self.free_up.lock().unwrap())
+    }
+
+    fn free_up_info(run: &FreeUpRun) -> FreeUpStatus {
+        let running = run.task.as_ref().is_some_and(|t| !t.is_finished());
+        let state = if running {
+            "running"
+        } else if run.error.is_some() {
+            "failed"
+        } else if run.report.is_some() {
+            "done"
+        } else {
+            "idle"
+        };
+        FreeUpStatus {
+            state: state.into(),
+            done: run.done,
+            total: run.total,
+            report: run.report.clone(),
+            error: run.error.clone(),
+        }
     }
 
     /// "Free up on this device" for chosen photos (the opposite of Keep on this device): as Free

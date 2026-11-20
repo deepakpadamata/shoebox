@@ -90,8 +90,9 @@ impl<L: LibraryStore> LibraryNode<L> {
         }
         let original = blobs.get(&rec.original.hash).await?;
         let mime = rec.preview.mime.clone();
+        let original_mime = rec.original.mime.clone();
         let made = tokio::task::spawn_blocking(move || {
-            shoebox_media::remake_preview(&original, &mime)
+            shoebox_media::remake_preview(&original, &original_mime, &mime)
         })
         .await?;
         let bytes = match made {
@@ -216,8 +217,9 @@ impl<L: LibraryStore> LibraryNode<L> {
     async fn convert_preview(&self, rec: &PhotoRecord) -> Result<bool> {
         let blobs = self.node().blobs();
         let original = blobs.get(&rec.original.hash).await?;
+        let original_mime = rec.original.mime.clone();
         let made = tokio::task::spawn_blocking(move || {
-            shoebox_media::remake_preview(&original, AVIF)
+            shoebox_media::remake_preview(&original, &original_mime, AVIF)
         })
         .await?;
         let bytes = match made {

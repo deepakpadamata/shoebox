@@ -116,7 +116,7 @@ async fn a_jpeg_preview_is_converted_to_avif_once_and_every_device_takes_it() {
     // the original held by both too.
     let bytes = std::fs::read(sample()).unwrap();
     let a = shoebox_media::analyze(&sample()).unwrap();
-    let jpeg = shoebox_media::remake_preview(&bytes, "image/jpeg").unwrap();
+    let jpeg = shoebox_media::remake_preview(&bytes, "image/jpeg", "image/jpeg").unwrap();
     let thumb = a.thumb.unwrap().bytes;
     let mut refs = vec![];
     for n in [phone, keeper] {
@@ -167,7 +167,7 @@ async fn a_jpeg_preview_is_converted_to_avif_once_and_every_device_takes_it() {
     let rec = keeper.store().photo(&a.hash).await.unwrap().unwrap();
     assert_eq!(rec.preview.mime, "image/avif");
     assert!(rec.preview.size < jpeg.len() as u64, "{} vs {}", rec.preview.size, jpeg.len());
-    let avif = shoebox_media::remake_preview(&bytes, "image/avif").unwrap();
+    let avif = shoebox_media::remake_preview(&bytes, "image/jpeg", "image/avif").unwrap();
     assert_eq!(
         rec.preview.hash,
         shoebox_core::Blake3Hash::of_bytes(&avif),

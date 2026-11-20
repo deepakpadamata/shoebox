@@ -34,7 +34,7 @@ pub use strip::{strip_location, StripError, Stripped};
 /// The picture in an image file (a preview, or an original shown as it is), at most `max_edge`
 /// px on its long side and upright (EXIF orientation applied), as a viewer shows it.
 pub fn decode_upright(bytes: &[u8], max_edge: u32) -> Result<image::DynamicImage, AnalyzeError> {
-    let (image, orientation) = decode_with_orientation(bytes)?;
+    let (image, orientation) = decode_with_orientation(bytes, None)?;
     Ok(render::upright(image, orientation, max_edge))
 }
 
@@ -42,20 +42,31 @@ pub fn decode_upright(bytes: &[u8], max_edge: u32) -> Result<image::DynamicImage
 /// the upright picture) in an image file: a preview, or an original shown as it is. A phone shows
 /// faces this way instead of handing its webview whole originals (S1-19).
 pub fn face_crop(bytes: &[u8], rect: [f32; 4], size: u32) -> Result<Rendition, AnalyzeError> {
-    let (image, orientation) = decode_with_orientation(bytes)?;
+    let (image, orientation) = decode_with_orientation(bytes, None)?;
     render::face_crop(image, orientation, rect, size)
 }
 
-/// The preview of a still picture, made again from its original in the format its record names
-/// (`mime`: AVIF now, JPEG for photos imported before): the same bytes the import made (same
-/// decoder, same resize, same encoder), so the preview's hash in the library still matches.
-pub fn remake_preview(bytes: &[u8], mime: &str) -> Result<Vec<u8>, AnalyzeError> {
-    let (image, orientation) = decode_with_orientation(bytes)?;
+/// The preview of a still picture, made again from its original (whose record says it is
+/// `original_mime`) in the format its record names (`mime`: AVIF now, JPEG for photos imported
+/// before): the same bytes the import made (same decoder, same resize, same encoder), so the
+/// preview's hash in the library still matches. The original's type matters for camera raw
+/// files: they start like TIFFs, and the import read the preview embedded in them.
+pub fn remake_preview(
+    bytes: &[u8],
+    original_mime: &str,
+    mime: &str,
+) -> Result<Vec<u8>, AnalyzeError> {
+    let raw = (original_mime == detect::Format::Raw.mime()).then_some("dng");
+    let (image, orientation) = decode_with_orientation(bytes, raw)?;
     Ok(render::preview_as(image, orientation, mime)?.bytes)
 }
 
-fn decode_with_orientation(bytes: &[u8]) -> Result<(image::DynamicImage, u16), AnalyzeError> {
-    let format = detect::sniff(bytes, None);
+/// `ext`: the file's extension when known, which tells a camera raw file from a TIFF.
+fn decode_with_orientation(
+    bytes: &[u8],
+    ext: Option<&str>,
+) -> Result<(image::DynamicImage, u16), AnalyzeError> {
+    let format = detect::sniff(bytes, ext);
     decode_picture(bytes, &format, || exif_data::read(bytes).orientation)
 }
 

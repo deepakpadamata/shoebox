@@ -192,8 +192,15 @@ fn raw_files_use_the_embedded_jpeg_preview() {
     );
     assert_eq!(r.mime, "image/x-adobe-dng");
     assert_eq!(r.exif.camera_make.as_deref(), Some("Shoebox"));
-    assert_eq!(avif_size(&r.preview.unwrap().bytes), (320, 240));
+    let preview = r.preview.unwrap();
+    assert_eq!(avif_size(&preview.bytes), (320, 240));
     assert_eq!(decode(&r.thumb.unwrap().bytes).dimensions(), (256, 256));
+    // Made again from the original (old previews are converted, A-150): the record's type, not
+    // the TIFF-like bytes, says where the picture is.
+    assert_eq!(
+        shoebox_media::remake_preview(&raw, &r.mime, "image/avif").unwrap(),
+        preview.bytes
+    );
 
     // A RAW without any embedded preview is reported, not guessed at.
     let bare = write(
@@ -513,17 +520,17 @@ fn previews_are_made_again_byte_for_byte_in_either_format() {
     let original = render_jpeg(&spec(3000, 2000, 6), 7);
     let r = analyze(&write(dir.path(), "p.jpg", &original)).unwrap();
     let preview = r.preview.unwrap();
-    let again = shoebox_media::remake_preview(&original, "image/avif").unwrap();
+    let again = shoebox_media::remake_preview(&original, "image/jpeg", "image/avif").unwrap();
     assert_eq!(again, preview.bytes, "the same AVIF bytes");
 
-    let jpeg = shoebox_media::remake_preview(&original, "image/jpeg").unwrap();
+    let jpeg = shoebox_media::remake_preview(&original, "image/jpeg", "image/jpeg").unwrap();
     assert_eq!(decode(&jpeg).dimensions(), (1365, 2048), "the old JPEG preview, upright");
     assert_eq!(
-        shoebox_media::remake_preview(&original, "image/jpeg").unwrap(),
+        shoebox_media::remake_preview(&original, "image/jpeg", "image/jpeg").unwrap(),
         jpeg
     );
     assert!(matches!(
-        shoebox_media::remake_preview(&original, "image/webp"),
+        shoebox_media::remake_preview(&original, "image/jpeg", "image/webp"),
         Err(AnalyzeError::Unsupported(_))
     ));
 }

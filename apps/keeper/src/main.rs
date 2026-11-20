@@ -125,6 +125,31 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Import a Google Takeout or an iCloud Photos export into the library: its zip or tgz parts,
+    /// or the folder they unpack to. Shows what it will do and asks first, then runs inside the
+    /// daemon (it goes on if this command exits, and continues after a restart). Without files:
+    /// where the import stands.
+    Import {
+        /// The export's parts (all of them at once) or its unpacked folder.
+        paths: Vec<PathBuf>,
+        /// Start without asking.
+        #[arg(long)]
+        yes: bool,
+        /// Start it and return instead of showing its progress.
+        #[arg(long)]
+        detach: bool,
+        /// Only show what it would do.
+        #[arg(long, conflicts_with_all = ["yes", "detach"])]
+        dry_run: bool,
+        /// Stop the running import (what it did stays; the same import again continues it).
+        #[arg(long, conflicts_with = "paths")]
+        stop: bool,
+        /// Drop an unfinished import and the last report.
+        #[arg(long, conflicts_with_all = ["paths", "stop"])]
+        forget: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Stop the running daemon.
     Stop,
     /// Security alerts (a new admin, a replaced recovery phrase): list them, or `ack` to clear.
@@ -270,6 +295,121 @@ fn ask_phrase(prompt: &str) -> Result<String> {
         bail!("no recovery phrase given");
     }
     Ok(line)
+}
+
+/// `shoebox-keeper import`: plan, ask, start, and follow the import until it ends.
+#[allow(clippy::too_many_arguments)]
+async fn import_cmd(
+    storage: &std::path::Path,
+    paths: Vec<PathBuf>,
+    yes: bool,
+    detach: bool,
+    dry_run: bool,
+    stop: bool,
+    forget: bool,
+    json_out: bool,
+) -> Result<()> {
+    use std::io::IsTerminal;
+    let call = |request: Value| async move { client(storage).await?.call_raw(request).await };
+    if stop {
+        let d = call(json!({"cmd":"import","action":"stop"})).await?;
+        println!(
+            "{}",
+            if d["stopped"] == true {
+                "Stopped. What it imported stays; the same import again continues it."
+            } else {
+                "No import is running."
+            }
+        );
+        return Ok(());
+    }
+    if forget {
+        call(json!({"cmd":"import","action":"forget"})).await?;
+        println!("Forgotten.");
+        return Ok(());
+    }
+    if paths.is_empty() {
+        let d = call(json!({"cmd":"import","action":"status"})).await?;
+        print(json_out, &d, render::import_status);
+        return Ok(());
+    }
+    // The daemon runs elsewhere (another folder, maybe another user): give it absolute paths.
+    let paths: Vec<String> = paths
+        .iter()
+        .map(|p| {
+            std::path::absolute(p)
+                .with_context(|| format!("{}", p.display()))
+                .and_then(|a| {
+                    anyhow::ensure!(a.exists(), "{} does not exist", a.display());
+                    Ok(a.to_string_lossy().into_owned())
+                })
+        })
+        .collect::<Result<_>>()?;
+    let plan = call(json!({"cmd":"import","action":"plan","paths":paths})).await?;
+    print(json_out, &plan, render::import_plan);
+    if dry_run {
+        return Ok(());
+    }
+    if plan["photos"] == 0 {
+        if !json_out {
+            println!("Nothing to import.");
+        }
+        return Ok(());
+    }
+    if !yes {
+        anyhow::ensure!(
+            std::io::stdin().is_terminal() && !json_out,
+            "add --yes to start without being asked"
+        );
+        print!("Import? [y/N] ");
+        let _ = std::io::stdout().flush();
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer)?;
+        if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+            println!("Not started.");
+            return Ok(());
+        }
+    }
+    call(json!({"cmd":"import","action":"start","paths":paths})).await?;
+    if detach {
+        if !json_out {
+            println!("Started. `shoebox-keeper import` shows how far it has got.");
+        }
+        return Ok(());
+    }
+    let tty = std::io::stdout().is_terminal() && !json_out;
+    if tty {
+        println!("Ctrl-C stops watching; the import carries on (`shoebox-keeper import --stop` stops it).");
+    }
+    let mut last = String::new();
+    let status = loop {
+        let d = call(json!({"cmd":"import","action":"status"})).await?;
+        if d["state"] != "running" {
+            break d;
+        }
+        let line = render::import_progress(&d);
+        if tty && line != last {
+            print!("\r{line}\x1b[K");
+            let _ = std::io::stdout().flush();
+            last = line;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    };
+    if tty && !last.is_empty() {
+        println!();
+    }
+    if json_out {
+        print(true, &status, render::import_status);
+    } else {
+        if let Some(e) = status["error"].as_str() {
+            println!("! {e}");
+        }
+        if let Some(r) = status.get("report").filter(|r| r.is_object()) {
+            print!("{}", render::import_report(r));
+        }
+    }
+    anyhow::ensure!(status["error"].is_null(), "the import stopped early");
+    Ok(())
 }
 
 fn print(json_out: bool, data: &Value, text: impl FnOnce(&Value) -> String) {
@@ -631,6 +771,15 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        Cmd::Import {
+            paths,
+            yes,
+            detach,
+            dry_run,
+            stop,
+            forget,
+            json,
+        } => import_cmd(&storage, paths, yes, detach, dry_run, stop, forget, json).await?,
         Cmd::Stop => {
             client(&storage)
                 .await?

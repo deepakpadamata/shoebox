@@ -917,3 +917,114 @@ async fn the_keeper_adds_a_device_with_a_pairing_string() {
     tablet.shutdown().await.ok();
     again.shutdown().await.ok();
 }
+
+/// The import's status once it is no longer running (at most a minute).
+async fn import_finished(control: &Path, what: &str) -> Value {
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let status = Client::connect(control)
+            .await
+            .unwrap()
+            .call_raw(serde_json::json!({"cmd":"import","action":"status"}))
+            .await
+            .unwrap();
+        if status["state"] != "running" {
+            assert_eq!(status["state"], "done", "{what}: {status}");
+            return status;
+        }
+        assert!(std::time::Instant::now() < end, "{what}: {status}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// `shoebox-keeper import`: the daemon plans and imports an iCloud export, and a daemon that
+/// starts with an unfinished import (here: a Google Takeout) continues it on its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_keeper_imports_exports_and_continues_an_unfinished_one_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_inode, ln) = inviter(dir.path(), &[]).await;
+    let ticket = ln
+        .start_pairing(Role::Keeper, Duration::from_secs(300), accept())
+        .await
+        .unwrap();
+    let d = Daemon::start(opts(dir.path())).await.unwrap();
+    let mut c = Client::connect(d.control_path()).await.unwrap();
+    c.pair(&ticket.to_string(), "pi", |_| true).await.unwrap();
+
+    let exports = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/exports")
+        .canonicalize()
+        .unwrap();
+    let icloud = exports.join("icloud/iCloud Photos");
+    let err = c
+        .call_raw(serde_json::json!({"cmd":"import","action":"plan","paths":["relative/path"]}))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("absolute"), "{err}");
+
+    let plan = c
+        .call_raw(serde_json::json!({"cmd":"import","action":"plan","paths":[icloud]}))
+        .await
+        .unwrap();
+    assert_eq!(plan["source"], "icloud", "{plan}");
+    assert_eq!(
+        plan["missing"],
+        serde_json::json!(["IMG_0011.JPG"]),
+        "{plan}"
+    );
+    assert_eq!(plan["trashed"], 1, "{plan}");
+    let photos = plan["photos"].as_u64().unwrap();
+    assert!(photos > 0, "{plan}");
+
+    c.call_raw(serde_json::json!({"cmd":"import","action":"start","paths":[icloud]}))
+        .await
+        .unwrap();
+    let status = import_finished(d.control_path(), "the import ends").await;
+    let report = &status["report"];
+    assert!(report["imported"].as_u64().unwrap() > 0, "{status}");
+    assert_eq!(report["trashed"], 1, "{status}");
+    assert_eq!(report["missing"], serde_json::json!(["IMG_0011.JPG"]));
+    assert_eq!(
+        status["paths"],
+        serde_json::json!([]),
+        "nothing left to continue"
+    );
+    let s = c.status().await.unwrap();
+    let after_icloud = s["library"]["photos"].as_u64().unwrap();
+    assert!(after_icloud > 0, "{s}");
+    assert!(
+        s.get("import").is_none(),
+        "a finished import is not in status: {s}"
+    );
+    d.shutdown().await.unwrap();
+
+    // As if the daemon stopped half way through importing a Takeout.
+    let takeout = exports.join("google-takeout");
+    std::fs::write(
+        dir.path().join("keeper/import.json"),
+        serde_json::to_vec(&serde_json::json!({"paths":[takeout]})).unwrap(),
+    )
+    .unwrap();
+    let d = Daemon::start(opts(dir.path())).await.unwrap();
+    let status = import_finished(
+        d.control_path(),
+        "the restarted daemon finishes the Takeout",
+    )
+    .await;
+    assert!(
+        status["report"]["imported"].as_u64().unwrap() > 0,
+        "{status}"
+    );
+    assert!(!dir.path().join("keeper/import.json").exists());
+    let s = Client::connect(d.control_path())
+        .await
+        .unwrap()
+        .status()
+        .await
+        .unwrap();
+    assert!(
+        s["library"]["photos"].as_u64().unwrap() > after_icloud,
+        "{s}"
+    );
+    d.shutdown().await.unwrap();
+}

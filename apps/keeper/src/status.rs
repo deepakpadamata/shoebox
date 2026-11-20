@@ -70,6 +70,14 @@ pub(crate) async fn report(shared: &Shared) -> Result<Value> {
     if let Some(r) = shared.update.lock().unwrap().clone() {
         out["update"] = json!({ "version": r.version, "page": r.page });
     }
+    let import = crate::import::status(&shared.import, &shared.opts.storage);
+    if import["state"] == "running" || import["state"] == "stopped" {
+        out["import"] = json!({
+            "state": import["state"],
+            "done": import["done"],
+            "total": import["total"],
+        });
+    }
     let guard = shared.library.lock().await;
     let Some(ln) = guard.as_ref() else {
         return Ok(out);

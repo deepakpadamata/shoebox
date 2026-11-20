@@ -111,6 +111,8 @@ pub(crate) struct Shared {
     pub shutdown: watch::Sender<bool>,
     /// A newer release the last check found (`status` mentions it).
     pub update: std::sync::Mutex<Option<shoebox_node::update::Release>>,
+    /// The export import running or run last (`shoebox-keeper import`).
+    pub import: crate::import::Shared,
 }
 
 pub struct Daemon {
@@ -264,6 +266,7 @@ impl Daemon {
             albums: Mutex::new(None),
             shutdown,
             update: std::sync::Mutex::new(None),
+            import: Default::default(),
         });
         if opts.update_feed != shoebox_node::update::PLACEHOLDER_FEED {
             // Twice a day: a keeper runs for months, and its person only sees `status`.
@@ -290,6 +293,9 @@ impl Daemon {
                 .map_err(|e| anyhow!("corrupt ticket in keeper.json: {e}"))?;
             shared.attach(ticket).await?;
             info!("rejoined the library");
+            if let Some(ln) = shared.library.lock().await.clone() {
+                crate::import::resume(&shared.import, &shared.opts.storage, ln);
+            }
         } else {
             info!("not paired yet: run `shoebox-keeper pair <ticket>`");
         }

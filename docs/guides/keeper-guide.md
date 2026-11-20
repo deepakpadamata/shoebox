@@ -68,11 +68,30 @@ back up the 24-word recovery phrase separately.
 | `devices replace-phrase` | replace the recovery phrase after it may have been seen; prints the new 24 words once |
 | `address` | the link another device needs to recover through this keeper |
 | `album list` / `album join <invitation>` / `album keep <id>` / `album drop <id>` | shared albums the keeper is in; `keep` makes it hold every original of an album |
+| `import <parts or folder>…` | import a Google Takeout or an iCloud Photos export that is on the keeper's disk (see below) |
 | `search "<query>" [--limit N] [--json]` | search the library on the keeper itself |
 | `index [status\|pause\|resume\|compact] [--json]` | indexing for search: how much is covered, by whom, how long is left; pause or resume this keeper's indexing; compact the index shards now |
 | `stop` | shut the daemon down cleanly |
 
 Full reference: `docs/keeper-cli.md`.
+
+## Importing a Google Takeout or an iCloud export
+
+A big export is easiest to import on the keeper: copy the zip (or tgz) files to its disk, then give them all at once:
+
+```
+shoebox-keeper import /srv/exports/takeout-*.zip
+```
+
+It shows what it found (how many photos, the albums, anything the export lists that is not in these files, the space
+needed) and asks before starting. The import runs inside the keeper's daemon: you can close the terminal (Ctrl-C only
+stops watching), and if the keeper restarts it carries on by itself. `shoebox-keeper import` on its own shows how far it
+has got, or what the last import did; `status` shows it too. `import --stop` stops it, and the same `import` command
+later continues where it stopped; `import --forget` drops it. An unpacked folder works as well as the zips.
+
+The daemon reads the files, so they must be readable by the user the service runs as (with `service install --system`,
+that is the service's user, not you). Imported photos sync to your other devices like any others; the export's files
+are copied into the keeper's storage, so you can delete them afterwards.
 
 ## Search indexing
 

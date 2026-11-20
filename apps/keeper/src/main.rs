@@ -8,9 +8,10 @@ use shoebox_node::RelaySetting;
 use std::io::Write;
 use std::path::PathBuf;
 
-// Diagnostic build only: jemalloc with heap profiling, configured at run time through
-// `_RJEM_MALLOC_CONF` (e.g. `prof:true,lg_prof_interval:30,prof_prefix:/path/jeprof`).
-#[cfg(feature = "jemalloc-prof")]
+// jemalloc on musl (the Linux release): musl's allocator holds on to freed memory and a keeper grew
+// without bound on it (see Cargo.toml). The `jemalloc-prof` feature also selects it, with heap
+// profiling set up at run time through `_RJEM_MALLOC_CONF`.
+#[cfg(any(target_env = "musl", feature = "jemalloc-prof"))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 

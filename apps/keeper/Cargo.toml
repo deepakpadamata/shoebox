@@ -33,11 +33,18 @@ tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 futures.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
-tikv-jemallocator = { version = "0.6", optional = true, features = ["profiling"] }
+tikv-jemallocator = { version = "0.6", optional = true }
+
+# The Linux release is static musl, and musl's allocator keeps what the indexer and the blob store free:
+# a keeper on it reached 19 GB in a day, 24,000 small mappings and never shrinking. On jemalloc the same
+# keeper stayed under 900 MB for hours and gave memory back.
+[target.'cfg(target_env = "musl")'.dependencies]
+tikv-jemallocator = "0.6"
 
 [features]
-# Diagnostic build: jemalloc with heap profiling (finding where a long-running keeper's memory goes).
-jemalloc-prof = ["dep:tikv-jemallocator"]
+# Diagnostic build: jemalloc with heap profiling (finding where a long-running keeper's memory goes). Set up
+# through `_RJEM_MALLOC_CONF`; glibc builds only, since active profiling crashes the static musl binary.
+jemalloc-prof = ["dep:tikv-jemallocator", "tikv-jemallocator/profiling"]
 
 [dev-dependencies]
 tempfile.workspace = true

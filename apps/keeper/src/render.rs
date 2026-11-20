@@ -318,7 +318,6 @@ pub fn import_plan(v: &Value) -> String {
             "These files do not look like a Google Photos or iCloud export: their photos and videos import as plain files.\n",
         ),
     }
-    let from = export_name(v).unwrap_or("the export");
     let _ = writeln!(
         out,
         "  {:<24}{}{}",
@@ -343,16 +342,16 @@ pub fn import_plan(v: &Value) -> String {
     for (k, label, note) in [
         (
             "with_export_data",
-            "with export data".into(),
+            "with export data",
             " (dates, places, favourites)",
         ),
-        ("trashed", "deleted, left out".into(), ""),
+        ("trashed", "deleted, left out", ""),
         (
             "unmatched",
-            format!("no data from {from}"),
+            "without export data",
             " (they keep what the file says)",
         ),
-        ("not_photos", "not photos, skipped".into(), ""),
+        ("not_photos", "not photos, skipped", ""),
     ] {
         if n(v, k) > 0 {
             let _ = writeln!(out, "  {label:<24}{}{note}", n(v, k));

@@ -107,9 +107,19 @@ struct Gate {
     seen: Mutex<HashMap<[u8; 16], (Instant, u32)>>,
 }
 
+/// Share ids the gate counts requests for at once. Ids come from the request before anything
+/// checks them, so without a bound a peer could grow the map with made-up ones.
+const GATE_IDS: usize = 4096;
+
 impl Gate {
     fn allow(&self, id: [u8; 16]) -> bool {
         let mut seen = self.seen.lock().unwrap();
+        if !seen.contains_key(&id) && seen.len() >= GATE_IDS {
+            seen.retain(|_, (since, _)| since.elapsed() <= Duration::from_secs(60));
+            if seen.len() >= GATE_IDS {
+                return false;
+            }
+        }
         let e = seen.entry(id).or_insert((Instant::now(), 0));
         if e.0.elapsed() > Duration::from_secs(60) {
             *e = (Instant::now(), 0);
@@ -432,5 +442,32 @@ impl<L: LibraryStore> LibraryNode<L> {
         live_dir(&self.node().config().data_dir, share_id)
             .join(META)
             .is_file()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn made_up_share_ids_cannot_grow_the_gate_without_bound() {
+        let gate = Gate {
+            at_once: Arc::new(tokio::sync::Semaphore::new(1)),
+            seen: Mutex::new(HashMap::new()),
+        };
+        for n in 0..GATE_IDS as u32 {
+            let mut id = [0u8; 16];
+            id[..4].copy_from_slice(&n.to_le_bytes());
+            assert!(gate.allow(id));
+        }
+        assert!(
+            !gate.allow([0xff; 16]),
+            "a new id waits while the gate is full"
+        );
+        assert!(
+            gate.allow([0; 16]),
+            "an id already counted still gets through"
+        );
+        assert_eq!(gate.seen.lock().unwrap().len(), GATE_IDS);
     }
 }

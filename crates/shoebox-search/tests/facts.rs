@@ -5,7 +5,7 @@ use shoebox_core::ids::{Blake3Hash, EndpointId, Timestamp};
 use shoebox_core::merge::Lww;
 use shoebox_core::model::{AlbumId, BlobRef, ExifSummary, Gps, PhotoId, PhotoRecord};
 use shoebox_search::calendar::{Date, Zone};
-use shoebox_search::facts::{decode, encode, FactsIndex, Field, PhotoFacts};
+use shoebox_search::facts::{decode, encode, encode_index, FactsIndex, Field, PhotoFacts};
 use shoebox_search::query::{parse, ParseContext};
 use std::time::Instant;
 
@@ -253,6 +253,12 @@ fn paging() {
 fn persists_and_rejects_damage() {
     let ix = library();
     let bytes = encode(&ix.snapshot());
+    assert!(!ix.snapshot().albums.is_empty() && !ix.snapshot().extra.is_empty());
+    assert_eq!(
+        encode_index(&ix),
+        bytes,
+        "written without a copy, the same file"
+    );
     let back = FactsIndex::from_snapshot(decode(&bytes).expect("decodes"));
     assert_eq!(back.snapshot(), ix.snapshot());
     assert_eq!(

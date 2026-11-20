@@ -301,12 +301,21 @@ const TRANSFER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5
 
 #[derive(Default)]
 struct TransferCache {
-    blobs: HashMap<Blake3Hash, (Blake3Hash, BlobKind)>,
+    /// Blobs that were moving when last asked → their photo and kind (none: not a photo's).
+    /// Only those: a map of every blob in the library was tens of MB kept for good.
+    blobs: HashMap<Blake3Hash, Option<(Blake3Hash, BlobKind)>>,
     blobs_at: Option<std::time::Instant>,
     /// The fetch queue: blob, kind and size.
     waiting: Vec<(Blake3Hash, BlobKind, u64)>,
     waiting_at: Option<std::time::Instant>,
+    /// When the Devices screen last asked; the cache is emptied once it stops.
+    used_at: Option<std::time::Instant>,
+    /// A task is waiting to empty the cache.
+    sweeping: bool,
 }
+
+/// The transfer cache is emptied when nothing asked for this long.
+const TRANSFER_CACHE_IDLE: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl AppCore {
     /// Open (creating on first use) the app's data directory and start the node. If this device
@@ -1855,31 +1864,59 @@ impl AppCore {
     }
 
     /// What is moving right now and what this device still has to fetch (Devices screen).
-    pub async fn transfers(&self) -> Result<crate::types::Transfers> {
+    pub async fn transfers(self: &Arc<Self>) -> Result<crate::types::Transfers> {
         use crate::types::{TransferItem, Transfers};
         let ln = self.ln().await?;
         let snap = self.node.transfers();
         let mut cache = self.transfer_cache.lock().await;
         let stale =
             |at: Option<std::time::Instant>| at.is_none_or(|t| t.elapsed() > TRANSFER_CACHE_TTL);
-        let unknown = snap
+        cache.used_at = Some(std::time::Instant::now());
+        if !cache.sweeping {
+            cache.sweeping = true;
+            let weak = Arc::downgrade(self);
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(TRANSFER_CACHE_IDLE).await;
+                    let Some(core) = weak.upgrade() else { break };
+                    let mut cache = core.transfer_cache.lock().await;
+                    if cache
+                        .used_at
+                        .is_none_or(|t| t.elapsed() >= TRANSFER_CACHE_IDLE)
+                    {
+                        *cache = TransferCache::default();
+                        break;
+                    }
+                }
+            });
+        }
+        let moving: HashSet<Blake3Hash> = snap
             .downloads
             .iter()
             .chain(&snap.uploads)
-            .any(|t| !cache.blobs.contains_key(&t.hash));
-        if stale(cache.blobs_at)
+            .map(|t| t.hash)
+            .collect();
+        let unknown = moving.iter().any(|h| !cache.blobs.contains_key(h));
+        if (stale(cache.blobs_at) && !moving.is_empty())
             || (unknown && cache.blobs_at.is_none_or(|t| t.elapsed().as_secs() >= 1))
         {
-            let mut blobs = HashMap::new();
+            let mut blobs: HashMap<Blake3Hash, Option<(Blake3Hash, BlobKind)>> =
+                moving.iter().map(|h| (*h, None)).collect();
             for rec in ln
                 .store()
                 .photos_by_time(TimeRange::ALL, Page::all())
                 .await?
             {
-                blobs.insert(rec.thumb.hash, (rec.id, BlobKind::Thumb));
-                blobs.insert(rec.preview.hash, (rec.id, BlobKind::Preview));
                 // Last: a video's thumbnail and preview are its original.
-                blobs.insert(rec.original.hash, (rec.id, BlobKind::Original));
+                for (h, kind) in [
+                    (rec.thumb.hash, BlobKind::Thumb),
+                    (rec.preview.hash, BlobKind::Preview),
+                    (rec.original.hash, BlobKind::Original),
+                ] {
+                    if let Some(slot) = blobs.get_mut(&h) {
+                        *slot = Some((rec.id, kind));
+                    }
+                }
             }
             cache.blobs = blobs;
             cache.blobs_at = Some(std::time::Instant::now());
@@ -1894,10 +1931,10 @@ impl AppCore {
             cache.waiting_at = Some(std::time::Instant::now());
         }
         let item = |t: &shoebox_node::Transfer| {
-            let known = cache.blobs.get(&t.hash);
+            let known = cache.blobs.get(&t.hash).copied().flatten();
             TransferItem {
                 photo: known.map(|(p, _)| p.to_string()),
-                kind: known.map_or("other", |(_, k)| kind_name(*k)).into(),
+                kind: known.map_or("other", |(_, k)| kind_name(k)).into(),
                 peer: t.peer.map(|p| hex::encode(p.0)),
                 size: t.size.map(|s| s as f64),
                 done: t.done as f64,

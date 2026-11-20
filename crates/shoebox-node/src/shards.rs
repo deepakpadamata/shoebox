@@ -140,6 +140,14 @@ impl<L: LibraryStore> LibraryNode<L> {
             .into_iter()
             .map(|r| (r.blob.hash, r))
             .collect();
+        // Forget shards the library no longer lists (replaced by compaction, or removed): what
+        // was learned about them would otherwise stay for as long as the app runs.
+        self.inner
+            .shards
+            .known
+            .lock()
+            .unwrap()
+            .retain(|h, _| records.contains_key(h));
         let mut fetched: HashMap<Blake3Hash, Fetched> = HashMap::new();
         for (hash, r) in &records {
             let state = match self.shard_ids(r).await? {

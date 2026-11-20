@@ -324,7 +324,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         let bytes = {
             let guard = self.inner.search.index.lock().unwrap();
             let Some(ix) = guard.as_ref() else { return };
-            facts::encode(&ix.snapshot())
+            facts::encode_index(ix)
         };
         let dir = self.search_dir();
         let res = std::fs::create_dir_all(&dir).and_then(|_| {

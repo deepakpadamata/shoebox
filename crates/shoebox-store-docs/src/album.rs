@@ -305,6 +305,67 @@ impl DocsAlbum {
         Ok(())
     }
 
+    /// Record other devices as viewers (see [`AlbumState::record_viewer`]); needs a writer.
+    pub async fn record_viewers(
+        &self,
+        devices: &[EndpointId],
+        name: &str,
+        person: Option<shoebox_core::store::LibraryId>,
+    ) -> Result<()> {
+        let now = self.inner.clock.now_ms();
+        let mut core = self.inner.core.lock().await;
+        let mut changed = false;
+        for d in devices {
+            let effect = core.state.record_viewer(*d, name, person, now)?;
+            for t in &effect.touched {
+                if let Some(entry) = core.state.entry(t) {
+                    let bytes = encode_album_entry(&entry);
+                    core.replica
+                        .put(&album_key(&entry), bytes)
+                        .await
+                        .map_err(backend_err)?;
+                }
+            }
+            changed |= effect.changed();
+        }
+        drop(core);
+        if changed {
+            self.inner.emit();
+        }
+        Ok(())
+    }
+
+    /// The role `device` has in the album, if it has an entry.
+    pub async fn role_of(&self, device: &EndpointId) -> Option<MemberRole> {
+        self.inner.core.lock().await.state.role_of(*device)
+    }
+
+    /// The person `device` said (or a writer recorded) it belongs to.
+    pub async fn person_of(&self, device: &EndpointId) -> Option<shoebox_core::store::LibraryId> {
+        self.inner.core.lock().await.state.person_of(device)
+    }
+
+    /// Read what arrived in the replica (by a sync someone else started, say) into the album now,
+    /// rather than when the watcher gets to it.
+    pub async fn settle(&self) -> Result<()> {
+        self.inner.settle().await
+    }
+
+    /// Whether `peer` holds exactly the entries this replica holds, asked with one small request
+    /// (no sync). `Ok(None)`: the peer is reachable but does not have the album open.
+    pub async fn same_as(&self, peer: iroh::EndpointId) -> Result<Option<bool>> {
+        let (doc, node) = {
+            let core = self.inner.core.lock().await;
+            (core.replica.doc.clone(), core.replica.node().clone())
+        };
+        let mine = shoebox_node::doc_digest(&doc).await.map_err(backend_err)?;
+        let theirs = node
+            .peer_doc_digest(peer, doc.id())
+            .await
+            .map_err(|_| StoreError::Unreachable(shoebox_node::from_iroh_id(&peer)))?;
+        Ok(theirs.map(|t| t == mine))
+    }
+
     /// Members with the person each said it belongs to.
     pub async fn members_with_person(
         &self,

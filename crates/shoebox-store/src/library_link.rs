@@ -132,6 +132,7 @@ pub async fn reconcile<L: LibraryStore + 'static>(
         .filter(|d| !d.revoked && d.device != me)
         .map(|d| PeerAddr::id_only(d.device))
         .collect();
+    shared.set_siblings(peers.iter().map(|p| p.id).collect());
     for r in list.iter().filter(|r| r.left_ms.is_none()) {
         if let Err(e) = shared.adopt(r, peers.clone(), my_name).await {
             debug!(

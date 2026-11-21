@@ -413,3 +413,51 @@ async fn two_gigabyte_file_imports_by_reference_without_copying() {
     );
     node.shutdown().await.unwrap();
 }
+
+/// Collection lists every blob, so it only runs when a protection was dropped since the last
+/// pass, and every 15 intervals for what is let go otherwise (here a dropped temporary tag).
+#[tokio::test]
+async fn gc_waits_for_a_release_or_its_periodic_pass() {
+    let dir = tempfile::tempdir().unwrap();
+    let node = open(&dir, "a").await;
+    let blobs = node.blobs();
+    // Let the pass at start go by.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    // Let go without a release: nothing tells GC, so it is left until the periodic pass.
+    let tag = blobs
+        .raw()
+        .add_bytes(b"temporary".to_vec())
+        .temp_tag()
+        .await
+        .unwrap();
+    let loose = Blake3Hash(*tag.hash().as_bytes());
+    drop(tag);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        blobs.has(&loose).await.unwrap(),
+        "no pass runs without a release"
+    );
+
+    // A release brings the next pass at once, and that pass takes everything loose too.
+    let doomed = blobs
+        .add_bytes(b"doomed".to_vec(), Protection::Library)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await; // past the quiet time after adding
+    blobs.remove(&doomed).await.unwrap();
+    assert!(gone(&node, &doomed).await);
+    assert!(gone(&node, &loose).await);
+
+    // With no release at all, the periodic pass (15 × 100 ms) still comes.
+    let tag = blobs
+        .raw()
+        .add_bytes(b"temporary too".to_vec())
+        .temp_tag()
+        .await
+        .unwrap();
+    let later = Blake3Hash(*tag.hash().as_bytes());
+    drop(tag);
+    assert!(gone(&node, &later).await, "the periodic pass collects it");
+    node.shutdown().await.unwrap();
+}

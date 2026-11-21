@@ -27,6 +27,8 @@ use shoebox_core::model::AlbumId;
 use std::collections::HashSet;
 use std::ops::Range;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Why a blob is being kept.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -144,11 +146,21 @@ pub(crate) fn core_hash(h: Hash) -> Blake3Hash {
 pub struct BlobStore {
     store: FsStore,
     activity: crate::activity::Activity,
+    /// Set when a protection is dropped, so the next collection pass has something to find.
+    released: Arc<AtomicBool>,
 }
 
 impl BlobStore {
-    pub(crate) fn new(store: FsStore, activity: crate::activity::Activity) -> Self {
-        Self { store, activity }
+    pub(crate) fn new(
+        store: FsStore,
+        activity: crate::activity::Activity,
+        released: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            store,
+            activity,
+            released,
+        }
     }
 
     /// The underlying iroh-blobs store (for protocols and low-level access).
@@ -342,11 +354,15 @@ impl BlobStore {
 
     /// Drop one protection. The blob is collected once none remain.
     pub async fn unprotect(&self, hash: &Blake3Hash, why: Protection) -> Result<()> {
-        self.store
+        let removed = self
+            .store
             .tags()
             .delete(why.tag_name(hash))
             .await
             .map_err(|e| anyhow!("untagging {hash}: {e}"))?;
+        if removed > 0 {
+            self.released.store(true, Ordering::SeqCst);
+        }
         Ok(())
     }
 

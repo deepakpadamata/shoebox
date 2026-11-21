@@ -66,9 +66,9 @@ impl Default for AppOptions {
             background: true,
             update_feed: default_update_feed(),
             // Released blobs (a deleted gallery photo's reference, a copy turned into a
-            // reference) are collected on the next pass. Each pass lists every blob in the
-            // store, so this is a balance between freeing room soon and idle CPU: iroh-blobs
-            // has no public way to run one pass on demand right after a release.
+            // reference) are collected within this long. Each pass lists every blob in the
+            // store, so one only runs when something was released since the last (or every
+            // half hour, for what is let go without a release): see the node's GC callback.
             gc_interval: Some(Duration::from_secs(120)),
             model_dirs: vec![],
             search_models: true,
@@ -316,6 +316,9 @@ pub struct AppCore {
     /// was asked for while it ran.
     pub(crate) auto_save: tokio::sync::Mutex<()>,
     pub(crate) auto_save_again: std::sync::atomic::AtomicBool,
+    /// The last pass left a photo it could not fetch, so the timer tries again (starts true:
+    /// the first tick after opening makes one pass).
+    pub(crate) auto_save_left: std::sync::atomic::AtomicBool,
     /// The Free up space run going on in the background, and how the last one ended.
     free_up: Mutex<FreeUpRun>,
     /// Bumped on each event that can change [`AppCore::health`]'s numbers.
@@ -463,6 +466,7 @@ impl AppCore {
             safety_sent: Mutex::new(None),
             auto_save: tokio::sync::Mutex::new(()),
             auto_save_again: std::sync::atomic::AtomicBool::new(false),
+            auto_save_left: std::sync::atomic::AtomicBool::new(true),
         });
         core.load_seen();
         core.forward_node_events();
@@ -835,7 +839,8 @@ impl AppCore {
         let mut notices = shared.subscribe();
         tokio::spawn(async move {
             // A photo that could not be fetched yet (nobody from the album was online) is tried
-            // again now and then, as well as when the album changes.
+            // again now and then, as well as when the album changes; with nothing left over the
+            // timer does nothing.
             let mut retry = tokio::time::interval(std::time::Duration::from_secs(120));
             loop {
                 tokio::select! {
@@ -856,7 +861,9 @@ impl AppCore {
                     }
                     _ = retry.tick() => {
                         let Some(core) = weak.upgrade() else { break };
-                        core.kick_auto_save();
+                        if core.auto_save_left.load(std::sync::atomic::Ordering::SeqCst) {
+                            core.kick_auto_save();
+                        }
                     }
                 }
             }

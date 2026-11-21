@@ -185,6 +185,57 @@ pub(crate) fn newest_cover(recs: &[PhotoRecord]) -> Option<Blake3Hash> {
         .map(|r| r.id)
 }
 
+/// When the earliest and latest live photos of `recs` were taken.
+fn date_range(recs: &[PhotoRecord]) -> (Option<f64>, Option<f64>) {
+    let live = recs.iter().filter(|r| r.deleted_at.value.is_none());
+    let first = live.clone().map(|r| r.taken_at.0).min();
+    let last = live.map(|r| r.taken_at.0).max();
+    (first.map(|t| t as f64), last.map(|t| t as f64))
+}
+
+/// Library setting holding an album's description (UTF-8; empty = none).
+fn album_note_key(album: &AlbumId) -> String {
+    format!("album-note.{}", hex::encode(album.0))
+}
+
+/// Library settings holding smart albums, one per key: JSON [`SmartAlbum`]; empty = deleted.
+const SMART_PREFIX: &str = "smart-album.";
+
+#[derive(Serialize, Deserialize)]
+struct SmartAlbum {
+    name: String,
+    query: String,
+}
+
+fn smart_key(id: &str) -> Result<String> {
+    let bytes = hex::decode(id.trim())
+        .ok()
+        .filter(|b| b.len() == 16)
+        .ok_or_else(|| anyhow!("`{id}` is not a smart album id"))?;
+    Ok(format!("{SMART_PREFIX}{}", hex::encode(bytes)))
+}
+
+/// A folder name for an album: what file systems refuse is replaced, and it is never empty.
+fn folder_name(name: &str) -> String {
+    let clean: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_control() || "/\\:*?\"<>|".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let clean = clean.trim_matches(|c: char| c == '.' || c.is_whitespace());
+    if clean.is_empty() {
+        "Album".to_string()
+    } else {
+        clean.chars().take(100).collect()
+    }
+}
+
 fn parse_album(s: &str) -> Result<AlbumId> {
     let bytes: [u8; 16] = hex::decode(s.trim())
         .ok()
@@ -715,6 +766,12 @@ impl AppCore {
                 AppEvent::DevicesChanged,
             ];
             let kind = |c: &Change| match c {
+                // An album's description or a smart album is a setting, but the albums show it.
+                Change::SettingChanged(k)
+                    if k.starts_with("album-note.") || k.starts_with(SMART_PREFIX) =>
+                {
+                    Some(1)
+                }
                 Change::PhotoUpserted(_)
                 | Change::PhotoDeleted(_)
                 | Change::MotionChanged(_)
@@ -1748,27 +1805,33 @@ impl AppCore {
         let mut out = vec![];
         for a in ln.store().albums().await? {
             let id = hex::encode(a.id.0);
-            // No stored cover: the newest photo in the album, chosen when read so there is
-            // nothing to sync (U1-03).
-            let cover = match a.cover {
-                Some(c) => Some(c),
-                None if a.item_count > 0 => {
-                    let mut recs = vec![];
-                    for pid in ln.store().album_items(&a.id, Page::all()).await? {
-                        if let Some(rec) = ln.store().photo(&pid).await? {
-                            recs.push(rec);
-                        }
+            let mut recs = vec![];
+            if a.item_count > 0 {
+                for pid in ln.store().album_items(&a.id, Page::all()).await? {
+                    if let Some(rec) = ln.store().photo(&pid).await? {
+                        recs.push(rec);
                     }
-                    newest_cover(&recs)
                 }
-                None => None,
-            };
+            }
+            // No stored cover: the newest photo in the album, chosen when read so there is
+            // nothing to sync (U1-03). The date range is worked out the same way.
+            let cover = a.cover.or_else(|| newest_cover(&recs));
+            let (first_ms, last_ms) = date_range(&recs);
+            let note = ln
+                .store()
+                .setting(&album_note_key(&a.id))
+                .await?
+                .and_then(|b| String::from_utf8(b).ok())
+                .unwrap_or_default();
             out.push(AlbumInfo {
                 shared_as: links.iter().find(|(p, _)| *p == id).map(|(_, s)| s.clone()),
                 id,
                 name: a.name,
                 cover: cover.map(|c| c.to_string()),
                 item_count: a.item_count as u32,
+                first_ms,
+                last_ms,
+                note,
             });
         }
         Ok(out)
@@ -1800,6 +1863,9 @@ impl AppCore {
             cover: None,
             item_count: 0,
             shared_as: None,
+            first_ms: None,
+            last_ms: None,
+            note: String::new(),
         })
     }
 
@@ -1872,6 +1938,118 @@ impl AppCore {
                 items: shoebox_core::merge::OrSet::new(),
             })
             .await?;
+        Ok(())
+    }
+
+    /// Delete an album on every device. Its photos stay in the library, and a shared album it
+    /// was shared as stays too (it just stops getting this album's new photos). Its web links
+    /// are stopped first: a link left serving an album nobody can see any more would be a leak,
+    /// so if the service cannot be reached for that, nothing is deleted.
+    pub async fn delete_album(&self, album: &str) -> Result<()> {
+        let ln = self.ln().await?;
+        let id = parse_album(album)?;
+        ensure!(
+            ln.store().albums().await?.iter().any(|a| a.id == id),
+            "no such album"
+        );
+        for share in ln.web_live_shares(&id).await? {
+            ln.revoke_live_share(&id, &share.share_id).await?;
+        }
+        for share in ln.web_shares(&id).await? {
+            ln.revoke_web_share(&id, &share.share_id)
+                .await
+                .context("could not stop this album's web link; try again when online")?;
+        }
+        ln.store().delete_album(&id).await?;
+        Ok(())
+    }
+
+    /// Describe an album in a few words (empty clears it); the latest edit wins on every device.
+    pub async fn set_album_note(&self, album: &str, note: &str) -> Result<()> {
+        let ln = self.ln().await?;
+        let id = parse_album(album)?;
+        let note = note.trim();
+        ensure!(
+            note.chars().count() <= 1000,
+            "keep the description under 1000 characters"
+        );
+        ensure!(
+            ln.store().albums().await?.iter().any(|a| a.id == id),
+            "no such album"
+        );
+        ln.store()
+            .put_setting(&album_note_key(&id), note.as_bytes().to_vec())
+            .await?;
+        Ok(())
+    }
+
+    // ---------- smart albums ----------
+
+    pub async fn smart_albums(&self) -> Result<Vec<SmartAlbumInfo>> {
+        let ln = self.ln().await?;
+        let mut out = vec![];
+        for (key, value) in ln.store().settings_with_prefix(SMART_PREFIX).await? {
+            let Ok(s) = serde_json::from_slice::<SmartAlbum>(&value) else {
+                continue; // deleted (empty) or unreadable
+            };
+            out.push(SmartAlbumInfo {
+                id: key[SMART_PREFIX.len()..].to_string(),
+                name: s.name,
+                query: s.query,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Save a search as an album. Its photos are found again each time it is opened, so it fills
+    /// itself as photos arrive and needs nothing synced beyond its name and search.
+    pub async fn save_smart_album(
+        &self,
+        id: Option<&str>,
+        name: &str,
+        query: &str,
+    ) -> Result<SmartAlbumInfo> {
+        let ln = self.ln().await?;
+        let (name, query) = (name.trim(), query.trim());
+        ensure!(!name.is_empty(), "an album needs a name");
+        ensure!(
+            !query.is_empty(),
+            "a smart album needs something to search for"
+        );
+        let id = match id {
+            Some(id) => {
+                let key = smart_key(id)?;
+                ensure!(
+                    ln.store()
+                        .setting(&key)
+                        .await?
+                        .is_some_and(|v| !v.is_empty()),
+                    "no such smart album"
+                );
+                key[SMART_PREFIX.len()..].to_string()
+            }
+            None => {
+                let mut id = [0u8; 16];
+                getrandom::fill(&mut id).expect("operating system randomness");
+                hex::encode(id)
+            }
+        };
+        let value = serde_json::to_vec(&SmartAlbum {
+            name: name.to_string(),
+            query: query.to_string(),
+        })?;
+        ln.store().put_setting(&smart_key(&id)?, value).await?;
+        Ok(SmartAlbumInfo {
+            id,
+            name: name.to_string(),
+            query: query.to_string(),
+        })
+    }
+
+    /// Delete a smart album (its photos are untouched: it only ever pointed at a search).
+    pub async fn delete_smart_album(&self, id: &str) -> Result<()> {
+        let ln = self.ln().await?;
+        ln.store().put_setting(&smart_key(id)?, vec![]).await?;
         Ok(())
     }
 
@@ -2616,6 +2794,66 @@ impl AppCore {
             dest.join("library.json"),
             serde_json::to_vec_pretty(&serde_json::json!({ "photos": manifest }))?,
         )?;
+        Ok(ExportReport {
+            written,
+            missing,
+            bytes: bytes as f64,
+            folder: dest.display().to_string(),
+        })
+    }
+
+    /// Copy the originals of one album that are on this device into `dest/<album name>/`, named
+    /// like a library export and checked against their content hashes. Nothing in the library
+    /// changes; running it again only writes what is new.
+    pub async fn export_album(&self, album: &str, dest: &str) -> Result<ExportReport> {
+        let ln = self.ln().await?;
+        let id = parse_album(album)?;
+        ensure!(!dest.trim().is_empty(), "choose a folder to export into");
+        let summary = ln
+            .store()
+            .albums()
+            .await?
+            .into_iter()
+            .find(|a| a.id == id)
+            .ok_or_else(|| anyhow!("no such album"))?;
+        let dest = PathBuf::from(dest.trim()).join(folder_name(&summary.name));
+        std::fs::create_dir_all(&dest).with_context(|| format!("creating {}", dest.display()))?;
+        let (mut written, mut missing, mut bytes) = (0u32, 0u32, 0u64);
+        for pid in ln.store().album_items(&id, Page::all()).await? {
+            let Some(rec) = ln.store().photo(&pid).await? else {
+                continue;
+            };
+            if rec.is_deleted() {
+                continue;
+            }
+            let Some(size) = self.node.blobs().size(&rec.original.hash).await? else {
+                missing += 1;
+                continue;
+            };
+            let when = crate::export::civil(rec.taken_at.0);
+            let name = format!(
+                "{:04}-{:02}-{:02}_{:02}{:02}{:02}_{}.{}",
+                when.0,
+                when.1,
+                when.2,
+                when.3,
+                when.4,
+                when.5,
+                &rec.id.to_string()[..8],
+                crate::export::extension(&rec.original.mime)
+            );
+            let path = dest.join(&name);
+            if !path.metadata().map(|m| m.len() == size).unwrap_or(false) {
+                let data = self.node.blobs().get(&rec.original.hash).await?;
+                ensure!(
+                    Blake3Hash::of_bytes(&data) == rec.original.hash,
+                    "{name} does not match its content hash; not exported"
+                );
+                std::fs::write(&path, &data)?;
+            }
+            written += 1;
+            bytes += size;
+        }
         Ok(ExportReport {
             written,
             missing,

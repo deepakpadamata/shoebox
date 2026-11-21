@@ -43,7 +43,7 @@ fn busy_state() -> LibraryState {
     });
     s.album_add(&AlbumId([1; 16]), &[hash(1), hash(2)], 300)
         .unwrap();
-    s.album_remove(&AlbumId([1; 16]), &[hash(1)]).unwrap();
+    s.album_remove(&AlbumId([1; 16]), &[hash(1)], 1).unwrap();
     s.apply_device_change(&SignedDeviceChange::Device(DeviceCert {
         device: dev(2),
         role: Role::Keeper,

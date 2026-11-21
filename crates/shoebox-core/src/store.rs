@@ -347,6 +347,11 @@ pub trait LibraryStore: Send + Sync + 'static {
     /// concurrent adds survive. Removing an absent item is a no-op.
     async fn album_remove(&self, album: &AlbumId, items: &[PhotoId]) -> Result<()>;
 
+    /// Delete an album: it leaves every replica's [`LibraryStore::albums`], its photos stay in
+    /// the library. A write to the album made after the deletion (on a replica that had not seen
+    /// it) brings the album back with just that write. `NotFound` if unknown or already deleted.
+    async fn delete_album(&self, album: &AlbumId) -> Result<()>;
+
     /// Present members of an album in id order, skipping soft-deleted or purged photos, following `page`
     /// (`page.after.id` is the last id seen).
     async fn album_items(&self, album: &AlbumId, page: Page) -> Result<Vec<PhotoId>>;
@@ -412,6 +417,10 @@ pub trait LibraryStore: Send + Sync + 'static {
     /// Write a setting with a fresh HLC. **Last writer wins** per key, on every replica. An invalid
     /// key is `Invalid`; the value is opaque bytes (callers define the encoding).
     async fn put_setting(&self, key: &str, value: Vec<u8>) -> Result<()>;
+
+    /// Every setting whose key starts with `prefix` (key, value), in key order: for records kept
+    /// one per key, such as smart albums.
+    async fn settings_with_prefix(&self, prefix: &str) -> Result<Vec<(String, Vec<u8>)>>;
 
     // ----- Live Photos and motion photos (F2.10) -----
 

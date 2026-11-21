@@ -70,6 +70,7 @@ scenario_table!(
     delete_restore_purge,
     delete_now_purges_at_once_everywhere,
     album_add_wins,
+    delete_album_replicates,
     holdings_single_writer_and_at_risk,
     change_stream_events,
     concurrent_edits_converge,
@@ -462,6 +463,78 @@ async fn album_add_wins<H: Harness>(h: &H) {
             n.store.album_items(&album, Page::all()).await.unwrap(),
             vec![hash(1)]
         );
+    }
+}
+
+async fn delete_album_replicates<H: Harness>(h: &H) {
+    let (a, b) = pair(h).await;
+    for id in [1, 2, 3] {
+        a.store.upsert_photo(photo(id, id as i64, 1)).await.unwrap();
+    }
+    let (trip, home) = (AlbumId([1; 16]), AlbumId([2; 16]));
+    a.store.upsert_album(album_meta(1, "Trip")).await.unwrap();
+    a.store.upsert_album(album_meta(2, "Home")).await.unwrap();
+    a.store.album_add(&trip, &[hash(1), hash(2)]).await.unwrap();
+    a.store.album_add(&home, &[hash(3)]).await.unwrap();
+    sync_both(h, &a, &b).await;
+
+    // Deleting hides the album everywhere; its photos stay in the library.
+    b.store.delete_album(&trip).await.unwrap();
+    assert_eq!(b.store.delete_album(&trip).await, Err(StoreError::NotFound));
+    assert_eq!(
+        b.store.delete_album(&AlbumId([9; 16])).await,
+        Err(StoreError::NotFound)
+    );
+    sync_both(h, &a, &b).await;
+    for n in [&a, &b] {
+        let names: Vec<_> = n
+            .store
+            .albums()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(names, vec!["Home".to_string()]);
+        assert_eq!(
+            n.store.album_items(&trip, Page::all()).await,
+            Err(StoreError::NotFound)
+        );
+        assert_eq!(
+            n.store.album_add(&trip, &[hash(3)]).await,
+            Err(StoreError::NotFound)
+        );
+        assert!(n.store.photo(&hash(1)).await.unwrap().is_some());
+    }
+    // An older write arriving late (an import registering the album at its start) does not
+    // bring it back.
+    a.store.upsert_album(album_meta(1, "Trip")).await.unwrap();
+    assert!(a.store.albums().await.unwrap().iter().all(|s| s.id != trip));
+
+    // B adds to Home after A deleted it but before hearing of that: Home comes back on both with
+    // just B's addition (what A had seen stays removed).
+    b.clock.advance(1_000);
+    a.store.delete_album(&home).await.unwrap();
+    b.store.album_add(&home, &[hash(1)]).await.unwrap();
+    sync_both(h, &a, &b).await;
+    for n in [&a, &b] {
+        assert_eq!(
+            n.store.album_items(&home, Page::all()).await.unwrap(),
+            vec![hash(1)]
+        );
+    }
+    // Emptying the album that came back does not delete it again.
+    a.store.album_remove(&home, &[hash(1)]).await.unwrap();
+    sync_both(h, &a, &b).await;
+    for n in [&a, &b] {
+        let home_now = n
+            .store
+            .albums()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|s| s.id == home);
+        assert_eq!(home_now.map(|s| s.item_count), Some(0));
     }
 }
 
@@ -862,6 +935,22 @@ async fn device_list_is_signed_and_order_independent<H: Harness>(h: &H) {
 async fn library_settings_are_last_writer_wins<H: Harness>(h: &H) {
     let (a, b) = pair(h).await;
     assert_eq!(a.store.setting("redundancy.target").await.unwrap(), None);
+    // Listing by prefix: only keys that start with it, in key order.
+    for key in ["smart-album.b", "smart-album.a", "smart-albums", "smart-al"] {
+        a.store
+            .put_setting(key, key.as_bytes().to_vec())
+            .await
+            .unwrap();
+    }
+    let listed: Vec<String> = a
+        .store
+        .settings_with_prefix("smart-album.")
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
+    assert_eq!(listed, vec!["smart-album.a", "smart-album.b"]);
     a.store
         .put_setting("redundancy.target", vec![3])
         .await

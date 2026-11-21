@@ -8,7 +8,8 @@
   import { api, blobUrl, motionSrc, playsNatively, videoUrl, type FaceOut, type PhotoDetail, type PhotoSummary, type SharedItemInfo } from '../lib/api';
   import FaceCrop from '../components/FaceCrop.svelte';
   import { bytes, dateTime, plural } from '../lib/format';
-  import { app, fail, toast } from '../lib/store.svelte';
+  import { app, fail, refreshAlbums, toast } from '../lib/store.svelte';
+  import { go } from '../lib/route.svelte';
   import Button from '../components/Button.svelte';
   import Pill from '../components/Pill.svelte';
   import Row from '../components/Row.svelte';
@@ -282,7 +283,23 @@
       await api.albumAdd(id, [photo.id]);
       toast('Added to the album');
       albumPick = false;
+      detail = await api.photoDetail(photo.id).catch(() => detail);
+      refreshAlbums().catch(() => {});
     } catch (e) { fail(e); }
+  }
+  // The albums this photo is in (Info), by name; an album not listed here yet is left out.
+  const inAlbums = $derived((detail?.albums ?? []).map((id) => app.albums.find((a) => a.id === id)).filter((a) => a !== undefined));
+  async function removeFromAlbum(id: string, name: string) {
+    try {
+      await api.albumRemove(id, [photo.id]);
+      toast(`Removed from “${name}”`);
+      detail = await api.photoDetail(photo.id).catch(() => detail);
+      refreshAlbums().catch(() => {});
+    } catch (e) { fail(e); }
+  }
+  function openAlbum(id: string) {
+    onclose();
+    go(`album/${id}`);
   }
 
   // The controls hide when the photo is tapped; the info panel remembers whether it was open.
@@ -425,6 +442,20 @@
             {/if}
             {#if detail.pinned}<Pill tone="info"><Icon name="pin" size={14} /> Kept here</Pill>{/if}
           </div>
+          <div class="section">In albums</div>
+          {#if inAlbums.length}
+            <div class="albums">
+              {#each inAlbums as a (a.id)}
+                <div class="albrow">
+                  <button class="albname" title="Open “{a.name}”" onclick={() => openAlbum(a.id)}><Icon name={a.shared ? 'people' : 'albums'} size={18} /><span>{a.name}</span></button>
+                  <button class="unalbum" title="Remove from “{a.name}”" aria-label="Remove from {a.name}" onclick={() => removeFromAlbum(a.id, a.name)}><Icon name="close" size={16} /></button>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <span class="muted small">Not in any album.</span>
+          {/if}
+          {#if myAlbums.some((a) => !detail?.albums.includes(a.id))}<button class="link small addalbum" onclick={() => (albumPick = true)}><Icon name="addalbum" size={14} /> Add to album</button>{/if}
           <div class="section">Stored on</div>
           <List>
             {#each detail.stored_on as s}
@@ -509,5 +540,13 @@
   .people { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
   .face-row { display: flex; align-items: center; gap: 8px; }
   .face-row .grow { flex: 1; min-width: 0; }
+  .albums { display: grid; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .albrow { display: flex; align-items: center; gap: 4px; padding: 0 4px 0 12px; min-height: 44px; }
+  .albrow + .albrow { border-top: 1px solid var(--line); }
+  .albname { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; border: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; padding: 8px 0; }
+  .albname span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .unalbum { width: 34px; height: 34px; border: 0; border-radius: 50%; background: none; color: var(--ink-3); display: grid; place-items: center; cursor: pointer; }
+  .unalbum:hover { background: var(--surface-2); color: var(--risk); }
+  .addalbum { display: inline-flex; align-items: center; gap: 4px; justify-self: start; }
   .link { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; }
 </style>

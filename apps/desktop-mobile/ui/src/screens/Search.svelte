@@ -8,6 +8,9 @@
   import { api, type PersonCard, type SearchStatus } from '../lib/api';
   import { plural } from '../lib/format';
   import Icon from '../components/Icon.svelte';
+  import Button from '../components/Button.svelte';
+  import Sheet from '../components/Sheet.svelte';
+  import { fail, refreshAlbums } from '../lib/store.svelte';
   import { onMount } from 'svelte';
   import FaceCrop from '../components/FaceCrop.svelte';
   import SearchField from '../components/SearchField.svelte';
@@ -26,6 +29,17 @@
   });
 
   const query = $derived(queryFromParam(param()));
+  // Keep this search as a smart album, named after it unless the person says otherwise.
+  let saveOpen = $state(false);
+  let saveName = $state('');
+  async function saveSmart() {
+    try {
+      const a = await api.saveSmartAlbum(saveName, query);
+      saveOpen = false;
+      await refreshAlbums();
+      go(`album/${a.id}`);
+    } catch (e) { fail(e); }
+  }
   let text = $state('');
   $effect(() => {
     text = query;
@@ -82,6 +96,7 @@
     </div>
     <div class="coverage small muted" role="status">
       {summary}{summary && coverage ? ' · ' : ''}{coverage}
+      <button class="link save" onclick={() => { saveName = query.trim(); saveOpen = true; }}><Icon name="addalbum" size={14} /> Save as smart album</button>
     </div>
     {#if relax}
       <div class="relax"><button class="link" onclick={() => drop(relax.chip)}>{relax.text}</button></div>
@@ -122,6 +137,14 @@
   </div>
 </div>
 
+<Sheet open={saveOpen} title="Save as smart album" onclose={() => (saveOpen = false)} width={400}>
+  <form class="stack" onsubmit={(e) => { e.preventDefault(); saveSmart(); }}>
+    <p class="muted small">The album shows whatever “{query.trim()}” finds, so new photos join it by themselves.</p>
+    <input class="input" bind:value={saveName} aria-label="Album name" placeholder="Album name" />
+    <Button type="submit" kind="primary" block disabled={!saveName.trim()}>Save</Button>
+  </form>
+</Sheet>
+
 <style>
   .search { height: 100%; display: flex; flex-direction: column; min-height: 0; }
   .bar { display: flex; gap: 10px; align-items: center; padding: 6px 16px 8px; }
@@ -130,6 +153,8 @@
   .x { border: 0; background: transparent; color: var(--ink-3); cursor: pointer; font-size: var(--t-xs); width: 22px; height: 22px; border-radius: 50%; }
   .x:hover { background: var(--surface-3); color: var(--ink); }
   .coverage { padding: 2px 18px 8px; }
+  .input { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); padding: 0 12px; color: var(--ink); font: inherit; width: 100%; }
+  .save { margin-left: 10px; display: inline-flex; align-items: center; gap: 4px; }
   .relax { padding: 0 18px 8px; }
   .link { border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; padding: 4px 0; }
   .grid { flex: 1; min-height: 0; }

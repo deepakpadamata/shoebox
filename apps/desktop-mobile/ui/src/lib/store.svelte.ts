@@ -87,8 +87,8 @@ export async function refreshPeers() {
 }
 
 export async function refreshAlbums() {
-  const [personal, shared] = await Promise.all([api.albums(), api.sharedAlbums().catch(() => [])]);
-  app.albums = mergeAlbums(personal, shared);
+  const [personal, shared, smart] = await Promise.all([api.albums(), api.sharedAlbums().catch(() => []), api.smartAlbums().catch(() => [])]);
+  app.albums = mergeAlbums(personal, shared, smart);
 }
 
 export async function refreshState() {

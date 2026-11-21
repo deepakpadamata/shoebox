@@ -4,4 +4,12 @@ export type AlbumInfo = { id: string, name: string, cover: string | null, item_c
 /**
  * The shared album this album is shared as, if it is shared.
  */
-shared_as: string | null, };
+shared_as: string | null, 
+/**
+ * When its earliest and latest photos were taken (ms), worked out when read; `None` when empty.
+ */
+first_ms: number | null, last_ms: number | null, 
+/**
+ * What the album is about, in the person's words ("" when none); the same on every device.
+ */
+note: string, };

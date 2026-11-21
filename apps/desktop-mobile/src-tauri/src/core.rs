@@ -177,7 +177,6 @@ pub(crate) async fn keeper_set(ln: &LibraryNode<Library>) -> Result<HashSet<Endp
         .collect())
 }
 
-/// The newest photo that is not deleted: an album's cover when none was chosen.
 /// Library setting holding an album's description (UTF-8; empty = none).
 fn album_note_key(album: &AlbumId) -> String {
     format!("album-note.{}", hex::encode(album.0))
@@ -319,7 +318,22 @@ pub struct AppCore {
     pub(crate) auto_save_again: std::sync::atomic::AtomicBool,
     /// The Free up space run going on in the background, and how the last one ended.
     free_up: Mutex<FreeUpRun>,
+    /// Bumped on each event that can change [`AppCore::health`]'s numbers.
+    health_generation: std::sync::atomic::AtomicU64,
+    /// The last [`AppCore::health`] walk, reused while nothing it depends on has changed.
+    health_cache: tokio::sync::Mutex<Option<HealthCache>>,
 }
+
+struct HealthCache {
+    library: shoebox_core::store::LibraryId,
+    generation: u64,
+    at: std::time::Instant,
+    health: Health,
+}
+
+/// A health walk is reused for at most this long, even with no event: a gallery file deleted
+/// outside the app, say, changes what is here without telling the library.
+const HEALTH_MAX_AGE: Duration = Duration::from_secs(60);
 
 #[derive(Default)]
 struct FreeUpRun {
@@ -443,6 +457,8 @@ impl AppCore {
             transfer_cache: tokio::sync::Mutex::new(TransferCache::default()),
             archive_import: Mutex::new(ArchiveRun::default()),
             free_up: Mutex::new(FreeUpRun::default()),
+            health_generation: Default::default(),
+            health_cache: Default::default(),
             seen: Mutex::new(SeenBook::default()),
             safety_sent: Mutex::new(None),
             auto_save: tokio::sync::Mutex::new(()),
@@ -475,6 +491,17 @@ impl AppCore {
     }
 
     pub(crate) fn emit(&self, e: AppEvent) {
+        if matches!(
+            e,
+            AppEvent::LibraryChanged
+                | AppEvent::HoldingsChanged
+                | AppEvent::DevicesChanged
+                | AppEvent::LibraryRotated
+        ) {
+            // Before it is sent, so a screen refreshing on it gets the new numbers.
+            self.health_generation
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         let _ = self.events.send(e);
     }
 
@@ -2379,15 +2406,54 @@ impl AppCore {
         }
     }
 
+    /// The library's health. The walk behind it (every photo's holders, what is here, what Free
+    /// up would let go) is reused until the library, holdings or devices change, or a minute
+    /// passes; which devices are online is always current.
     pub async fn health(&self) -> Result<Health> {
         let ln = self.ln().await?;
+        let library = ln.library_id();
+        // Held through the walk: a second caller waits for it rather than walking too.
+        let mut cache = self.health_cache.lock().await;
+        let generation = self
+            .health_generation
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let mut health = match cache.as_ref() {
+            Some(c)
+                if c.library == library
+                    && c.generation == generation
+                    && c.at.elapsed() < HEALTH_MAX_AGE =>
+            {
+                c.health.clone()
+            }
+            _ => {
+                let health = self.walk_health(&ln).await?;
+                *cache = Some(HealthCache {
+                    library,
+                    generation,
+                    at: std::time::Instant::now(),
+                    health: health.clone(),
+                });
+                health
+            }
+        };
+        drop(cache);
+        health.devices_online = self
+            .devices()
+            .await?
+            .iter()
+            .filter(|d| d.online && !d.revoked)
+            .count() as u32;
+        Ok(health)
+    }
+
+    async fn walk_health(&self, ln: &LibraryNode<Library>) -> Result<Health> {
         let photos = ln
             .store()
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?;
         let target = ln.redundancy_target().await? as usize;
         let mut hist = vec![0u32; target.max(2) + 2];
-        let keepers = keeper_set(&ln).await?;
+        let keepers = keeper_set(ln).await?;
         let (mut here, mut here_bytes) = (0u32, 0f64);
         for rec in &photos {
             let holders = ln.store().holders(&rec.original.hash).await?;
@@ -2409,12 +2475,6 @@ impl AppCore {
             }
         }
         let list = ln.store().device_list().await?;
-        let online = self
-            .devices()
-            .await?
-            .iter()
-            .filter(|d| d.online && !d.revoked)
-            .count();
         let (free_photos, free_bytes) = match ln.free_up_space(true).await {
             Ok(r) => (r.photos.len() as u32, r.bytes as f64),
             Err(_) => (0, 0.0), // keepers never free space
@@ -2426,7 +2486,7 @@ impl AppCore {
             redundancy_target: target as u32,
             originals_here: here,
             originals_here_bytes: here_bytes,
-            devices_online: online as u32,
+            devices_online: 0, // filled in by `health`, always fresh
             devices_total: list.devices.iter().filter(|d| !d.revoked).count() as u32,
             can_free_bytes: free_bytes,
             can_free_photos: free_photos,

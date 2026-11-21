@@ -115,3 +115,6 @@ all = { level = "warn", priority = -1 }
 # vendor/libheif-sys/build.rs and docs/notes/assumptions.md (A-031).
 [patch.crates-io]
 libheif-sys = { path = "vendor/libheif-sys" }
+# iroh-blobs with a configurable metadata cache (redb keeps every page it reads, inlined thumbnails
+# included, up to 1 GiB): see vendor/iroh-blobs/SHOEBOX.md.
+iroh-blobs = { path = "vendor/iroh-blobs" }

@@ -107,6 +107,12 @@ pub const COMMANDS: &[&str] = &[
     "leave_library",
     "transfers",
     "rename_album",
+    "delete_album",
+    "set_album_note",
+    "smart_albums",
+    "save_smart_album",
+    "delete_smart_album",
+    "export_album",
     "set_album_cover",
     "set_poster",
     "backup_status",
@@ -412,6 +418,37 @@ pub async fn dispatch(core: &Arc<AppCore>, cmd: &str, args: Value) -> Result<Val
                 &arg::<String>(&args, "photo")?,
             )
             .await?;
+            Ok(json!({}))
+        }
+        "set_album_note" => {
+            core.set_album_note(
+                &arg::<String>(&args, "album")?,
+                &arg::<String>(&args, "note")?,
+            )
+            .await?;
+            Ok(json!({}))
+        }
+        "smart_albums" => out(core.smart_albums().await?),
+        "save_smart_album" => out(core
+            .save_smart_album(
+                opt::<String>(&args, "id")?.as_deref(),
+                &arg::<String>(&args, "name")?,
+                &arg::<String>(&args, "query")?,
+            )
+            .await?),
+        "delete_smart_album" => {
+            core.delete_smart_album(&arg::<String>(&args, "id")?)
+                .await?;
+            Ok(json!({}))
+        }
+        "export_album" => out(core
+            .export_album(
+                &arg::<String>(&args, "album")?,
+                &arg::<String>(&args, "dest")?,
+            )
+            .await?),
+        "delete_album" => {
+            core.delete_album(&arg::<String>(&args, "album")?).await?;
             Ok(json!({}))
         }
         "rename_album" => {

@@ -2,7 +2,7 @@
   import Icon from '../components/Icon.svelte';
   // The timeline (M3-06): photos grouped by day, virtualised so 100k photos scroll smoothly,
   // with multi-select and the actions of mockup 2b.
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { api, type PageCursor, type PhotoPage, type PhotoSummary, type SearchPage } from '../lib/api';
   import { tzOffset } from '../lib/search';
   import { dayLabel, monthLabel, plural } from '../lib/format';
@@ -153,8 +153,15 @@
   let again = false;
   // Bumped when the source changes: a load for the old one stops and the next pass starts over.
   let generation = 0;
+  // Gone from the screen (an album just deleted, say): nothing more is loaded or reported.
+  let gone = false;
+  onDestroy(() => {
+    gone = true;
+    clearTimeout(timer);
+  });
 
   function reload() {
+    if (gone) return;
     if (loading) {
       again = true;
       return;
@@ -166,7 +173,7 @@
           await load();
         } while (again);
       } catch (e) {
-        fail(e);
+        if (!gone) fail(e);
       } finally {
         loading = null;
       }

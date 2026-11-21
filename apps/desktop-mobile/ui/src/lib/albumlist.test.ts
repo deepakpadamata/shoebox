@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { filterAlbums, findAlbum, mergeAlbums } from './albumlist';
+import { deletable, filterAlbums, findAlbum, mergeAlbums } from './albumlist';
 
-const p = (id: string, name: string, shared_as: string | null = null) => ({ id, name, cover: null, item_count: 3, shared_as });
+const p = (id: string, name: string, shared_as: string | null = null) => ({ id, name, cover: null, item_count: 3, shared_as, first_ms: null, last_ms: null, note: '' });
 const s = (id: string, name: string, unread = 0) => ({ id, name, role: 'owner', item_count: 5, member_count: 2, keep_originals: false, location: 'ask', unread, cover: 'c', save_all: false });
 
 describe('mergeAlbums', () => {
@@ -21,5 +21,12 @@ describe('mergeAlbums', () => {
     expect(filterAlbums(l, 'shared')).toHaveLength(2);
     expect(findAlbum(l, 's1')?.id).toBe('a');
     expect(findAlbum(l, 'zz')).toBeUndefined();
+  });
+  it("lists smart albums as the person's own, deletable, and never as shared", () => {
+    const l = mergeAlbums([p('a', 'Trip')], [s('s9', 'Party')], [{ id: 'm1', name: 'Beach', query: 'beach' }]);
+    expect(findAlbum(l, 'm1')).toMatchObject({ smart: 'beach', personal: false, shared: false });
+    expect(filterAlbums(l, 'mine').map((x) => x.id).sort()).toEqual(['a', 'm1']);
+    expect(filterAlbums(l, 'shared').map((x) => x.id)).toEqual(['s9']);
+    expect(l.filter(deletable).map((x) => x.id).sort()).toEqual(['a', 'm1']);
   });
 });

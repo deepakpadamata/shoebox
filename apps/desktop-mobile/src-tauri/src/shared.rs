@@ -784,7 +784,12 @@ impl AppCore {
             let previews: std::collections::HashSet<_> =
                 items.iter().map(|i| i.preview.hash).collect();
             let mut missing = vec![];
-            for p in ln.store().album_items(&personal, Page::all()).await? {
+            // A deleted personal album shares nothing more (the shared album itself stays).
+            let personal_items = match ln.store().album_items(&personal, Page::all()).await {
+                Err(shoebox_core::store::StoreError::NotFound) => continue,
+                r => r?,
+            };
+            for p in personal_items {
                 let Some(rec) = ln.store().photo(&p).await? else {
                     continue;
                 };

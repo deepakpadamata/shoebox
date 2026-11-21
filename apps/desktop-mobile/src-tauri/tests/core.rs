@@ -448,6 +448,151 @@ async fn exporting_writes_verified_originals_and_a_manifest() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn albums_can_be_deleted_and_their_photos_stay() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    let ids: Vec<String> = core
+        .library_page(None, 10)
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    let trip = core.create_album("Trip").await.unwrap();
+    let home = core.create_album("Home").await.unwrap();
+    core.album_add(&trip.id, &ids[..2]).await.unwrap();
+    core.delete_album(&trip.id).await.unwrap();
+    let albums = core.albums().await.unwrap();
+    assert_eq!(albums.len(), 1);
+    assert_eq!(albums[0].id, home.id, "only the deleted album goes");
+    assert_eq!(
+        core.library_page(None, 10).await.unwrap().items.len(),
+        ids.len(),
+        "its photos stay in the library"
+    );
+    assert!(core.album_page(&trip.id, None, 10).await.is_err());
+    assert!(core.rename_album(&trip.id, "Back").await.is_err());
+    assert!(core.album_add(&trip.id, &ids[..1]).await.is_err());
+    assert!(core.delete_album(&trip.id).await.is_err(), "already gone");
+    assert!(
+        core.delete_album(&"0".repeat(32)).await.is_err(),
+        "unknown album"
+    );
+    core.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn albums_show_their_dates_and_a_description() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    let items = core.library_page(None, 10).await.unwrap().items;
+    let a = core.create_album("Trip").await.unwrap();
+    let get = || async {
+        core.albums()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|x| x.id == a.id)
+            .unwrap()
+    };
+    let empty = get().await;
+    assert_eq!(
+        (empty.first_ms, empty.last_ms, empty.note.as_str()),
+        (None, None, "")
+    );
+    let ids: Vec<String> = items.iter().map(|p| p.id.clone()).collect();
+    core.album_add(&a.id, &ids).await.unwrap();
+    let times: Vec<f64> = items.iter().map(|p| p.taken_at).collect();
+    let min = times.iter().cloned().fold(f64::MAX, f64::min);
+    let max = times.iter().cloned().fold(f64::MIN, f64::max);
+    let full = get().await;
+    assert_eq!((full.first_ms, full.last_ms), (Some(min), Some(max)));
+
+    core.set_album_note(&a.id, "  Two weeks by the sea ")
+        .await
+        .unwrap();
+    assert_eq!(get().await.note, "Two weeks by the sea");
+    core.set_album_note(&a.id, "").await.unwrap();
+    assert_eq!(get().await.note, "", "an empty description clears it");
+    assert!(core.set_album_note(&a.id, &"x".repeat(1001)).await.is_err());
+    assert!(core.set_album_note(&"0".repeat(32), "x").await.is_err());
+    core.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn smart_albums_are_saved_searches() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    assert!(core.smart_albums().await.unwrap().is_empty());
+    let s = core
+        .save_smart_album(None, " Screens ", " screenshot ")
+        .await
+        .unwrap();
+    assert_eq!(
+        (s.name.as_str(), s.query.as_str()),
+        ("Screens", "screenshot")
+    );
+    let renamed = core
+        .save_smart_album(Some(&s.id), "Screenshots", "screenshot")
+        .await
+        .unwrap();
+    assert_eq!(renamed.id, s.id);
+    let list = core.smart_albums().await.unwrap();
+    assert_eq!(list, vec![renamed]);
+    assert!(
+        core.save_smart_album(None, "x", "  ").await.is_err(),
+        "needs a search"
+    );
+    assert!(
+        core.save_smart_album(None, " ", "q").await.is_err(),
+        "needs a name"
+    );
+    assert!(
+        core.save_smart_album(Some(&"0".repeat(32)), "x", "q")
+            .await
+            .is_err(),
+        "unknown smart album"
+    );
+    core.delete_smart_album(&s.id).await.unwrap();
+    assert!(core.smart_albums().await.unwrap().is_empty());
+    assert!(
+        core.save_smart_album(Some(&s.id), "x", "q").await.is_err(),
+        "a deleted one cannot be edited"
+    );
+    core.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn one_album_exports_into_its_own_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    let ids: Vec<String> = core
+        .library_page(None, 10)
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    let a = core.create_album("Lisbon / Porto").await.unwrap();
+    core.album_add(&a.id, &ids[..2]).await.unwrap();
+    let dest = out.path().to_str().unwrap();
+    let r = core.export_album(&a.id, dest).await.unwrap();
+    assert_eq!((r.written, r.missing), (2, 0));
+    let folder = out.path().join("Lisbon _ Porto");
+    assert_eq!(r.folder, folder.display().to_string());
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 2);
+    // Again: nothing new, nothing doubled.
+    assert_eq!(core.export_album(&a.id, dest).await.unwrap().written, 2);
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 2);
+    assert!(core.export_album(&a.id, " ").await.is_err());
+    assert!(core.export_album(&"0".repeat(32), dest).await.is_err());
+    core.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn albums_can_be_renamed() {
     let dir = tempfile::tempdir().unwrap();
     let core = library_with_photos(dir.path()).await;

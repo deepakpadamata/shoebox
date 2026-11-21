@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bytes, dayKey, dayLabel, plural } from './format';
+import { bytes, dateRange, dayKey, dayLabel, plural } from './format';
 
 describe('format', () => {
   it('groups by local day', () => {
@@ -23,5 +23,13 @@ describe('format', () => {
     expect(bytes(120_000_000_000)).toBe('120 GB');
     expect(plural(1, 'photo')).toBe('1 photo');
     expect(plural(1234, 'photo')).toBe('1,234 photos');
+  });
+  it("says an album's dates as briefly as it can", () => {
+    const d = (y: number, m: number, day: number) => new Date(y, m - 1, day, 12).getTime();
+    expect(dateRange(null, null)).toBe('');
+    expect(dateRange(d(2025, 6, 3), d(2025, 6, 3))).toBe('3 Jun 2025');
+    expect(dateRange(d(2025, 6, 3), d(2025, 6, 9))).toBe('3–9 Jun 2025');
+    expect(dateRange(d(2025, 5, 28), d(2025, 6, 9))).toBe('28 May – 9 Jun 2025');
+    expect(dateRange(d(2024, 12, 30), d(2025, 1, 2))).toBe('Dec 2024 – Jan 2025');
   });
 });

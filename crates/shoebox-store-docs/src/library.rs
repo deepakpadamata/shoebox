@@ -260,8 +260,14 @@ impl LibraryStore for DocsLibrary {
     }
 
     async fn album_remove(&self, album: &AlbumId, items: &[PhotoId]) -> Result<()> {
-        self.write(|s| Ok(((), s.album_remove(album, items)?)))
+        let now = self.now();
+        self.write(|s| Ok(((), s.album_remove(album, items, now)?)))
             .await
+    }
+
+    async fn delete_album(&self, album: &AlbumId) -> Result<()> {
+        let now = self.now();
+        self.write(|s| Ok(((), s.delete_album(album, now)?))).await
     }
 
     async fn album_items(&self, album: &AlbumId, page: Page) -> Result<Vec<PhotoId>> {
@@ -296,6 +302,10 @@ impl LibraryStore for DocsLibrary {
 
     async fn setting(&self, key: &str) -> Result<Option<Vec<u8>>> {
         Ok(self.read(|s| s.setting(key)).await)
+    }
+
+    async fn settings_with_prefix(&self, prefix: &str) -> Result<Vec<(String, Vec<u8>)>> {
+        Ok(self.read(|s| s.settings_with_prefix(prefix)).await)
     }
 
     async fn put_setting(&self, key: &str, value: Vec<u8>) -> Result<()> {

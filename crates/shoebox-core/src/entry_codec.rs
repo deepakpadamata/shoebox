@@ -82,6 +82,7 @@ pub fn library_key(e: &StateEntry) -> String {
             format!("facelabels/{}/{}", hex32(&l.photo.0), hex::encode(l.face))
         }
         StateEntry::Motion(m) => format!("motion/{}", hex32(&m.photo.0)),
+        StateEntry::AlbumDeleted { id, .. } => format!("albums-deleted/{}", hex::encode(id.0)),
     }
 }
 
@@ -104,6 +105,7 @@ pub fn touched_key(t: &Touched) -> String {
             format!("facelabels/{}/{}", hex32(&photo.0), hex::encode(face))
         }
         Touched::Motion(photo) => format!("motion/{}", hex32(&photo.0)),
+        Touched::AlbumDeleted(id) => format!("albums-deleted/{}", hex::encode(id.0)),
     }
 }
 

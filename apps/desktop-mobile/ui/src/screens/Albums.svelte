@@ -4,8 +4,8 @@
   // the bottom. ＋ makes an album or joins one with an invitation.
   import { onMount, untrack } from 'svelte';
   import { api, blobUrl } from '../lib/api';
-  import { filterAlbums, type AlbumFilter } from '../lib/albumlist';
-  import { plural } from '../lib/format';
+  import { deletable, filterAlbums, type AlbumEntry, type AlbumFilter } from '../lib/albumlist';
+  import { dateRange, plural } from '../lib/format';
   import { app, fail, refreshAlbums, toast, ui } from '../lib/store.svelte';
   import { go } from '../lib/route.svelte';
   import { canScan, scanQr } from '../lib/scan';
@@ -25,6 +25,23 @@
   let name = $state('');
   let code = $state('');
   let busy = $state(false);
+  // Smart albums: a name and the search that fills them.
+  let smartOpen = $state(false);
+  let smartName = $state('');
+  let smartQuery = $state('');
+  // Choosing albums to delete several at once.
+  let selecting = $state(false);
+  let chosen = $state<string[]>([]);
+  let confirmOpen = $state(false);
+  const chosenAlbums = $derived(app.albums.filter((a) => chosen.includes(a.id)));
+  const chosenPhotos = $derived(chosenAlbums.filter((a) => a.personal).reduce((n, a) => n + a.count, 0));
+  function stopSelecting() { selecting = false; chosen = []; }
+  function toggle(a: AlbumEntry) {
+    if (!deletable(a)) return;
+    chosen = chosen.includes(a.id) ? chosen.filter((x) => x !== a.id) : [...chosen, a.id];
+  }
+  const subtitle = (a: AlbumEntry) =>
+    a.smart !== undefined ? 'Smart album' : [plural(a.count, 'photo'), dateRange(a.firstMs, a.lastMs)].filter(Boolean).join(' · ');
   // A cover whose picture is not there (yet) shows the album's icon, not a broken image; it is
   // tried again when something changes (a thumbnail may have arrived).
   let broken = $state<Record<string, boolean>>({});
@@ -43,6 +60,37 @@
       await refreshAlbums();
       go(`album/${a.id}`);
     } catch (e) { fail(e); } finally { busy = false; }
+  }
+  async function createSmart() {
+    busy = true;
+    try {
+      const a = await api.saveSmartAlbum(smartName, smartQuery);
+      smartName = smartQuery = '';
+      smartOpen = false;
+      await refreshAlbums();
+      go(`album/${a.id}`);
+    } catch (e) { fail(e); } finally { busy = false; }
+  }
+  // One at a time, so a failure (a web link the service could not stop) leaves the rest done and says which.
+  async function deleteChosen() {
+    busy = true;
+    let done = 0;
+    const failed: string[] = [];
+    for (const a of chosenAlbums) {
+      try {
+        if (a.smart !== undefined) await api.deleteSmartAlbum(a.id);
+        else await api.deleteAlbum(a.id);
+        done++;
+      } catch (e) {
+        failed.push(`${a.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    busy = false;
+    confirmOpen = false;
+    stopSelecting();
+    await refreshAlbums().catch(() => {});
+    if (failed.length) fail(new Error(`${done ? `Deleted ${plural(done, 'album')}. ` : ''}Not deleted: ${failed.join('; ')}`));
+    else toast(`Deleted ${plural(done, 'album')}`);
   }
   async function join() {
     busy = true;
@@ -77,6 +125,7 @@
         <div class="seg"><Segmented bind:value={filter} options={[{ value: 'all', label: 'All' }, { value: 'mine', label: 'Mine' }, { value: 'shared', label: 'Shared' }]} /></div>
       {/if}
       <span class="grow"></span>
+      {#if app.albums.some(deletable)}<Button size="sm" kind={selecting ? 'primary' : 'default'} onclick={() => (selecting ? stopSelecting() : (selecting = true))}>{selecting ? 'Done' : 'Select'}</Button>{/if}
       <button class="plus" aria-label="New album or join one" onclick={() => (menuOpen = true)}><Icon name="add" size={22} /></button>
     </div>
   {/if}
@@ -95,17 +144,31 @@
   {:else}
     <div class="grid">
       {#each albums as a (a.id)}
-        <a class="album" href="#/album/{a.id}">
+        {#snippet tile()}
           <div class="cover">
-            {#if a.cover && !broken[a.id + a.cover]}<img src={blobUrl(a.cover, 'thumb', a.coverScope)} alt="" loading="lazy" onerror={() => (broken[a.id + a.cover] = true)} />{:else}<span><Icon name={a.shared ? 'people' : 'albums'} size={34} /></span>{/if}
-            {#if a.unread > 0}<span class="dot" title="{plural(a.unread, 'new photo')}">{a.unread}</span>{/if}
+            {#if a.cover && !broken[a.id + a.cover]}<img src={blobUrl(a.cover, 'thumb', a.coverScope)} alt="" loading="lazy" onerror={() => (broken[a.id + a.cover] = true)} />{:else}<span><Icon name={a.smart !== undefined ? 'search' : a.shared ? 'people' : 'albums'} size={34} /></span>{/if}
+            {#if a.unread > 0 && !selecting}<span class="dot" title="{plural(a.unread, 'new photo')}">{a.unread}</span>{/if}
+            {#if selecting && deletable(a)}<span class="tick" class:on={chosen.includes(a.id)}>{#if chosen.includes(a.id)}<Icon name="check" size={16} />{/if}</span>{/if}
           </div>
           <b>{a.name}{#if a.shared}<span class="pill">Shared</span>{/if}</b>
-          <span class="muted small">{plural(a.count, 'photo')}</span>
-        </a>
+          <span class="muted small">{subtitle(a)}</span>
+        {/snippet}
+        {#if selecting}
+          <button class="album pick" class:off={!deletable(a)} disabled={!deletable(a)} aria-pressed={chosen.includes(a.id)} title={deletable(a) ? '' : 'Shared albums are left, not deleted'} onclick={() => toggle(a)}>{@render tile()}</button>
+        {:else}
+          <a class="album" href="#/album/{a.id}">{@render tile()}</a>
+        {/if}
       {/each}
     </div>
     {#if albums.length === 0}<p class="muted">Nothing here yet.</p>{/if}
+  {/if}
+
+  {#if selecting}
+    <div class="selbar">
+      <span class="grow">{chosen.length ? plural(chosen.length, 'album') + ' selected' : 'Choose albums to delete'}</span>
+      <Button onclick={stopSelecting}>Cancel</Button>
+      <Button kind="danger" disabled={!chosen.length} onclick={() => (confirmOpen = true)}><Icon name="trash" size={16} /> Delete</Button>
+    </div>
   {/if}
 
   <div class="rows end">
@@ -116,7 +179,29 @@
 <Sheet open={menuOpen} title="Albums" onclose={() => (menuOpen = false)} width={360}>
   <div class="menu">
     <button onclick={() => { menuOpen = false; createOpen = true; }}><Icon name="add" size={20} /> New album</button>
+    <button onclick={() => { menuOpen = false; smartOpen = true; }}><Icon name="search" size={20} /> New smart album</button>
     <button onclick={() => { menuOpen = false; joinOpen = true; }}><Icon name="link" size={20} /> Join with an invitation</button>
+    {#if app.albums.some(deletable)}<button onclick={() => { menuOpen = false; selecting = true; }}><Icon name="check" size={20} /> Select albums</button>{/if}
+  </div>
+</Sheet>
+
+<Sheet open={smartOpen} title="New smart album" onclose={() => (smartOpen = false)} width={400}>
+  <form class="stack" onsubmit={(e) => { e.preventDefault(); createSmart(); }}>
+    <p class="muted small">It shows whatever this search finds, so new photos join it by themselves. Try a person, a place, a year or a thing: “beach 2024”, “screenshots”.</p>
+    <input class="input" placeholder="Album name" aria-label="Album name" bind:value={smartName} />
+    <input class="input" placeholder="Search for…" aria-label="Search" bind:value={smartQuery} />
+    <Button type="submit" kind="primary" block disabled={busy || !smartName.trim() || !smartQuery.trim()}>Create smart album</Button>
+  </form>
+</Sheet>
+
+<Sheet open={confirmOpen} title="Delete {plural(chosen.length, 'album')}?" onclose={() => (confirmOpen = false)} width={400}>
+  <div class="stack">
+    <p class="muted">{chosenAlbums.map((a) => a.name).join(', ')}</p>
+    <p class="muted">They go from all your devices.{chosenPhotos ? ` Their ${plural(chosenPhotos, 'photo')} stay in your library.` : ''}</p>
+    {#if chosenAlbums.some((a) => a.sharedId)}<p class="muted small">Shared albums they were shared as stay for the people in them.</p>{/if}
+    {#if chosenAlbums.some((a) => a.personal)}<p class="muted small">Any web links to them stop working.</p>{/if}
+    <Button kind="danger" block disabled={busy} onclick={deleteChosen}>{busy ? 'Deleting…' : `Delete ${plural(chosen.length, 'album')}`}</Button>
+    <Button kind="ghost" block onclick={() => (confirmOpen = false)}>Cancel</Button>
   </div>
 </Sheet>
 
@@ -154,6 +239,12 @@
   @media (min-width: 721px) { .page { padding-top: 14px; padding-left: 18px; padding-right: 18px; } }
   @media (max-width: 720px) { .grid { grid-template-columns: repeat(2, 1fr); } }
   .album { text-decoration: none; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .pick { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+  .pick.off { opacity: .45; cursor: default; }
+  .tick { position: absolute; left: 8px; top: 8px; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.25); display: grid; place-items: center; color: var(--accent-ink); }
+  .tick.on { background: var(--accent); border-color: var(--accent); }
+  .pick[aria-pressed='true'] .cover { outline: 3px solid var(--accent); outline-offset: -3px; }
+  .selbar { position: sticky; bottom: 0; margin-top: 14px; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0,0,0,.18); }
   .album b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cover { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: var(--surface-2); display: grid; place-items: center; color: var(--ink-3); margin-bottom: 6px; }
   .cover img { width: 100%; height: 100%; object-fit: cover; }

@@ -59,6 +59,14 @@ pub enum StateEntry {
     FaceLabel(FaceLabel),
     /// The video that goes with a photo (F2.10). Appended, like the records before.
     Motion(MotionRecord),
+    /// A personal album was deleted at `hlc`. Appended, like the records before: older builds
+    /// skip it and keep showing the album. The album stays deleted unless it is written to
+    /// (renamed, given a cover, added to) after `hlc`, so an edit made before a device heard of
+    /// the deletion brings back just that edit.
+    AlbumDeleted {
+        id: AlbumId,
+        hlc: Hlc,
+    },
 }
 
 /// Which stored record a write changed (and so must be persisted/announced).
@@ -76,6 +84,7 @@ pub enum Touched {
     Person(PersonId),
     FaceLabel(PhotoId, [u8; 4]),
     Motion(PhotoId),
+    AlbumDeleted(AlbumId),
 }
 
 /// The result of a state mutation.
@@ -135,6 +144,8 @@ pub struct LibraryState {
     /// Purge markers: a record whose latest tombstone HLC is not after the marker is dropped.
     purged: BTreeMap<PhotoId, Hlc>,
     albums: BTreeMap<AlbumId, AlbumMeta>,
+    /// Deletion marker per album (the latest wins); see [`StateEntry::AlbumDeleted`].
+    albums_deleted: BTreeMap<AlbumId, Hlc>,
     devices: BTreeMap<EndpointId, DeviceCert>,
     admins: BTreeMap<EndpointId, AdminCert>,
     /// Present once the library's root key is known: certs are then verified (M2-01) and
@@ -213,6 +224,7 @@ impl LibraryState {
             timeline: BTreeSet::new(),
             purged: BTreeMap::new(),
             albums: BTreeMap::new(),
+            albums_deleted: BTreeMap::new(),
             devices: BTreeMap::new(),
             admins: BTreeMap::new(),
             chain: None,
@@ -329,6 +341,41 @@ impl LibraryState {
             fx.change(Change::AlbumChanged(album.id));
             fx.touch(Touched::Album(album.id));
         }
+    }
+
+    fn merge_album_deleted(&mut self, id: AlbumId, hlc: Hlc, fx: &mut Effect) {
+        self.observe(&hlc);
+        if self.albums_deleted.get(&id).is_some_and(|h| *h >= hlc) {
+            return;
+        }
+        self.albums_deleted.insert(id, hlc);
+        fx.change(Change::AlbumChanged(id));
+        fx.touch(Touched::AlbumDeleted(id));
+    }
+
+    /// The latest write to an album that still counts: its name, its cover, or an item it holds.
+    fn album_last_write(album: &AlbumMeta) -> Hlc {
+        let items = album.items.adds.iter().flat_map(|(item, tags)| {
+            let removed = album.items.removes.get(item);
+            tags.iter()
+                .filter(move |t| removed.is_none_or(|r| !r.contains(t)))
+        });
+        items
+            .copied()
+            .chain([album.name.hlc, album.cover.hlc])
+            .max()
+            .expect("name and cover")
+    }
+
+    /// An album is shown unless it was deleted after its latest write.
+    fn album_live(&self, album: &AlbumMeta) -> bool {
+        self.albums_deleted
+            .get(&album.id)
+            .is_none_or(|deleted| Self::album_last_write(album) > *deleted)
+    }
+
+    fn live_album(&self, id: &AlbumId) -> Option<&AlbumMeta> {
+        self.albums.get(id).filter(|a| self.album_live(a))
     }
 
     fn merge_device(&mut self, cert: &DeviceCert) -> bool {
@@ -725,7 +772,7 @@ impl LibraryState {
     }
 
     pub fn album_add(&mut self, album: &AlbumId, items: &[PhotoId], now_ms: u64) -> Result<Effect> {
-        if !self.albums.contains_key(album) {
+        if self.live_album(album).is_none() {
             return Err(StoreError::NotFound);
         }
         let tags: Vec<Hlc> = items.iter().map(|_| self.tick(now_ms)).collect();
@@ -739,17 +786,51 @@ impl LibraryState {
         Ok(fx)
     }
 
-    pub fn album_remove(&mut self, album: &AlbumId, items: &[PhotoId]) -> Result<Effect> {
-        let meta = self.albums.get_mut(album).ok_or(StoreError::NotFound)?;
+    pub fn album_remove(
+        &mut self,
+        album: &AlbumId,
+        items: &[PhotoId],
+        now_ms: u64,
+    ) -> Result<Effect> {
+        if self.live_album(album).is_none() {
+            return Err(StoreError::NotFound);
+        }
+        // An album brought back after a deletion is kept by its latest write; emptying it must
+        // not delete it again, so the name is written anew (same value, fresh HLC).
+        let restamp = self
+            .albums_deleted
+            .contains_key(album)
+            .then(|| self.tick(now_ms));
+        let meta = self.albums.get_mut(album).expect("checked");
         let before = meta.items.clone();
         for item in items {
             meta.items.remove(item);
         }
         let mut fx = Effect::default();
         if meta.items != before {
+            if let Some(hlc) = restamp {
+                meta.name = Lww::new(meta.name.value.clone(), hlc);
+            }
             fx.change(Change::AlbumChanged(*album));
             fx.touch(Touched::Album(*album));
         }
+        Ok(fx)
+    }
+
+    /// Delete an album: drop every item this replica has seen from it and mark it deleted. The
+    /// photos stay in the library. `NotFound` if the album is unknown or already deleted.
+    pub fn delete_album(&mut self, album: &AlbumId, now_ms: u64) -> Result<Effect> {
+        if self.live_album(album).is_none() {
+            return Err(StoreError::NotFound);
+        }
+        let hlc = self.tick(now_ms);
+        let meta = self.albums.get_mut(album).expect("checked");
+        for item in meta.items.items() {
+            meta.items.remove(&item);
+        }
+        let mut fx = Effect::default();
+        fx.touch(Touched::Album(*album));
+        self.merge_album_deleted(*album, hlc, &mut fx);
         Ok(fx)
     }
 
@@ -867,6 +948,7 @@ impl LibraryState {
         match entry {
             StateEntry::Photo(rec) => self.merge_photo(rec, &mut fx),
             StateEntry::Album(album) => self.merge_album(album, &mut fx),
+            StateEntry::AlbumDeleted { id, hlc } => self.merge_album_deleted(*id, *hlc, &mut fx),
             StateEntry::Device(cert) => match &mut self.chain {
                 None => {
                     if self.merge_device(cert) {
@@ -984,6 +1066,10 @@ impl LibraryState {
                 .cloned()
                 .map(StateEntry::IndexShard),
             Touched::Motion(photo) => self.motions.get(photo).cloned().map(StateEntry::Motion),
+            Touched::AlbumDeleted(id) => self
+                .albums_deleted
+                .get(id)
+                .map(|hlc| StateEntry::AlbumDeleted { id: *id, hlc: *hlc }),
             Touched::Indexer(device) => self
                 .indexers
                 .get(device)
@@ -1003,6 +1089,11 @@ impl LibraryState {
         let mut out: Vec<StateEntry> = vec![];
         out.extend(self.photos.values().map(StateEntry::Photo));
         out.extend(self.albums.values().cloned().map(StateEntry::Album));
+        out.extend(
+            self.albums_deleted
+                .iter()
+                .map(|(id, hlc)| StateEntry::AlbumDeleted { id: *id, hlc: *hlc }),
+        );
         out.extend(self.devices.values().cloned().map(StateEntry::Device));
         out.extend(self.admins.values().cloned().map(StateEntry::Admin));
         out.extend(self.holdings.iter().map(|((d, b), l)| StateEntry::Holding {
@@ -1071,6 +1162,15 @@ impl LibraryState {
 
     pub fn setting(&self, key: &str) -> Option<Vec<u8>> {
         self.settings.get(key).map(|l| l.value.clone())
+    }
+
+    /// Every setting whose key starts with `prefix`, in key order.
+    pub fn settings_with_prefix(&self, prefix: &str) -> Vec<(String, Vec<u8>)> {
+        self.settings
+            .range::<str, _>((Bound::Included(prefix), Bound::Unbounded))
+            .take_while(|(k, _)| k.starts_with(prefix))
+            .map(|(k, l)| (k.clone(), l.value.clone()))
+            .collect()
     }
 
     /// The video of a photo, if it has one.
@@ -1161,7 +1261,7 @@ impl LibraryState {
     }
 
     pub fn album_items(&self, album: &AlbumId, page: Page) -> Result<Vec<PhotoId>> {
-        let meta = self.albums.get(album).ok_or(StoreError::NotFound)?;
+        let meta = self.live_album(album).ok_or(StoreError::NotFound)?;
         let after = page.after.map(|c| c.id);
         Ok(self
             .visible_album_items(meta)
@@ -1174,6 +1274,7 @@ impl LibraryState {
     pub fn albums(&self) -> Vec<AlbumSummary> {
         self.albums
             .values()
+            .filter(|a| self.album_live(a))
             .map(|a| AlbumSummary {
                 id: a.id,
                 name: a.name.value.clone(),

@@ -655,8 +655,14 @@ impl<L: LibraryStore> LibraryNode<L> {
                     items: OrSet::new(),
                 })
                 .await?;
-            store.album_add(&id, &ids).await?;
-            report.albums.push((album.title.clone(), ids.len()));
+            // An album the user deleted stays deleted: its photos are imported, just not into it.
+            match store.album_add(&id, &ids).await {
+                Ok(()) => report.albums.push((album.title.clone(), ids.len())),
+                Err(shoebox_core::store::StoreError::NotFound) => {
+                    report.albums.push((album.title.clone(), 0))
+                }
+                Err(e) => return Err(e.into()),
+            }
         }
         if !report.import.imported.is_empty() {
             let _ = self

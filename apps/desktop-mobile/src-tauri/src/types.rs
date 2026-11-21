@@ -344,6 +344,20 @@ ts_type! {
         pub item_count: u32,
         /// The shared album this album is shared as, if it is shared.
         pub shared_as: Option<String>,
+        /// When its earliest and latest photos were taken (ms), worked out when read; `None` when empty.
+        pub first_ms: Option<f64>,
+        pub last_ms: Option<f64>,
+        /// What the album is about, in the person's words ("" when none); the same on every device.
+        pub note: String,
+    }
+}
+
+ts_type! {
+    /// A saved search shown as an album: its photos are whatever the search finds now.
+    pub struct SmartAlbumInfo {
+        pub id: String,
+        pub name: String,
+        pub query: String,
     }
 }
 

@@ -50,3 +50,16 @@ export function monthLabel(key: string): string {
   const [y, m] = key.split('-').map(Number);
   return `${['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][m - 1]} ${y}`;
 }
+
+/** When an album's photos were taken, as short as it can say it: "3 Jun 2025", "3–9 Jun 2025",
+ *  "28 May – 9 Jun 2025", "Dec 2024 – Jan 2025". Empty without dates. */
+export function dateRange(first: number | null, last: number | null): string {
+  if (first === null || last === null) return '';
+  const a = new Date(first), b = new Date(last);
+  const [da, ma, ya] = [a.getDate(), MONTHS[a.getMonth()], a.getFullYear()];
+  const [db, mb, yb] = [b.getDate(), MONTHS[b.getMonth()], b.getFullYear()];
+  if (ya !== yb) return `${ma} ${ya} – ${mb} ${yb}`;
+  if (ma !== mb) return `${da} ${ma} – ${db} ${mb} ${yb}`;
+  if (da !== db) return `${da}–${db} ${mb} ${yb}`;
+  return `${da} ${mb} ${yb}`;
+}

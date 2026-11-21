@@ -141,7 +141,7 @@
     <div class="albums">
       {#each app.albums as a (a.id)}
         <a class="it" class:on={sec === 'album' && (param() === a.id || param() === a.sharedId)} href="#/album/{a.id}" title={a.name}>
-          <span class="ni"><Icon name="albums" size={18} /></span><span class="nm">{a.name}</span>
+          <span class="ni"><Icon name={a.smart !== undefined ? 'search' : 'albums'} size={18} /></span><span class="nm">{a.name}</span>
           {#if a.shared}<span class="pill">Shared</span>{/if}
           {#if a.unread > 0}<span class="badge" aria-label="{a.unread} new">{a.unread}</span>{/if}
         </a>

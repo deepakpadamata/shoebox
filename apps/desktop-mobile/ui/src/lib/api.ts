@@ -10,6 +10,7 @@ import type { SharedItemInfo } from '../bindings/SharedItemInfo';
 import type { SharedItemsPage } from '../bindings/SharedItemsPage';
 import type { SharedMemberInfo } from '../bindings/SharedMemberInfo';
 import type { AlbumInfo } from '../bindings/AlbumInfo';
+import type { SmartAlbumInfo } from '../bindings/SmartAlbumInfo';
 import type { AppEvent } from '../bindings/AppEvent';
 import type { AppState } from '../bindings/AppState';
 import type { BackupFolder } from '../bindings/BackupFolder';
@@ -55,7 +56,7 @@ import type { WebLinksInfo } from '../bindings/WebLinksInfo';
 
 export type {
   AboutInfo, AddCheck, AddResult, DiagnosticsBundle, FeedEntry, InviteOut, SharedAlbumInfo, SharedItemInfo, SharedItemsPage, SharedMemberInfo,
-  AlbumInfo, AppEvent, BackupFolder, BackupPolicy, BackupPreview, BackupScope, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, FreeUpStatus, Health, SafetyStatus, ImportSummary, ArchiveImportInfo, ArchivePlanInfo,
+  AlbumInfo, SmartAlbumInfo, AppEvent, BackupFolder, BackupPolicy, BackupPreview, BackupScope, BackupReport, BackupStatus, AppState, CreatedLibrary, DeviceInfo, DeviceStorageInfo, ExportReport, FreeUpReport, FreeUpStatus, Health, SafetyStatus, ImportSummary, ArchiveImportInfo, ArchivePlanInfo,
   LibraryCounts, PageCursor, PairStart, PhotoDetail, PhotoPage, PhotoSummary, Profile, FaceOut, PeopleList, PersonCard, SearchChip, SearchIndexer, SearchPage, SearchStatus, SearchSuggestion, Settings, TransferItem, Transfers, WebLinkCheck, WebLinkInfo, WebLinksInfo,
 };
 
@@ -242,6 +243,12 @@ export const api = {
   renameDevice: (name: string) => call<{}>('rename_device', { name }),
   setAlbumCover: (album: string, photo: string) => call<{}>('set_album_cover', { album, photo }),
   renameAlbum: (album: string, name: string) => call<{}>('rename_album', { album, name }),
+  deleteAlbum: (album: string) => call<{}>('delete_album', { album }),
+  setAlbumNote: (album: string, note: string) => call<{}>('set_album_note', { album, note }),
+  exportAlbum: (album: string, dest: string) => call<ExportReport>('export_album', { album, dest }),
+  smartAlbums: () => call<SmartAlbumInfo[]>('smart_albums'),
+  saveSmartAlbum: (name: string, query: string, id: string | null = null) => call<SmartAlbumInfo>('save_smart_album', { id, name, query }),
+  deleteSmartAlbum: (id: string) => call<{}>('delete_smart_album', { id }),
   setPoster: (id: string, data: string) => call<{}>('set_poster', { id, data }),
   /** Make a video's poster frame with the platform's thumbnailer; `false` where it cannot. */
   makePoster: (id: string) => call<boolean>('make_poster', { id }),

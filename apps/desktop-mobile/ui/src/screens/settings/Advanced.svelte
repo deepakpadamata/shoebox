@@ -35,7 +35,14 @@
   async function copyDiagnostics() {
     try { await navigator.clipboard.writeText(diag!.text); toast('Copied. Paste it into your message.'); } catch { toast('Select the text and copy it'); }
   }
-  const diagUrl = $derived(diag ? URL.createObjectURL(new Blob([diag.text], { type: 'text/plain' })) : '');
+  // One file link at a time: the last one is let go when the text changes or the page closes.
+  let diagUrl = $state('');
+  $effect(() => {
+    if (!diag) return;
+    const url = URL.createObjectURL(new Blob([diag.text], { type: 'text/plain' }));
+    diagUrl = url;
+    return () => URL.revokeObjectURL(url);
+  });
 
   // Replacing the recovery phrase: the current one in, the new kit out (shown once).
   let replaceOpen = $state(false);

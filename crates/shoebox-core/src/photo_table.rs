@@ -177,6 +177,14 @@ impl PhotoTable {
         self.photos.get(id).map(|p| p.deleted_at.is_some())
     }
 
+    /// When a live photo was taken, without unpacking it; `None` if unknown or deleted.
+    pub(crate) fn live_taken_at(&self, id: &PhotoId) -> Option<Timestamp> {
+        self.photos
+            .get(id)
+            .filter(|p| p.deleted_at.is_none())
+            .map(|p| p.taken_at)
+    }
+
     pub(crate) fn insert(&mut self, rec: &PhotoRecord) -> Option<PhotoRecord> {
         let packed = self.pack(rec);
         let old = self.photos.insert(rec.id, packed)?;

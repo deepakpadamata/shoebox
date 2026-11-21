@@ -278,6 +278,10 @@ impl LibraryStore for DocsLibrary {
         Ok(self.read(|s| s.albums()).await)
     }
 
+    async fn photo_albums(&self, photo: &PhotoId) -> Result<Vec<AlbumId>> {
+        Ok(self.read(|s| s.photo_albums(photo)).await)
+    }
+
     async fn device_list(&self) -> Result<SignedDeviceList> {
         Ok(self.read(|s| s.device_list()).await)
     }

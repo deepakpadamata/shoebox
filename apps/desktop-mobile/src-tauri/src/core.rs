@@ -178,21 +178,6 @@ pub(crate) async fn keeper_set(ln: &LibraryNode<Library>) -> Result<HashSet<Endp
 }
 
 /// The newest photo that is not deleted: an album's cover when none was chosen.
-pub(crate) fn newest_cover(recs: &[PhotoRecord]) -> Option<Blake3Hash> {
-    recs.iter()
-        .filter(|r| r.deleted_at.value.is_none())
-        .max_by_key(|r| (r.taken_at, r.id))
-        .map(|r| r.id)
-}
-
-/// When the earliest and latest live photos of `recs` were taken.
-fn date_range(recs: &[PhotoRecord]) -> (Option<f64>, Option<f64>) {
-    let live = recs.iter().filter(|r| r.deleted_at.value.is_none());
-    let first = live.clone().map(|r| r.taken_at.0).min();
-    let last = live.map(|r| r.taken_at.0).max();
-    (first.map(|t| t as f64), last.map(|t| t as f64))
-}
-
 /// Library setting holding an album's description (UTF-8; empty = none).
 fn album_note_key(album: &AlbumId) -> String {
     format!("album-note.{}", hex::encode(album.0))
@@ -1512,20 +1497,13 @@ impl AppCore {
                 }
             }
         }
-        let albums = ln
+        let in_albums = ln
             .store()
-            .albums()
+            .photo_albums(&id)
             .await?
             .into_iter()
-            .map(|a| a.id)
+            .map(|a| hex::encode(a.0))
             .collect::<Vec<_>>();
-        let mut in_albums = vec![];
-        for a in albums {
-            let items = ln.store().album_items(&a, Page::all()).await?;
-            if items.contains(&id) {
-                in_albums.push(hex::encode(a.0));
-            }
-        }
         let copies = holders
             .iter()
             .filter(|h| h.kind == BlobKind::Original)
@@ -1805,18 +1783,12 @@ impl AppCore {
         let mut out = vec![];
         for a in ln.store().albums().await? {
             let id = hex::encode(a.id.0);
-            let mut recs = vec![];
-            if a.item_count > 0 {
-                for pid in ln.store().album_items(&a.id, Page::all()).await? {
-                    if let Some(rec) = ln.store().photo(&pid).await? {
-                        recs.push(rec);
-                    }
-                }
-            }
             // No stored cover: the newest photo in the album, chosen when read so there is
             // nothing to sync (U1-03). The date range is worked out the same way.
-            let cover = a.cover.or_else(|| newest_cover(&recs));
-            let (first_ms, last_ms) = date_range(&recs);
+            let cover = a.cover.or(a.newest);
+            let (first_ms, last_ms) = a
+                .taken
+                .map_or((None, None), |(f, l)| (Some(f.0 as f64), Some(l.0 as f64)));
             let note = ln
                 .store()
                 .setting(&album_note_key(&a.id))
@@ -3131,53 +3103,5 @@ fn archive_report(r: &shoebox_node::ArchiveImportReport) -> ArchiveReportInfo {
             .iter()
             .map(|(p, e)| format!("{}: {e}", p.display()))
             .collect(),
-    }
-}
-
-#[cfg(test)]
-mod cover_tests {
-    use super::*;
-    use shoebox_core::model::{BlobRef, ExifSummary};
-
-    fn rec(n: u8, taken: i64, deleted: bool) -> PhotoRecord {
-        let hlc = shoebox_core::Hlc {
-            physical_ms: 1,
-            counter: 0,
-            device: EndpointId([1; 32]),
-        };
-        let blob = BlobRef {
-            hash: Blake3Hash([n; 32]),
-            size: 1,
-            mime: "image/jpeg".into(),
-        };
-        PhotoRecord {
-            id: Blake3Hash([n; 32]),
-            original: blob.clone(),
-            preview: blob.clone(),
-            thumb: blob,
-            taken_at: Timestamp(taken),
-            exif: ExifSummary::default(),
-            imported_by: EndpointId([1; 32]),
-            favorite: Lww::new(false, hlc),
-            deleted_at: Lww::new(deleted.then_some(Timestamp(5)), hlc),
-        }
-    }
-
-    #[test]
-    fn cover_is_the_newest_photo() {
-        let recs = [rec(1, 100, false), rec(2, 300, false), rec(3, 200, false)];
-        assert_eq!(newest_cover(&recs), Some(Blake3Hash([2; 32])));
-    }
-
-    #[test]
-    fn cover_ignores_deleted_photos() {
-        let recs = [rec(1, 100, false), rec(2, 300, true)];
-        assert_eq!(newest_cover(&recs), Some(Blake3Hash([1; 32])));
-    }
-
-    #[test]
-    fn empty_album_has_no_cover() {
-        assert_eq!(newest_cover(&[]), None);
-        assert_eq!(newest_cover(&[rec(1, 1, true)]), None);
     }
 }

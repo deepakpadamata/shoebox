@@ -990,6 +990,9 @@ impl LibraryStore for LoroLibrary {
     async fn albums(&self) -> Result<Vec<AlbumSummary>> {
         Ok(self.read(|s| s.albums()))
     }
+    async fn photo_albums(&self, photo: &PhotoId) -> Result<Vec<AlbumId>> {
+        Ok(self.read(|s| s.photo_albums(photo)))
+    }
     async fn device_list(&self) -> Result<SignedDeviceList> {
         Ok(self.read(|s| s.device_list()))
     }

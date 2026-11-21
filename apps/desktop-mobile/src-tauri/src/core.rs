@@ -66,9 +66,9 @@ impl Default for AppOptions {
             background: true,
             update_feed: default_update_feed(),
             // Released blobs (a deleted gallery photo's reference, a copy turned into a
-            // reference) are collected on the next pass. Each pass lists every blob in the
-            // store, so this is a balance between freeing room soon and idle CPU: iroh-blobs
-            // has no public way to run one pass on demand right after a release.
+            // reference) are collected within this long. Each pass lists every blob in the
+            // store, so one only runs when something was released since the last (or every
+            // half hour, for what is let go without a release): see the node's GC callback.
             gc_interval: Some(Duration::from_secs(120)),
             model_dirs: vec![],
             search_models: true,
@@ -175,22 +175,6 @@ pub(crate) async fn keeper_set(ln: &LibraryNode<Library>) -> Result<HashSet<Endp
         .filter(|d| d.role == Role::Keeper && !d.revoked)
         .map(|d| d.device)
         .collect())
-}
-
-/// The newest photo that is not deleted: an album's cover when none was chosen.
-pub(crate) fn newest_cover(recs: &[PhotoRecord]) -> Option<Blake3Hash> {
-    recs.iter()
-        .filter(|r| r.deleted_at.value.is_none())
-        .max_by_key(|r| (r.taken_at, r.id))
-        .map(|r| r.id)
-}
-
-/// When the earliest and latest live photos of `recs` were taken.
-fn date_range(recs: &[PhotoRecord]) -> (Option<f64>, Option<f64>) {
-    let live = recs.iter().filter(|r| r.deleted_at.value.is_none());
-    let first = live.clone().map(|r| r.taken_at.0).min();
-    let last = live.map(|r| r.taken_at.0).max();
-    (first.map(|t| t as f64), last.map(|t| t as f64))
 }
 
 /// Library setting holding an album's description (UTF-8; empty = none).
@@ -332,9 +316,27 @@ pub struct AppCore {
     /// was asked for while it ran.
     pub(crate) auto_save: tokio::sync::Mutex<()>,
     pub(crate) auto_save_again: std::sync::atomic::AtomicBool,
+    /// The last pass left a photo it could not fetch, so the timer tries again (starts true:
+    /// the first tick after opening makes one pass).
+    pub(crate) auto_save_left: std::sync::atomic::AtomicBool,
     /// The Free up space run going on in the background, and how the last one ended.
     free_up: Mutex<FreeUpRun>,
+    /// Bumped on each event that can change [`AppCore::health`]'s numbers.
+    health_generation: std::sync::atomic::AtomicU64,
+    /// The last [`AppCore::health`] walk, reused while nothing it depends on has changed.
+    health_cache: tokio::sync::Mutex<Option<HealthCache>>,
 }
+
+struct HealthCache {
+    library: shoebox_core::store::LibraryId,
+    generation: u64,
+    at: std::time::Instant,
+    health: Health,
+}
+
+/// A health walk is reused for at most this long, even with no event: a gallery file deleted
+/// outside the app, say, changes what is here without telling the library.
+const HEALTH_MAX_AGE: Duration = Duration::from_secs(60);
 
 #[derive(Default)]
 struct FreeUpRun {
@@ -458,10 +460,13 @@ impl AppCore {
             transfer_cache: tokio::sync::Mutex::new(TransferCache::default()),
             archive_import: Mutex::new(ArchiveRun::default()),
             free_up: Mutex::new(FreeUpRun::default()),
+            health_generation: Default::default(),
+            health_cache: Default::default(),
             seen: Mutex::new(SeenBook::default()),
             safety_sent: Mutex::new(None),
             auto_save: tokio::sync::Mutex::new(()),
             auto_save_again: std::sync::atomic::AtomicBool::new(false),
+            auto_save_left: std::sync::atomic::AtomicBool::new(true),
         });
         core.load_seen();
         core.forward_node_events();
@@ -490,6 +495,17 @@ impl AppCore {
     }
 
     pub(crate) fn emit(&self, e: AppEvent) {
+        if matches!(
+            e,
+            AppEvent::LibraryChanged
+                | AppEvent::HoldingsChanged
+                | AppEvent::DevicesChanged
+                | AppEvent::LibraryRotated
+        ) {
+            // Before it is sent, so a screen refreshing on it gets the new numbers.
+            self.health_generation
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         let _ = self.events.send(e);
     }
 
@@ -823,7 +839,8 @@ impl AppCore {
         let mut notices = shared.subscribe();
         tokio::spawn(async move {
             // A photo that could not be fetched yet (nobody from the album was online) is tried
-            // again now and then, as well as when the album changes.
+            // again now and then, as well as when the album changes; with nothing left over the
+            // timer does nothing.
             let mut retry = tokio::time::interval(std::time::Duration::from_secs(120));
             loop {
                 tokio::select! {
@@ -844,7 +861,9 @@ impl AppCore {
                     }
                     _ = retry.tick() => {
                         let Some(core) = weak.upgrade() else { break };
-                        core.kick_auto_save();
+                        if core.auto_save_left.load(std::sync::atomic::Ordering::SeqCst) {
+                            core.kick_auto_save();
+                        }
                     }
                 }
             }
@@ -1512,20 +1531,13 @@ impl AppCore {
                 }
             }
         }
-        let albums = ln
+        let in_albums = ln
             .store()
-            .albums()
+            .photo_albums(&id)
             .await?
             .into_iter()
-            .map(|a| a.id)
+            .map(|a| hex::encode(a.0))
             .collect::<Vec<_>>();
-        let mut in_albums = vec![];
-        for a in albums {
-            let items = ln.store().album_items(&a, Page::all()).await?;
-            if items.contains(&id) {
-                in_albums.push(hex::encode(a.0));
-            }
-        }
         let copies = holders
             .iter()
             .filter(|h| h.kind == BlobKind::Original)
@@ -1805,18 +1817,12 @@ impl AppCore {
         let mut out = vec![];
         for a in ln.store().albums().await? {
             let id = hex::encode(a.id.0);
-            let mut recs = vec![];
-            if a.item_count > 0 {
-                for pid in ln.store().album_items(&a.id, Page::all()).await? {
-                    if let Some(rec) = ln.store().photo(&pid).await? {
-                        recs.push(rec);
-                    }
-                }
-            }
             // No stored cover: the newest photo in the album, chosen when read so there is
             // nothing to sync (U1-03). The date range is worked out the same way.
-            let cover = a.cover.or_else(|| newest_cover(&recs));
-            let (first_ms, last_ms) = date_range(&recs);
+            let cover = a.cover.or(a.newest);
+            let (first_ms, last_ms) = a
+                .taken
+                .map_or((None, None), |(f, l)| (Some(f.0 as f64), Some(l.0 as f64)));
             let note = ln
                 .store()
                 .setting(&album_note_key(&a.id))
@@ -2407,15 +2413,54 @@ impl AppCore {
         }
     }
 
+    /// The library's health. The walk behind it (every photo's holders, what is here, what Free
+    /// up would let go) is reused until the library, holdings or devices change, or a minute
+    /// passes; which devices are online is always current.
     pub async fn health(&self) -> Result<Health> {
         let ln = self.ln().await?;
+        let library = ln.library_id();
+        // Held through the walk: a second caller waits for it rather than walking too.
+        let mut cache = self.health_cache.lock().await;
+        let generation = self
+            .health_generation
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let mut health = match cache.as_ref() {
+            Some(c)
+                if c.library == library
+                    && c.generation == generation
+                    && c.at.elapsed() < HEALTH_MAX_AGE =>
+            {
+                c.health.clone()
+            }
+            _ => {
+                let health = self.walk_health(&ln).await?;
+                *cache = Some(HealthCache {
+                    library,
+                    generation,
+                    at: std::time::Instant::now(),
+                    health: health.clone(),
+                });
+                health
+            }
+        };
+        drop(cache);
+        health.devices_online = self
+            .devices()
+            .await?
+            .iter()
+            .filter(|d| d.online && !d.revoked)
+            .count() as u32;
+        Ok(health)
+    }
+
+    async fn walk_health(&self, ln: &LibraryNode<Library>) -> Result<Health> {
         let photos = ln
             .store()
             .photos_by_time(TimeRange::ALL, Page::all())
             .await?;
         let target = ln.redundancy_target().await? as usize;
         let mut hist = vec![0u32; target.max(2) + 2];
-        let keepers = keeper_set(&ln).await?;
+        let keepers = keeper_set(ln).await?;
         let (mut here, mut here_bytes) = (0u32, 0f64);
         for rec in &photos {
             let holders = ln.store().holders(&rec.original.hash).await?;
@@ -2437,12 +2482,6 @@ impl AppCore {
             }
         }
         let list = ln.store().device_list().await?;
-        let online = self
-            .devices()
-            .await?
-            .iter()
-            .filter(|d| d.online && !d.revoked)
-            .count();
         let (free_photos, free_bytes) = match ln.free_up_space(true).await {
             Ok(r) => (r.photos.len() as u32, r.bytes as f64),
             Err(_) => (0, 0.0), // keepers never free space
@@ -2454,7 +2493,7 @@ impl AppCore {
             redundancy_target: target as u32,
             originals_here: here,
             originals_here_bytes: here_bytes,
-            devices_online: online as u32,
+            devices_online: 0, // filled in by `health`, always fresh
             devices_total: list.devices.iter().filter(|d| !d.revoked).count() as u32,
             can_free_bytes: free_bytes,
             can_free_photos: free_photos,
@@ -3131,53 +3170,5 @@ fn archive_report(r: &shoebox_node::ArchiveImportReport) -> ArchiveReportInfo {
             .iter()
             .map(|(p, e)| format!("{}: {e}", p.display()))
             .collect(),
-    }
-}
-
-#[cfg(test)]
-mod cover_tests {
-    use super::*;
-    use shoebox_core::model::{BlobRef, ExifSummary};
-
-    fn rec(n: u8, taken: i64, deleted: bool) -> PhotoRecord {
-        let hlc = shoebox_core::Hlc {
-            physical_ms: 1,
-            counter: 0,
-            device: EndpointId([1; 32]),
-        };
-        let blob = BlobRef {
-            hash: Blake3Hash([n; 32]),
-            size: 1,
-            mime: "image/jpeg".into(),
-        };
-        PhotoRecord {
-            id: Blake3Hash([n; 32]),
-            original: blob.clone(),
-            preview: blob.clone(),
-            thumb: blob,
-            taken_at: Timestamp(taken),
-            exif: ExifSummary::default(),
-            imported_by: EndpointId([1; 32]),
-            favorite: Lww::new(false, hlc),
-            deleted_at: Lww::new(deleted.then_some(Timestamp(5)), hlc),
-        }
-    }
-
-    #[test]
-    fn cover_is_the_newest_photo() {
-        let recs = [rec(1, 100, false), rec(2, 300, false), rec(3, 200, false)];
-        assert_eq!(newest_cover(&recs), Some(Blake3Hash([2; 32])));
-    }
-
-    #[test]
-    fn cover_ignores_deleted_photos() {
-        let recs = [rec(1, 100, false), rec(2, 300, true)];
-        assert_eq!(newest_cover(&recs), Some(Blake3Hash([1; 32])));
-    }
-
-    #[test]
-    fn empty_album_has_no_cover() {
-        assert_eq!(newest_cover(&[]), None);
-        assert_eq!(newest_cover(&[rec(1, 1, true)]), None);
     }
 }

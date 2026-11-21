@@ -1248,3 +1248,27 @@ async fn a_video_that_is_elsewhere_streams_in_ranges() {
         core.shutdown().await.unwrap();
     }
 }
+
+/// Health is reused while nothing changes, and a change to the library shows in it once the
+/// change has gone out to the screens.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn health_is_reused_until_the_library_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = library_with_photos(dir.path()).await;
+    let first = core.health().await.unwrap();
+    assert_eq!(first.photos, 3);
+    assert_eq!(core.health().await.unwrap(), first);
+
+    let mut events = core.events();
+    let id = core.library_page(None, 1).await.unwrap().items[0]
+        .id
+        .clone();
+    core.delete(std::slice::from_ref(&id)).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !matches!(events.recv().await, Ok(AppEvent::LibraryChanged)) {}
+    })
+    .await
+    .expect("the deletion goes out");
+    assert_eq!(core.health().await.unwrap().photos, 2);
+    core.shutdown().await.unwrap();
+}

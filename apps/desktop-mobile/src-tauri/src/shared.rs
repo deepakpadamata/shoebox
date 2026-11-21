@@ -584,10 +584,15 @@ impl AppCore {
             return;
         };
         use shoebox_core::store::AlbumStore;
+        let mut left = false;
         for hex_id in self.save_all_albums() {
             let Ok(aid) = album_id(&hex_id) else { continue };
-            let Ok(store) = sa.album(&aid) else { continue };
+            let Ok(store) = sa.album(&aid) else {
+                left = true;
+                continue;
+            };
             let Ok(items) = store.items(Page::all()).await else {
+                left = true;
                 continue;
             };
             for item in items {
@@ -596,10 +601,13 @@ impl AppCore {
                 }
                 if let Err(e) = self.save_item(&sa, &aid, &ln, &item).await {
                     tracing::debug!("keeping the album's photos in the library: {e:#}");
+                    left = true;
                     break;
                 }
             }
         }
+        self.auto_save_left
+            .store(left, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub async fn shared_settings(

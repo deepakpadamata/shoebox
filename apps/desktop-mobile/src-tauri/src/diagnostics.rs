@@ -65,9 +65,9 @@ pub fn init_logging() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         // Debug builds also show the app's own debug lines (blob requests and the like).
         if cfg!(debug_assertions) {
-            "info,loro_internal=warn,desktop_mobile=debug".into()
+            "info,loro_internal=warn,iroh_blobs::store::gc=warn,desktop_mobile=debug".into()
         } else {
-            "info,loro_internal=warn".into()
+            "info,loro_internal=warn,iroh_blobs::store::gc=warn".into()
         }
     });
     let _ = tracing_subscriber::registry()

@@ -1275,12 +1275,37 @@ impl LibraryState {
         self.albums
             .values()
             .filter(|a| self.album_live(a))
-            .map(|a| AlbumSummary {
-                id: a.id,
-                name: a.name.value.clone(),
-                cover: a.cover.value,
-                item_count: self.visible_album_items(a).len(),
+            .map(|a| {
+                let items = self.visible_album_items(a);
+                let mut newest: Option<(Timestamp, PhotoId)> = None;
+                let mut earliest: Option<Timestamp> = None;
+                for id in &items {
+                    let Some(t) = self.photos.live_taken_at(id) else {
+                        continue;
+                    };
+                    newest = newest.max(Some((t, *id)));
+                    earliest = Some(earliest.map_or(t, |e| e.min(t)));
+                }
+                AlbumSummary {
+                    id: a.id,
+                    name: a.name.value.clone(),
+                    cover: a.cover.value,
+                    item_count: items.len(),
+                    newest: newest.map(|(_, id)| id),
+                    taken: earliest.zip(newest.map(|(t, _)| t)),
+                }
             })
+            .collect()
+    }
+
+    pub fn photo_albums(&self, photo: &PhotoId) -> Vec<AlbumId> {
+        if !self.photo_visible_in_album(photo) {
+            return vec![];
+        }
+        self.albums
+            .values()
+            .filter(|a| self.album_live(a) && a.items.contains(photo))
+            .map(|a| a.id)
             .collect()
     }
 

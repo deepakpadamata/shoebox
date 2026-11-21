@@ -72,7 +72,11 @@ function brightness(ctx: CanvasRenderingContext2D, w: number, h: number): number
 
 interface Request { id: string; done: (ok: boolean) => void; wanted: number }
 const waiting = new Map<string, Request>();
+/** Requests queued or being made. */
 const results = new Map<string, Promise<boolean>>();
+/** Posters made lately, so a tile shown again before the library has caught up does not redo it. */
+const made = new Set<string>();
+const MADE_KEPT = 500;
 let running = 0;
 
 function pump() {
@@ -85,7 +89,15 @@ function pump() {
     grab(next.id).then((ok) => {
       running--;
       // A failure may be retried later (the original may arrive), a success never needs repeating.
-      if (!ok) results.delete(next.id);
+      results.delete(next.id);
+      if (ok) {
+        made.add(next.id);
+        // Long since in the library by then: the oldest are forgotten.
+        for (const old of made) {
+          if (made.size <= MADE_KEPT) break;
+          made.delete(old);
+        }
+      }
       next.done(ok);
       pump();
     });
@@ -97,6 +109,7 @@ function pump() {
  * the tile left before its turn); call the returned function when the tile goes away.
  */
 export function ensurePoster(id: string): { result: Promise<boolean>; release: () => void } {
+  if (made.has(id)) return { result: Promise.resolve(true), release: () => {} };
   const queued = waiting.get(id);
   if (queued) {
     queued.wanted++;

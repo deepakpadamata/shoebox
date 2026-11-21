@@ -71,6 +71,7 @@ scenario_table!(
     delete_now_purges_at_once_everywhere,
     album_add_wins,
     delete_album_replicates,
+    album_dates_and_membership,
     holdings_single_writer_and_at_risk,
     change_stream_events,
     concurrent_edits_converge,
@@ -464,6 +465,43 @@ async fn album_add_wins<H: Harness>(h: &H) {
             vec![hash(1)]
         );
     }
+}
+
+async fn album_dates_and_membership<H: Harness>(h: &H) {
+    let (n, _) = solo(h, 1, 1_000).await;
+    let s = &n.store;
+    for (id, taken) in [(1, 100), (2, 300), (3, 200), (4, 300), (5, 900)] {
+        s.upsert_photo(photo(id, taken, 1)).await.unwrap();
+    }
+    s.mark_deleted(&hash(5)).await.unwrap();
+    let (trip, more, empty) = (AlbumId([1; 16]), AlbumId([2; 16]), AlbumId([3; 16]));
+    for (a, name) in [(1, "Trip"), (2, "More"), (3, "Empty")] {
+        s.upsert_album(album_meta(a, name)).await.unwrap();
+    }
+    // 77 has not synced here yet: it counts, but has no date.
+    s.album_add(
+        &trip,
+        &[hash(1), hash(2), hash(3), hash(4), hash(5), hash(77)],
+    )
+    .await
+    .unwrap();
+    s.album_add(&more, &[hash(1)]).await.unwrap();
+
+    let by_id = |all: Vec<AlbumSummary>, id: AlbumId| all.into_iter().find(|a| a.id == id).unwrap();
+    let t = by_id(s.albums().await.unwrap(), trip);
+    assert_eq!(t.item_count, 5); // the deleted photo is left out
+    assert_eq!(t.newest, Some(hash(4))); // ties on time go to the higher id
+    assert_eq!(t.taken, Some((Timestamp(100), Timestamp(300))));
+    let e = by_id(s.albums().await.unwrap(), empty);
+    assert_eq!((e.newest, e.taken), (None, None));
+
+    assert_eq!(s.photo_albums(&hash(1)).await.unwrap(), vec![trip, more]);
+    assert_eq!(s.photo_albums(&hash(3)).await.unwrap(), vec![trip]);
+    assert_eq!(s.photo_albums(&hash(5)).await.unwrap(), vec![]); // deleted
+    assert_eq!(s.photo_albums(&hash(77)).await.unwrap(), vec![trip]);
+    s.album_remove(&trip, &[hash(1)]).await.unwrap();
+    s.delete_album(&more).await.unwrap();
+    assert_eq!(s.photo_albums(&hash(1)).await.unwrap(), vec![]);
 }
 
 async fn delete_album_replicates<H: Harness>(h: &H) {

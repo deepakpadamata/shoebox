@@ -32,6 +32,8 @@ use tracing::{info, info_span, warn, Instrument};
 pub use iroh::EndpointAddr as PeerAddr;
 
 /// Minimum bytes between `BlobProgress` events for one download.
+/// Blob collection runs at least once every this many intervals, even with nothing released.
+const GC_FULL_PASS_EVERY: u32 = 15;
 const PROGRESS_STEP: u64 = 256 * 1024;
 /// Blobs at least this large are fetched from several holders at once (A-099).
 pub const SPLIT_MIN: u64 = 8 * 1024 * 1024;
@@ -597,14 +599,38 @@ impl Node {
             // Skip a GC pass while the node is busy: GC can race with in-flight data.
             let quiet = Duration::from_millis(config.gc_quiet_ms);
             let guard_activity = activity.clone();
+            // A pass lists every blob, so it only runs when a protection was dropped since the
+            // last one, or now and then (every 15 intervals) for what is let go without one: an
+            // abandoned partial download, a replaced docs entry. Starts true: one pass at start.
+            let released = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let full_every = Duration::from_millis(config.gc_interval_ms.unwrap_or(0))
+                .saturating_mul(GC_FULL_PASS_EVERY);
+            let last_pass = Arc::new(Mutex::new(Instant::now()));
+            let guard_released = released.clone();
             let protect_cb: iroh_blobs::store::ProtectCb = Arc::new(move |live| {
                 let docs_cb = docs_cb.clone();
-                let busy = guard_activity.busy_within(quiet);
+                let retry = guard_released.clone();
+                let run = if guard_activity.busy_within(quiet) {
+                    false
+                } else {
+                    let mut last = last_pass.lock().unwrap();
+                    let due = guard_released.swap(false, std::sync::atomic::Ordering::SeqCst)
+                        || last.elapsed() >= full_every;
+                    if due {
+                        *last = Instant::now();
+                    }
+                    due
+                };
                 Box::pin(async move {
-                    if busy {
-                        iroh_blobs::store::ProtectOutcome::Abort
+                    if run {
+                        let outcome = docs_cb(live).await;
+                        if matches!(outcome, iroh_blobs::store::ProtectOutcome::Abort) {
+                            // Called off after all: what was released waits for the next one.
+                            retry.store(true, std::sync::atomic::Ordering::SeqCst);
+                        }
+                        outcome
                     } else {
-                        docs_cb(live).await
+                        iroh_blobs::store::ProtectOutcome::Abort
                     }
                 })
             });
@@ -615,7 +641,7 @@ impl Node {
             let raw_blobs = FsStore::load_with_opts(config.blobs_dir().join("blobs.db"), blob_opts)
                 .await
                 .map_err(|e| anyhow!("opening blob store: {e}"))?;
-            let blobs = BlobStore::new(raw_blobs, activity.clone());
+            let blobs = BlobStore::new(raw_blobs, activity.clone(), released);
             let gossip = Gossip::builder().spawn(endpoint.clone());
             let docs_dir = config.store_dir().join("docs");
             std::fs::create_dir_all(&docs_dir)?;

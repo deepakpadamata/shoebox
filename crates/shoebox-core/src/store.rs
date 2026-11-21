@@ -162,6 +162,10 @@ pub struct AlbumSummary {
     pub name: String,
     pub cover: Option<PhotoId>,
     pub item_count: usize,
+    /// The newest photo by when it was taken (ties by id), among those this replica has.
+    pub newest: Option<PhotoId>,
+    /// When the earliest and latest of those photos were taken.
+    pub taken: Option<(Timestamp, Timestamp)>,
 }
 
 /// The current set of device certs and admin delegations.
@@ -357,6 +361,9 @@ pub trait LibraryStore: Send + Sync + 'static {
     async fn album_items(&self, album: &AlbumId, page: Page) -> Result<Vec<PhotoId>>;
 
     async fn albums(&self) -> Result<Vec<AlbumSummary>>;
+
+    /// The live albums `photo` is a present member of, in album id order.
+    async fn photo_albums(&self, photo: &PhotoId) -> Result<Vec<AlbumId>>;
 
     // ----- devices (signed by the library root; the store persists and verifies) -----
 

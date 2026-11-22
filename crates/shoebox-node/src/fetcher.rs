@@ -185,6 +185,35 @@ impl<L: LibraryStore> LibraryNode<L> {
 
     // ---------- planning ----------
 
+    /// What decides whether this device wants the original of `rec` (see [`PlanContext`]).
+    pub(crate) async fn plan_context(
+        &self,
+        rec: &PhotoRecord,
+        config: &NodeConfig,
+        pinned: &HashSet<String>,
+        target: usize,
+        protected: &HashSet<Blake3Hash>,
+    ) -> Result<PlanContext> {
+        let own_below = rec.imported_by == self.device()
+            && self
+                .store()
+                .holders(&rec.original.hash)
+                .await?
+                .iter()
+                .filter(|h| h.kind == BlobKind::Original)
+                .count()
+                < target;
+        // Freed by hand: the keep rules no longer want it here (a pin would have cleared this).
+        let offloaded = is_offloaded(rec, config);
+        Ok(PlanContext {
+            pinned: pinned.contains(&rec.id.to_string()),
+            own_capture_below_target: own_below,
+            recent: !offloaded && self.is_recent(rec, config),
+            kept_favorite: !offloaded && config.keep_favorites && rec.favorite.value,
+            holds_original: protected.contains(&rec.original.hash),
+        })
+    }
+
     /// Everything this device should hold according to its role but does not, in fetch order.
     pub async fn missing_blobs(&self) -> Result<Vec<QueuedFetch>> {
         let config = self.node().config();
@@ -228,24 +257,9 @@ impl<L: LibraryStore> LibraryNode<L> {
             }
         };
         for rec in photos {
-            let own_below = rec.imported_by == self.device()
-                && self
-                    .store()
-                    .holders(&rec.original.hash)
-                    .await?
-                    .iter()
-                    .filter(|h| h.kind == BlobKind::Original)
-                    .count()
-                    < target;
-            // Freed by hand: the keep rules no longer want it here (a pin would have cleared this).
-            let offloaded = is_offloaded(&rec, &config);
-            let ctx = PlanContext {
-                pinned: pinned.contains(&rec.id.to_string()),
-                own_capture_below_target: own_below,
-                recent: !offloaded && self.is_recent(&rec, &config),
-                kept_favorite: !offloaded && config.keep_favorites && rec.favorite.value,
-                holds_original: protected.contains(&rec.original.hash),
-            };
+            let ctx = self
+                .plan_context(&rec, &config, &pinned, target, &protected)
+                .await?;
             // An embedded clip is part of the original: wanted with it, never fetched on its own.
             let video = motions
                 .get(&rec.id)

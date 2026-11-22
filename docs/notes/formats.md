@@ -124,6 +124,7 @@ Node data dir (the keeper storage dir is one, plus `keeper.json`, `keeper.lock`,
 | `store/docs/` | iroh-docs store (shared albums) |
 | `loro/<epoch>/` | the library: `snapshot.loro` (Loro bytes any `import` reads: a full snapshot from builds before M4-11, all updates since; both open), `updates.log` |
 | `holder-confirmations.json` | who confirmed holding which original (free-up) |
+| `tmp-posters/` | a keeper's temporary copy of the video it is making a poster frame for (A-154); deleted after each batch, safe to delete |
 | `epoch-notice.bin` | the latest epoch notice, postcard `EpochNotice` (layout 2; layout 1 had `rotation-notice.bin`) |
 | `admins-seen.bin` | admins this device has seen, for new-admin alerts |
 | `search/vec-<model>.bin` | the picture vectors of one model (S1-12): `"SBVX"`, version 1, model, dims, count, ids, scales, binary codes, then the 8-bit vectors. **A derived cache**, rebuilt from the shards |

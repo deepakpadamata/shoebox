@@ -27,6 +27,7 @@ mod node;
 mod pairing;
 mod people;
 mod places;
+mod posters;
 mod presence;
 mod previews;
 mod recover;
@@ -71,6 +72,7 @@ pub use node::{
 };
 pub use pairing::{DecideFn, PairGrant, PairTicket, PairingCode};
 pub use people::{PeopleView, ME_SETTING};
+pub use posters::find_ffmpeg;
 pub use presence::{DeviceStatus, PresenceConfig};
 pub use recover::{PeerLink, RecoverGrant, RecoveryDecideFn, RecoveryRequest};
 pub use search::{SearchOptions, SearchResult};

@@ -34,6 +34,12 @@ pub use iroh::EndpointAddr as PeerAddr;
 /// Minimum bytes between `BlobProgress` events for one download.
 /// Blob collection runs at least once every this many intervals, even with nothing released.
 const GC_FULL_PASS_EVERY: u32 = 15;
+
+/// The blob store's metadata cache. Thumbnails live inside that database, and its default (1 GiB)
+/// kept every one ever read in memory: about 300 MB for 18,000. The blob and tag tables that
+/// lookups walk stay well under this; thumbnail reads past it come from the OS file cache, which
+/// the system can take back (see vendor/iroh-blobs/SHOEBOX.md).
+const BLOB_DB_CACHE: usize = 32 * 1024 * 1024;
 const PROGRESS_STEP: u64 = 256 * 1024;
 /// Blobs at least this large are fetched from several holders at once (A-099).
 pub const SPLIT_MIN: u64 = 8 * 1024 * 1024;
@@ -594,6 +600,7 @@ impl Node {
             // GC reclaims every untagged blob; docs content hashes are protected through the
             // protect handler so metadata entries are never collected from under the library.
             let mut blob_opts = BlobOptions::new(&config.blobs_dir());
+            blob_opts.db_cache_size = BLOB_DB_CACHE;
             let (protect_handler, docs_cb) = ProtectCallbackHandler::new();
             let activity = crate::activity::Activity::default();
             // Skip a GC pass while the node is busy: GC can race with in-flight data.

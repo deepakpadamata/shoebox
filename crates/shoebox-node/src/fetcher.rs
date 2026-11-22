@@ -213,7 +213,20 @@ impl<L: LibraryStore> LibraryNode<L> {
             .collect();
         // One listing of the tags for the whole pass: asking `kept` per photo lists every album
         // tag each time, which grew with photos × shared-album items on every 5 s replan.
+        // A tag also answers "held": only a complete blob is ever tagged. Asking the store
+        // instead reads a small blob's whole inlined content to report its size, and the
+        // database keeps every page it read cached (hundreds of MB once every thumbnail is asked).
         let protected = self.node().blobs().protected().await?;
+        let holds = |hash: &Blake3Hash| {
+            let tagged = protected.contains(hash);
+            let hash = *hash;
+            async move {
+                if tagged {
+                    return Ok::<_, anyhow::Error>(true);
+                }
+                self.node().blobs().has(&hash).await
+            }
+        };
         for rec in photos {
             let own_below = rec.imported_by == self.device()
                 && self
@@ -231,8 +244,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 own_capture_below_target: own_below,
                 recent: !offloaded && self.is_recent(&rec, &config),
                 kept_favorite: !offloaded && config.keep_favorites && rec.favorite.value,
-                holds_original: protected.contains(&rec.original.hash)
-                    && self.node().blobs().has(&rec.original.hash).await?,
+                holds_original: protected.contains(&rec.original.hash),
             };
             // An embedded clip is part of the original: wanted with it, never fetched on its own.
             let video = motions
@@ -241,7 +253,7 @@ impl<L: LibraryStore> LibraryNode<L> {
                 .map(|m| motion_plan(role, m, &ctx))
                 .unwrap_or_default();
             for item in fetch_plan(role, &rec, &ctx).into_iter().chain(video) {
-                if !self.node().blobs().has(&item.blob.hash).await? {
+                if !holds(&item.blob.hash).await? {
                     queue.push(QueuedFetch {
                         photo: rec.id,
                         taken_at: rec.taken_at,
@@ -466,21 +478,18 @@ async fn fetch_loop<L: LibraryStore>(
     cfg: FetcherConfig,
 ) {
     let permits = Arc::new(Semaphore::new(cfg.concurrency.max(1)));
-    // The last plan found nothing missing: wait longer (a relevant change still wakes it).
-    let mut idle = false;
+    // How long to wait before the next plan when nothing signals a change.
+    let mut wait = cfg.tick;
+    // Plans in a row that fetched nothing although something was missing.
+    let mut stuck = 0u32;
     loop {
         let Some(inner) = weak.upgrade() else { break };
         let ln = LibraryNode { inner };
         let wake = {
             // Wait for a signal or the next tick.
             let inner = ln.inner.clone();
-            let tick = if idle {
-                cfg.tick * IDLE_TICKS
-            } else {
-                cfg.tick
-            };
             async move {
-                let _ = tokio::time::timeout(tick, inner.fetcher.wake.notified()).await;
+                let _ = tokio::time::timeout(wait, inner.fetcher.wake.notified()).await;
             }
         };
         wake.await;
@@ -491,11 +500,11 @@ async fn fetch_loop<L: LibraryStore>(
             Ok(q) => q,
             Err(e) => {
                 warn!("could not plan fetches: {e:#}");
-                idle = false;
+                wait = cfg.tick;
                 continue;
             }
         };
-        idle = queue.is_empty();
+        let mut progressed = false;
         {
             // Cooling entries past their time say nothing an absent entry does not.
             let now = Instant::now();
@@ -568,6 +577,7 @@ async fn fetch_loop<L: LibraryStore>(
                 }
             }
             if !fetched.is_empty() {
+                progressed = true;
                 let _ = ln.publish_holdings(fetched).await;
                 // New holdings can unblock others and change "own capture below target".
                 ln.inner.fetcher.wake.notify_one();
@@ -576,11 +586,45 @@ async fn fetch_loop<L: LibraryStore>(
                 break;
             }
         }
+        stuck = if queue.is_empty() || progressed {
+            0
+        } else {
+            stuck.saturating_add(1)
+        };
+        wait = next_wait(cfg.tick, queue.is_empty(), stuck);
     }
+}
+
+/// How long the fetcher waits for a change before planning again. Nothing missing waits the
+/// longest. Blobs that stay missing (their holders are offline, or nobody holds them) back off
+/// from one tick to that same ceiling, doubling each time: every plan walks every photo.
+fn next_wait(tick: Duration, nothing_missing: bool, stuck: u32) -> Duration {
+    let longest = tick * IDLE_TICKS;
+    if nothing_missing {
+        return longest;
+    }
+    tick.saturating_mul(1u32 << stuck.min(16)).min(longest)
 }
 
 /// The person freed this original from this device by hand (see `offloaded_originals`).
 pub(crate) fn is_offloaded(rec: &PhotoRecord, config: &NodeConfig) -> bool {
     !config.offloaded_originals.is_empty()
         && config.offloaded_originals.contains(&rec.id.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plans_back_off_while_nothing_can_be_fetched() {
+        let tick = Duration::from_secs(5);
+        let longest = tick * IDLE_TICKS;
+        assert_eq!(next_wait(tick, true, 0), longest);
+        assert_eq!(next_wait(tick, false, 0), tick, "progress keeps the pace");
+        assert_eq!(next_wait(tick, false, 1), tick * 2);
+        assert_eq!(next_wait(tick, false, 3), tick * 8);
+        assert_eq!(next_wait(tick, false, 6), longest);
+        assert_eq!(next_wait(tick, false, u32::MAX), longest);
+    }
 }

@@ -134,7 +134,8 @@ impl<L: LibraryStore> LibraryNode<L> {
     /// [`LibraryNode::purge_expired`], [`LibraryNode::reconcile_blobs`] and
     /// [`LibraryNode::release_previews`]. Every device does this
     /// for itself; purges replicate. Also starts converting old previews to AVIF
-    /// ([`LibraryNode::convert_previews`]).
+    /// ([`LibraryNode::convert_previews`]) and, on a keeper with `ffmpeg`, making poster frames
+    /// ([`LibraryNode::make_posters`]).
     pub fn start_maintenance(&self, cfg: MaintenanceConfig) {
         let wake = std::sync::Arc::new(tokio::sync::Notify::new());
         let signal = wake.clone();
@@ -154,6 +155,7 @@ impl<L: LibraryStore> LibraryNode<L> {
         let weak = std::sync::Arc::downgrade(&self.inner);
         tokio::spawn(maintenance_loop(weak, cfg, wake));
         self.start_preview_conversion();
+        self.start_poster_making();
     }
 }
 
@@ -208,6 +210,9 @@ async fn maintenance_loop<L: LibraryStore>(
         }
         if let Err(e) = ln.release_embedded_clips().await {
             warn!("releasing stored clips failed: {e:#}");
+        }
+        if let Err(e) = ln.release_placeholder_videos().await {
+            warn!("releasing videos fetched as thumbnails failed: {e:#}");
         }
     }
 }

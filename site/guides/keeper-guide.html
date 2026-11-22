@@ -19,6 +19,7 @@
 <pre><code>tar -xzf shoebox-keeper-linux-aarch64.tar.gz
 sudo install shoebox-keeper /usr/local/bin/</code></pre>
 <p>Or build from source: <code>cargo build --release -p keeper</code>.</p>
+<p><strong>Optional: <code>ffmpeg</code>.</strong> With <code>ffmpeg</code> installed (<code>sudo pacman -S ffmpeg</code>, <code>sudo apt install ffmpeg</code>, <code>brew install ffmpeg</code>) the keeper gives every video it holds a poster frame, so phones and computers show a picture for the video's tile without downloading the video. It works through videos already in the library in the background, newest first. Without <code>ffmpeg</code> the apps make poster frames for the videos they show. The keeper looks for <code>ffmpeg</code> on the path when it starts; set <code>SHOEBOX_FFMPEG=/path/to/ffmpeg</code> to use another one. A systemd service sees a short path, so put <code>ffmpeg</code> in <code>/usr/bin</code> or set the variable in the unit.</p>
 <h2>Join your library</h2>
 <ol><li>On a device already in the library: <em>Devices → Add a device → Keeper</em>. It shows a pairing code.</li><li>On the keeper machine:</li></ol>
 <p>   ``<code>bash    shoebox-keeper run --name "Pi in the hall" &amp;        # or use the service below    shoebox-keeper pair &lt;the code&gt; --name "Pi in the hall"    </code>``</p>

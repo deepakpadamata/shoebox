@@ -114,6 +114,14 @@ pub async fn serve(
         // (`LibraryNode::release_previews`): show the original, do not fetch the preview back.
         (blob, bk) = (&rec.original, BlobKind::Original);
     }
+    if bk != BlobKind::Original
+        && blob.hash == rec.original.hash
+        && core.blobs().size(&blob.hash).await?.is_none()
+    {
+        // A video with no poster frame yet: its thumb and preview are the video itself. Fetching
+        // it for an album cover or a list row stored whole videos as "thumbnails" (A-154).
+        return Ok(None);
+    }
     if core.blobs().size(&blob.hash).await?.is_none() && bk != BlobKind::Original {
         // Thumbnails and previews are small: get them for the retry.
         core.fetch_in_background(photo, bk);

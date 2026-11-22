@@ -14,7 +14,7 @@ iroh-blobs.workspace = true
 iroh-gossip.workspace = true
 iroh-docs.workspace = true
 iroh-mdns-address-lookup.workspace = true
-tokio = { workspace = true, features = ["fs", "io-util"] }
+tokio = { workspace = true, features = ["fs", "io-util", "process"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures.workspace = true
 serde.workspace = true
